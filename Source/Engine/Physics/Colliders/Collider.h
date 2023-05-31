@@ -142,6 +142,8 @@ public:
     /// <returns>True if the distance has successfully been computed, i.e. if objects do overlap, otherwise false.</returns>
     API_FUNCTION() static bool ComputePenetration(const Collider* colliderA, const Collider* colliderB, API_PARAM(Out) Vector3& direction, API_PARAM(Out) float& distance);
 
+    API_FUNCTION() static void ShowAllColliders(bool show);
+
 public:
     /// <summary>
     /// Determines whether this collider can be attached the specified rigid body.
@@ -198,6 +200,8 @@ protected:
     /// Removes the static actor.
     /// </summary>
     void RemoveStaticActor();
+
+    void ShowPhysicsDebug(bool show);
 
 #if USE_EDITOR
     virtual void DrawPhysicsDebug(RenderView& view);

@@ -4,6 +4,7 @@
 #include "Engine/Core/Log.h"
 #if USE_EDITOR
 #include "Engine/Level/Scene/SceneRendering.h"
+#include "Engine/Level/Level.h"
 #endif
 #include "Engine/Serialization/Serialization.h"
 #include "Engine/Physics/PhysicsSettings.h"
@@ -116,6 +117,15 @@ bool Collider::ComputePenetration(const Collider* colliderA, const Collider* col
     return PhysicsBackend::ComputeShapesPenetration(shapeA, shapeB, colliderA->GetPosition(), colliderA->GetOrientation(), colliderB->GetPosition(), colliderB->GetOrientation(), direction, distance);
 }
 
+void Collider::ShowAllColliders(bool show)
+{
+    Array<Actor*> colliders = Level::GetActors(Collider::GetStaticClass());
+    for (int32 i = 0; i < colliders.Count(); i++)
+    {
+        dynamic_cast<Collider*>(colliders[i])->ShowPhysicsDebug(show);
+    }
+}
+
 bool Collider::CanAttach(RigidBody* rigidBody) const
 {
     return true;
@@ -151,6 +161,19 @@ void Collider::OnDisable()
     Actor::OnDisable();
 
     GetSceneRendering()->RemovePhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+}
+
+void Collider::ShowPhysicsDebug(bool show)
+{
+    LOG(Info, "Testing: {0}", show);
+    if (show)
+    {
+        GetSceneRendering()->AddPhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+    }
+    else
+    {
+        GetSceneRendering()->RemovePhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+    }
 }
 
 #endif

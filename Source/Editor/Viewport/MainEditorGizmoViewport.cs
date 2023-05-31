@@ -28,6 +28,7 @@ namespace FlaxEditor.Viewport
 
         private readonly ContextMenuButton _showGridButton;
         private readonly ContextMenuButton _showNavigationButton;
+        private readonly ContextMenuButton _showCollidersButton;
         private readonly ViewportWidgetButton _gizmoModeTranslate;
         private readonly ViewportWidgetButton _gizmoModeRotate;
         private readonly ViewportWidgetButton _gizmoModeScale;
@@ -181,6 +182,19 @@ namespace FlaxEditor.Viewport
         {
             get => _showNavigationButton.Checked;
             set => _showNavigationButton.Checked = value;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public bool ShowColliders
+        {
+            get => _showCollidersButton.Checked;
+            set
+            {
+                _showCollidersButton.Checked = value;
+                Collider.ShowAllColliders(ShowColliders);
+            }
         }
 
         /// <summary>
@@ -372,6 +386,8 @@ namespace FlaxEditor.Viewport
 
             // Show navigation widget
             _showNavigationButton = ViewWidgetShowMenu.AddButton("Navigation", () => ShowNavigation = !ShowNavigation);
+
+            _showCollidersButton = ViewWidgetShowMenu.AddButton("Show Colliders", () => ShowColliders = !ShowColliders);
 
             // Create camera widget
             ViewWidgetButtonMenu.AddSeparator();
