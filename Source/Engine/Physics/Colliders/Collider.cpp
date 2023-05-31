@@ -117,15 +117,6 @@ bool Collider::ComputePenetration(const Collider* colliderA, const Collider* col
     return PhysicsBackend::ComputeShapesPenetration(shapeA, shapeB, colliderA->GetPosition(), colliderA->GetOrientation(), colliderB->GetPosition(), colliderB->GetOrientation(), direction, distance);
 }
 
-void Collider::ShowAllColliders(bool show)
-{
-    Array<Actor*> colliders = Level::GetActors(Collider::GetStaticClass());
-    for (int32 i = 0; i < colliders.Count(); i++)
-    {
-        dynamic_cast<Collider*>(colliders[i])->ShowPhysicsDebug(show);
-    }
-}
-
 bool Collider::CanAttach(RigidBody* rigidBody) const
 {
     return true;
@@ -143,6 +134,13 @@ RigidBody* Collider::GetAttachedRigidBody() const
         return dynamic_cast<RigidBody*>(GetParent());
     }
     return nullptr;
+}
+
+bool Collider::ShowColliders{ false };
+
+void Collider::ToggleDebugColliders(bool show)
+{
+    Collider::ShowColliders = show;
 }
 
 #if USE_EDITOR
@@ -163,16 +161,11 @@ void Collider::OnDisable()
     GetSceneRendering()->RemovePhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
 }
 
-void Collider::ShowPhysicsDebug(bool show)
+void Collider::OnDebugDraw()
 {
-    LOG(Info, "Testing: {0}", show);
-    if (show)
+    if (ShowColliders)
     {
-        GetSceneRendering()->AddPhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
-    }
-    else
-    {
-        GetSceneRendering()->RemovePhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+        OnDebugDrawSelected();
     }
 }
 

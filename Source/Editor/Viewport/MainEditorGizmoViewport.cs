@@ -193,7 +193,7 @@ namespace FlaxEditor.Viewport
             set
             {
                 _showCollidersButton.Checked = value;
-                Collider.ShowAllColliders(ShowColliders);
+                Collider.ToggleDebugColliders(ShowColliders);
             }
         }
 
@@ -387,7 +387,7 @@ namespace FlaxEditor.Viewport
             // Show navigation widget
             _showNavigationButton = ViewWidgetShowMenu.AddButton("Navigation", () => ShowNavigation = !ShowNavigation);
 
-            _showCollidersButton = ViewWidgetShowMenu.AddButton("Show Colliders", () => ShowColliders = !ShowColliders);
+            _showCollidersButton = ViewWidgetShowMenu.AddButton("Colliders", () => ShowColliders = !ShowColliders);
 
             // Create camera widget
             ViewWidgetButtonMenu.AddSeparator();

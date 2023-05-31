@@ -27,6 +27,7 @@ protected:
     float _contactOffset;
     Vector3 _cachedLocalPosePos;
     Quaternion _cachedLocalPoseRot;
+    static bool ShowColliders;
 
 public:
     /// <summary>
@@ -142,7 +143,12 @@ public:
     /// <returns>True if the distance has successfully been computed, i.e. if objects do overlap, otherwise false.</returns>
     API_FUNCTION() static bool ComputePenetration(const Collider* colliderA, const Collider* colliderB, API_PARAM(Out) Vector3& direction, API_PARAM(Out) float& distance);
 
-    API_FUNCTION() static void ShowAllColliders(bool show);
+    /// <summary>
+    /// Toggles whether physics colliders should be drawn in the main editor viewport.
+    /// </summary>
+    /// <param name="show">True to show colliders, false to hide.</param>
+    /// <returns></returns>
+    API_FUNCTION() static void ToggleDebugColliders(bool show);
 
 public:
     /// <summary>
@@ -201,8 +207,6 @@ protected:
     /// </summary>
     void RemoveStaticActor();
 
-    void ShowPhysicsDebug(bool show);
-
 #if USE_EDITOR
     virtual void DrawPhysicsDebug(RenderView& view);
 #endif
@@ -221,6 +225,7 @@ protected:
 #if USE_EDITOR
     void OnEnable() override;
     void OnDisable() override;
+    void OnDebugDraw() override;
 #endif
     void BeginPlay(SceneBeginData* data) override;
     void EndPlay() override;
