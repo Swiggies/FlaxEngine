@@ -298,6 +298,18 @@ public:
     }
 
     /// <summary>
+    /// Rotates transform to orient it towards the specified world position.
+    /// </summary>
+    /// <param name="worldPos">The world position to orient towards.</param>
+    void LookAt(const Vector3& worldPos);
+
+    /// <summary>
+    /// Gets rotation of the transform oriented towards the specified world position.
+    /// </summary>
+    /// <param name="worldPos">The world position to orient towards.</param>
+    Quaternion LookingAt(const Vector3& worldPos) const;
+
+    /// <summary>
     /// Combines the functions: <br/>
     /// <see cref="SnapToGrid"/>,<br/>
     /// <see cref="GetRotationFromNormal"/>.

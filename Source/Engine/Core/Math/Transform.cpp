@@ -213,6 +213,39 @@ void Transform::WorldToLocal(const Quaternion& rotation, Quaternion& result) con
     result = orientation;
 }
 
+void Transform::LookAt(const Vector3& worldPos)
+{
+    const Quaternion orientation = LookingAt(worldPos);
+    Orientation = orientation;
+}
+
+API_FUNCTION()Quaternion Transform::LookingAt(const Vector3& worldPos) const
+{
+    const Vector3 direction = worldPos - Translation;
+    if (direction.LengthSquared() < ZeroTolerance)
+        return Orientation;
+
+    const Float3 newForward = Vector3::Normalize(direction);
+    const Float3 oldForward = Orientation * Vector3::Forward;
+
+    Quaternion orientation;
+    if ((newForward + oldForward).LengthSquared() < 0.00005f)
+    {
+        // 180 degree turn (infinite possible rotation axes)
+        // Default to yaw i.e. use current Up
+        orientation = Quaternion(Orientation.Y, -Orientation.Z, Orientation.W, Orientation.X);
+    }
+    else
+    {
+        // Derive shortest arc to new direction
+        Quaternion rotQuat;
+        Quaternion::GetRotationFromTo(oldForward, newForward, rotQuat, Float3::Zero);
+        orientation = rotQuat * Orientation;
+    }
+
+    return orientation;
+}
+
 Float3 Transform::GetRight() const
 {
     return Float3::Transform(Float3::Right, Orientation);

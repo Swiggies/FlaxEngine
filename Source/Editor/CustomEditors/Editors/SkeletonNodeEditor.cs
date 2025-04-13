@@ -24,7 +24,7 @@ namespace FlaxEditor.CustomEditors.Editors
 
             // Set node names
             if (ParentEditor != null
-                && ParentEditor.Values.Count == 1 && ParentEditor.Values[0] is BoneSocket boneSocket
+                && ParentEditor.Values.Count == 1 && (ParentEditor.Values[0] is Actor boneSocket)
                 && boneSocket.Parent is AnimatedModel animatedModel && animatedModel.SkinnedModel
                 && !animatedModel.SkinnedModel.WaitForLoaded())
             {
