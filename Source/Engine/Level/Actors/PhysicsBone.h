@@ -4,6 +4,17 @@
 
 class AnimatedModel;
 
+struct PhysBone {
+    String boneName;
+    Transform transform;
+    Transform localTransform;
+    float boneLength;
+    Vector3 position;
+    Vector3 velocity;
+    Vector3 previousPosition;
+    Vector3 targetPosition;
+};
+
 /// <summary>
 /// Actor that links to the animated model skeleton node transformation.
 /// </summary>
@@ -16,21 +27,11 @@ private:
     int32 _index;
     AnimatedModel* _model;
 
-    Transform _startTransform;
-
-    Transform _bones[12];
-    float _boneLengths[12];
-    Vector3 _positions[12];
-    Vector3 _velocities[12];
-    Vector3 _previousPositions[12];
-    Vector3 _targetPositions[12];
+    PhysBone _bones[12];
 
     Transform _lastParentTransform;
 
 public:
-    
-    API_FIELD()
-    Vector3 _position;
 
     API_FIELD()
     int _chainLength;
@@ -47,6 +48,9 @@ public:
     API_FIELD()
     float _gravityScale = 0.2;
 
+    API_FIELD()
+    bool _showDebugLines = false;
+    
     /// <summary>
     /// Gets the target node name to link to it.
     /// </summary>
@@ -64,14 +68,20 @@ public:
 
     void OnEnable() override;
 
+    void SetupBones();
+
     void OnDisable() override;
 
     void OnLateUpdate();
 
+#if USE_EDITOR
+    void OnDebugDraw() override;
+#endif
+
 private:
     void ApplyConstraints();
     void ApplyTransforms();
-    Transform GetNodeTransform(int node);
+    Transform GetNodeTransform(int node, bool isWorldSpace = true);
 
 public:
 

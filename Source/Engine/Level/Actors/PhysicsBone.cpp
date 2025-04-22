@@ -20,6 +20,7 @@ void PhysicsBone::SetNode(const StringView& name)
     {
         _node = name;
         _index = -1;
+        SetupBones();
     }
 }
 
@@ -27,6 +28,16 @@ void PhysicsBone::OnEnable()
 {
     GetScene()->Ticking.LateUpdate.AddTick<PhysicsBone, &PhysicsBone::OnLateUpdate>(this);
 
+    SetupBones();
+}
+
+void PhysicsBone::OnDisable()
+{
+    GetScene()->Ticking.Update.RemoveTick(this);
+}
+
+void PhysicsBone::SetupBones()
+{
     const auto parent = dynamic_cast<AnimatedModel*>(GetParent());
     if (parent && parent->SkinnedModel)
     {
@@ -46,59 +57,68 @@ void PhysicsBone::OnEnable()
             t = parent->SkinnedModel->Skeleton.GetNodeTransform(_index);
 
         _model = parent;
-        _startTransform = _model->SkinnedModel->Skeleton.GetNodeTransform(_index);
 
         _lastParentTransform = parent->GetTransform().LocalToWorld(_model->SkinnedModel->Skeleton.GetNodeTransform(_index));
 
         for (size_t i = 0; i < _chainLength; i++)
         {
-            _bones[i] = GetNodeTransform(_index + i);
-            _velocities[i] = Vector3::Zero;
-            _positions[i] = _bones[i].Translation;
-            _previousPositions[i] = _bones[i].Translation;
-            _targetPositions[i] = _bones[i].Translation;
+            _bones[i].boneName = _model->SkinnedModel->Skeleton.Nodes[_index + i].Name;
+            _bones[i].transform = GetNodeTransform(_index + i);
+            _bones[i].localTransform = GetNodeTransform(_index + i, false);
+            _bones[i].position = _bones[i].transform.Translation;
+            _bones[i].previousPosition = _bones[i].transform.Translation;
+            _bones[i].velocity = Vector3::Zero;
+            _bones[i].targetPosition = Vector3::Zero;
         }
 
         // Calculate bone lengths
         for (size_t i = 0; i < _chainLength - 1; i++)
         {
-            _boneLengths[i] = Vector3::Distance(_positions[i], _positions[i + 1]);
+            _bones[i].boneLength = Vector3::Distance(_bones[i].position, _bones[i + 1].position);
+        }
+        _bones[_chainLength].boneLength = 0;
+
+        // Debug
+        for (size_t i = 1; i < _chainLength; i++)
+        {
+            Transform localPos = _bones[i].transform;
+
+            localPos = _bones[i-1].transform.WorldToLocal(localPos);
+
+            _bones[i].localTransform = localPos;
+
+            LOG(Info, "{0} | Local Position: {1}", _bones[i].boneName, localPos);
         }
     }
-}
-
-void PhysicsBone::OnDisable()
-{
-    GetScene()->Ticking.LateUpdate.RemoveTick(this);
 }
 
 void PhysicsBone::OnLateUpdate() 
 {
     if (_model && _index != -1) 
     {
-        _positions[0] = GetNodeTransform(_index).Translation;
+        _bones[0].position = GetNodeTransform(_index).Translation;
 
         for (size_t i = 0; i < _chainLength; i++)
         {
             // Get Target Positions
-            _targetPositions[i] = GetNodeTransform(_index + i).Translation;
+            _bones[i].targetPosition = GetNodeTransform(_index + i).Translation;
         }
 
         for (size_t i = 1; i < _chainLength; i++)
         {
             // Apply parent movement to all bones first
-            Vector3 parentMovement = _targetPositions[i - 1] - _previousPositions[i - 1];
+            Vector3 parentMovement = _bones[i - 1].targetPosition - _bones[i - 1].previousPosition;
 
-            _targetPositions[i] += parentMovement;
+            _bones[i].targetPosition += parentMovement;
 
-            Vector3 displacement = _targetPositions[i] - _positions[i];
+            Vector3 displacement = _bones[i].targetPosition - _bones[i].position;
             Vector3 acceleration = (_stiffness * displacement) / _mass;
             acceleration += GetPhysicsScene()->GetGravity() * _gravityScale;
 
-            _velocities[i] += acceleration * Time::GetDeltaTime();
-            _velocities[i] *= (1 - _damping * Time::GetDeltaTime());
+            _bones[i].velocity += acceleration * Time::GetDeltaTime();
+            _bones[i].velocity *= (1 - _damping * Time::GetDeltaTime());
 
-            _positions[i] += _velocities[i] * Time::GetDeltaTime();
+            _bones[i].position += _bones[i].velocity * Time::GetDeltaTime();
         }
         ApplyConstraints();
 
@@ -106,60 +126,99 @@ void PhysicsBone::OnLateUpdate()
     }
 }
 
+#if USE_EDITOR
+
+#include "Engine/Debug/DebugDraw.h"
+
+void PhysicsBone::OnDebugDraw()
+{
+    if (_showDebugLines) 
+    {
+        for (size_t i = 1; i < _chainLength; ++i)
+        {
+            PhysBone pb = _bones[i];
+
+            Ray ray = Ray(pb.transform.Translation, pb.transform.GetForward().GetNormalized());
+            Ray ray2 = Ray(pb.transform.Translation, pb.transform.GetUp().GetNormalized());
+            Ray ray3 = Ray(pb.transform.Translation, pb.transform.GetRight().GetNormalized());
+            DEBUG_DRAW_RAY(ray, Color::Blue, pb.boneLength, 0, false);
+            DEBUG_DRAW_RAY(ray2, Color::Green, pb.boneLength, 0, false);
+            DEBUG_DRAW_RAY(ray3, Color::Red, pb.boneLength, 0, false);
+        }
+    }
+}
+
+#endif
+
 void PhysicsBone::ApplyConstraints()
 {
     for (size_t iter = 0; iter < 5; iter++)
     {
         for (size_t i = 1; i < _chainLength; i++)
         {
-            Vector3 direction = (_positions[i] - _positions[i - 1]).GetNormalized();
-            float desiredLength = _boneLengths[i-1];
+            Vector3 direction = (_bones[i].position - _bones[i - 1].position).GetNormalized();
+            float desiredLength = _bones[i-1].boneLength;
 
             if (direction == Vector3::Zero) 
             {
-                direction = (_bones[i].Translation - _bones[i - 1].Translation).GetNormalized();
+                direction = (_bones[i].transform.Translation - _bones[i - 1].transform.Translation).GetNormalized();
                 if (direction == Vector3::Zero)
                     direction = Vector3::Forward;
             }
 
-            _positions[i] = _positions[i - 1] + direction * _boneLengths[i-1];
+            _bones[i].position = _bones[i - 1].position + direction * _bones[i-1].boneLength;
         }
     }
 }
 
 void PhysicsBone::ApplyTransforms()
 {
-    for (size_t i = 0; i < _chainLength; i++)
+    // Calculate inverse matrix
+    // Outside loop so we only do it once
+    Matrix world;
+    _model->GetLocalToWorldMatrix(world);
+    Matrix invWorld;
+    Matrix::Invert(world, invWorld);
+
+    for (size_t i = 1; i < _chainLength; ++i)
     {
-        _bones[i].Translation = _positions[i];
-        
-        //if (i < _chainLength - 1 && i + 1 < _chainLength)
-        //{
-        //    Vector3 lookDirection = (_positions[i + 1] - _positions[i]).GetNormalized();
-        //    if (lookDirection != Vector3::Zero)
-        //    {
-        //        Vector3 originalUp = _bones[i].GetUp();
-        //        _bones[i].Orientation = Quaternion::LookRotation(lookDirection, originalUp);
-        //    }
-        //}
+        if (i > 0) 
+        {
+            Vector3 transformedPos = _bones[i - 1].transform.LocalToWorldVector(_bones[i].localTransform.Translation);
+
+            //Vector3 transformedOrientation;
+            //Vector3::Transform(localPos, _bones[i-1].transform.Orientation, transformedOrientation);
+            Vector3 dirToLastBone;
+            dirToLastBone = (_bones[i].position - _bones[i - 1].position);
+
+
+            Quaternion targetRot = Quaternion::GetRotationFromTo(transformedPos, dirToLastBone, Vector3::Zero);
+
+            //Quaternion::Slerp(_bones[i - 1].transform.Orientation, targetRot * _bones[i - 1].transform.Orientation, _test.X, _bones[i-1].transform.Orientation);
+
+            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].transform.Orientation;
+
+        }
+        _bones[i].transform.Translation = _bones[i].position;
 
         Matrix result;
-        Matrix::Transformation(_bones[i].Scale, _bones[i].Orientation, _bones[i].Translation, result);
-        _model->SetNodeTransformation(_index + i, result, true);
+        Matrix::Transformation(_bones[i].transform.Scale, _bones[i].transform.Orientation, _bones[i].transform.Translation, result);
+
+        _model->SetNodeTransformation(_index + i, result * invWorld);
     }
 
     for (size_t i = 0; i < _chainLength; i++)
     {
-        _previousPositions[i] = GetNodeTransform(_index + i).Translation;
+        _bones[i].previousPosition = GetNodeTransform(_index + i).Translation;
     }
 
 }
 
-Transform PhysicsBone::GetNodeTransform(int node)
+Transform PhysicsBone::GetNodeTransform(int node, bool isWorldSpace)
 {
     Transform value;
     Matrix m;
-    _model->GetNodeTransformation(node, m, true);
+    _model->GetNodeTransformation(node, m, isWorldSpace);
     m.Decompose(value);
     return value;
 }
@@ -176,7 +235,6 @@ void PhysicsBone::Serialize(SerializeStream& stream, const void* otherObj)
     SERIALIZE_MEMBER(Mass, _mass);
     SERIALIZE_MEMBER(Damping, _damping);
     SERIALIZE_MEMBER(Stiffness, _stiffness);
-    SERIALIZE_MEMBER(Position, _position);
     SERIALIZE_MEMBER(GravityScale, _gravityScale);
 }
 
@@ -191,6 +249,6 @@ void PhysicsBone::Deserialize(DeserializeStream& stream, ISerializeModifier* mod
     DESERIALIZE_MEMBER(Mass, _mass);
     DESERIALIZE_MEMBER(Damping, _damping);
     DESERIALIZE_MEMBER(Stiffness, _stiffness);
-    DESERIALIZE_MEMBER(Position, _position);
     DESERIALIZE_MEMBER(GravityScale, _gravityScale);
 }
+
