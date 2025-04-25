@@ -6,6 +6,7 @@
 #include "AnimatedModel.h"
 #include "Engine/Physics/PhysicsScene.h"
 #include "Engine/Engine/Time.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 PhysicsBone::PhysicsBone(const SpawnParams& params)
     : Actor(params)
@@ -64,7 +65,6 @@ void PhysicsBone::SetupBones()
         {
             _bones[i].boneName = _model->SkinnedModel->Skeleton.Nodes[_index + i].Name;
             _bones[i].transform = GetNodeTransform(_index + i);
-            _bones[i].localTransform = GetNodeTransform(_index + i, false);
             _bones[i].position = _bones[i].transform.Translation;
             _bones[i].previousPosition = _bones[i].transform.Translation;
             _bones[i].velocity = Vector3::Zero;
@@ -92,16 +92,26 @@ void PhysicsBone::SetupBones()
     }
 }
 
+void PhysicsBone::OnUpdate() 
+{
+
+}
+
 void PhysicsBone::OnLateUpdate() 
 {
+    PROFILE_CPU_NAMED("PhysBone");
     if (_model && _index != -1) 
     {
-        _bones[0].position = GetNodeTransform(_index).Translation;
 
         for (size_t i = 0; i < _chainLength; i++)
         {
+            Transform nodeTransform = GetNodeTransform(_index + i);
+            if (i == 0) _bones[0].position = nodeTransform.Translation;
+
             // Get Target Positions
-            _bones[i].targetPosition = GetNodeTransform(_index + i).Translation;
+            _bones[i].targetPosition = nodeTransform.Translation;
+            _bones[i].targetRotation = nodeTransform.Orientation;
+            _bones[i].restPosition = nodeTransform.Translation;
         }
 
         for (size_t i = 1; i < _chainLength; i++)
@@ -117,6 +127,9 @@ void PhysicsBone::OnLateUpdate()
 
             _bones[i].velocity += acceleration * Time::GetDeltaTime();
             _bones[i].velocity *= (1 - _damping * Time::GetDeltaTime());
+
+            Vector3 restDisplacement = _bones[i].restPosition - _bones[i].position;
+            _bones[i].velocity += restDisplacement * (_elasticity * Time::GetDeltaTime());
 
             _bones[i].position += _bones[i].velocity * Time::GetDeltaTime();
         }
@@ -134,7 +147,7 @@ void PhysicsBone::OnDebugDraw()
 {
     if (_showDebugLines) 
     {
-        for (size_t i = 1; i < _chainLength; ++i)
+        for (size_t i = 1; i < _chainLength; i++)
         {
             PhysBone pb = _bones[i];
 
@@ -144,6 +157,11 @@ void PhysicsBone::OnDebugDraw()
             DEBUG_DRAW_RAY(ray, Color::Blue, pb.boneLength, 0, false);
             DEBUG_DRAW_RAY(ray2, Color::Green, pb.boneLength, 0, false);
             DEBUG_DRAW_RAY(ray3, Color::Red, pb.boneLength, 0, false);
+
+            //Vector3 restPos = _bones[i - 1].tar.LocalToWorld(_bones[i].localTransform).Translation;
+
+            BoundingSphere sphere = BoundingSphere(_bones[i].restPosition, 1);
+            DEBUG_DRAW_SPHERE(sphere, Color::Red, 0, false);
         }
     }
 }
@@ -180,24 +198,20 @@ void PhysicsBone::ApplyTransforms()
     Matrix invWorld;
     Matrix::Invert(world, invWorld);
 
+
     for (size_t i = 1; i < _chainLength; ++i)
     {
         if (i > 0) 
         {
+            //LOG(Info, "{0}", _bones[i].localTransform.Translation);
             Vector3 transformedPos = _bones[i - 1].transform.LocalToWorldVector(_bones[i].localTransform.Translation);
 
-            //Vector3 transformedOrientation;
-            //Vector3::Transform(localPos, _bones[i-1].transform.Orientation, transformedOrientation);
             Vector3 dirToLastBone;
             dirToLastBone = (_bones[i].position - _bones[i - 1].position);
 
-
             Quaternion targetRot = Quaternion::GetRotationFromTo(transformedPos, dirToLastBone, Vector3::Zero);
 
-            //Quaternion::Slerp(_bones[i - 1].transform.Orientation, targetRot * _bones[i - 1].transform.Orientation, _test.X, _bones[i-1].transform.Orientation);
-
-            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].transform.Orientation;
-
+            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].targetRotation * _bones[i-1].transform.Orientation;
         }
         _bones[i].transform.Translation = _bones[i].position;
 

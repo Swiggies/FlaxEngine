@@ -13,6 +13,8 @@ struct PhysBone {
     Vector3 velocity;
     Vector3 previousPosition;
     Vector3 targetPosition;
+    Quaternion targetRotation;
+    Vector3 restPosition;
 };
 
 /// <summary>
@@ -37,19 +39,25 @@ public:
     int _chainLength;
 
     API_FIELD()
-    float _stiffness = 50.0;
+    float _stiffness = 10.0;
 
     API_FIELD()
-    float _damping = 3.0;
+    float _damping = 10.0;
 
     API_FIELD()
     float _mass = 0.1;
+
+    API_FIELD()
+    float _elasticity = 10.0;
 
     API_FIELD()
     float _gravityScale = 0.2;
 
     API_FIELD()
     bool _showDebugLines = false;
+
+    API_FIELD()
+    Vector3 _test;
     
     /// <summary>
     /// Gets the target node name to link to it.
@@ -73,6 +81,7 @@ public:
     void OnDisable() override;
 
     void OnLateUpdate();
+    void OnUpdate();
 
 #if USE_EDITOR
     void OnDebugDraw() override;
