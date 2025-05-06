@@ -110,8 +110,7 @@ void PhysicsBone::OnLateUpdate()
 
             // Get Target Positions
             _bones[i].targetPosition = nodeTransform.Translation;
-            _bones[i].targetRotation = nodeTransform.Orientation;
-            _bones[i].restPosition = nodeTransform.Translation;
+            _bones[i].restTransform = nodeTransform;
         }
 
         for (size_t i = 1; i < _chainLength; i++)
@@ -128,10 +127,13 @@ void PhysicsBone::OnLateUpdate()
             _bones[i].velocity += acceleration * Time::GetDeltaTime();
             _bones[i].velocity *= (1 - _damping * Time::GetDeltaTime());
 
-            Vector3 restDisplacement = _bones[i].restPosition - _bones[i].position;
+            Vector3 restDisplacement = _bones[i].restTransform.Translation - _bones[i].position;
             _bones[i].velocity += restDisplacement * (_elasticity * Time::GetDeltaTime());
 
             _bones[i].position += _bones[i].velocity * Time::GetDeltaTime();
+
+            float angle = Quaternion::AngleBetween(_bones[i].transform.Orientation, _bones[i].restTransform.Orientation);
+            //Quaternion::Slerp(_bones[i].transform.Orientation, _bones[i].restTransform.Orientation, angle * _elasticity, _bones[i].targetRotation);
         }
         ApplyConstraints();
 
@@ -160,7 +162,7 @@ void PhysicsBone::OnDebugDraw()
 
             //Vector3 restPos = _bones[i - 1].tar.LocalToWorld(_bones[i].localTransform).Translation;
 
-            BoundingSphere sphere = BoundingSphere(_bones[i].restPosition, 1);
+            BoundingSphere sphere = BoundingSphere(_bones[i].restTransform.Translation, 1);
             DEBUG_DRAW_SPHERE(sphere, Color::Red, 0, false);
         }
     }
@@ -206,12 +208,12 @@ void PhysicsBone::ApplyTransforms()
             //LOG(Info, "{0}", _bones[i].localTransform.Translation);
             Vector3 transformedPos = _bones[i - 1].transform.LocalToWorldVector(_bones[i].localTransform.Translation);
 
-            Vector3 dirToLastBone;
-            dirToLastBone = (_bones[i].position - _bones[i - 1].position);
+            Transform dirToLastBone;
+            dirToLastBone.Translation = (_bones[i].position - _bones[i - 1].position);
 
-            Quaternion targetRot = Quaternion::GetRotationFromTo(transformedPos, dirToLastBone, Vector3::Zero);
+            Quaternion targetRot = Quaternion::GetRotationFromTo(transformedPos, dirToLastBone.Translation, Vector3::Zero);
 
-            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].targetRotation * _bones[i-1].transform.Orientation;
+            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].transform.Orientation;
         }
         _bones[i].transform.Translation = _bones[i].position;
 

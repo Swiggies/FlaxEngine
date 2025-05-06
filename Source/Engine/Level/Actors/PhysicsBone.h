@@ -14,13 +14,13 @@ struct PhysBone {
     Vector3 previousPosition;
     Vector3 targetPosition;
     Quaternion targetRotation;
-    Vector3 restPosition;
+    Transform restTransform;
 };
 
 /// <summary>
 /// Actor that links to the animated model skeleton node transformation.
 /// </summary>
-API_CLASS(Attributes = "ActorContextMenu(\"New/Other/Physics BOne\"), ActorToolbox(\"Other\")")
+API_CLASS(Attributes = "ActorContextMenu(\"New/Other/Physics Bone\"), ActorToolbox(\"Other\")")
 class FLAXENGINE_API PhysicsBone : public Actor
 {
     DECLARE_SCENE_OBJECT(PhysicsBone);
