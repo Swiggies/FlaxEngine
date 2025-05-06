@@ -106,14 +106,19 @@ void PhysicsBone::OnLateUpdate()
         for (size_t i = 0; i < _chainLength; i++)
         {
             Transform nodeTransform = GetNodeTransform(_index + i);
-            if (i == 0) _bones[0].position = nodeTransform.Translation;
+            if (i == 0) 
+            {
+                _bones[0].transform = nodeTransform;
+                _bones[0].position = nodeTransform.Translation;
+            }
 
             // Get Target Positions
             _bones[i].targetPosition = nodeTransform.Translation;
+            _bones[i].targetRotation = nodeTransform.Orientation;
             _bones[i].restTransform = nodeTransform;
         }
 
-        for (size_t i = 1; i < _chainLength; i++)
+        for (size_t i = 1; i < _chainLength; ++i)
         {
             // Apply parent movement to all bones first
             Vector3 parentMovement = _bones[i - 1].targetPosition - _bones[i - 1].previousPosition;
@@ -125,7 +130,10 @@ void PhysicsBone::OnLateUpdate()
             acceleration += GetPhysicsScene()->GetGravity() * _gravityScale;
 
             _bones[i].velocity += acceleration * Time::GetDeltaTime();
-            _bones[i].velocity *= (1 - _damping * Time::GetDeltaTime());
+
+            float dampingFactor = (1 - _damping * Time::GetDeltaTime());
+            dampingFactor = Math::Max(0.0f, Math::Min(1.0f, dampingFactor));
+            _bones[i].velocity *= dampingFactor;
 
             Vector3 restDisplacement = _bones[i].restTransform.Translation - _bones[i].position;
             _bones[i].velocity += restDisplacement * (_elasticity * Time::GetDeltaTime());
@@ -133,7 +141,8 @@ void PhysicsBone::OnLateUpdate()
             _bones[i].position += _bones[i].velocity * Time::GetDeltaTime();
 
             float angle = Quaternion::AngleBetween(_bones[i].transform.Orientation, _bones[i].restTransform.Orientation);
-            //Quaternion::Slerp(_bones[i].transform.Orientation, _bones[i].restTransform.Orientation, angle * _elasticity, _bones[i].targetRotation);
+            float angleElasticity = Math::Clamp(angle * (_elasticity * Time::GetDeltaTime()), 0.0f, 1.0f);
+            Quaternion::Slerp(_bones[i].transform.Orientation, _bones[i].restTransform.Orientation, angleElasticity, _bones[i].targetRotation);
         }
         ApplyConstraints();
 
@@ -149,7 +158,7 @@ void PhysicsBone::OnDebugDraw()
 {
     if (_showDebugLines) 
     {
-        for (size_t i = 1; i < _chainLength; i++)
+        for (size_t i = 0; i < _chainLength; i++)
         {
             PhysBone pb = _bones[i];
 
@@ -164,6 +173,8 @@ void PhysicsBone::OnDebugDraw()
 
             BoundingSphere sphere = BoundingSphere(_bones[i].restTransform.Translation, 1);
             DEBUG_DRAW_SPHERE(sphere, Color::Red, 0, false);
+            Ray fwdRestRay = Ray(pb.restTransform.Translation, pb.restTransform.GetForward().GetNormalized());
+            DEBUG_DRAW_RAY(fwdRestRay, Color::Yellow, pb.boneLength, 0, false);
         }
     }
 }
@@ -174,7 +185,7 @@ void PhysicsBone::ApplyConstraints()
 {
     for (size_t iter = 0; iter < 5; iter++)
     {
-        for (size_t i = 1; i < _chainLength; i++)
+        for (size_t i = 1; i < _chainLength; ++i)
         {
             Vector3 direction = (_bones[i].position - _bones[i - 1].position).GetNormalized();
             float desiredLength = _bones[i-1].boneLength;
@@ -213,7 +224,7 @@ void PhysicsBone::ApplyTransforms()
 
             Quaternion targetRot = Quaternion::GetRotationFromTo(transformedPos, dirToLastBone.Translation, Vector3::Zero);
 
-            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].transform.Orientation;
+            _bones[i-1].transform.Orientation = targetRot * _bones[i-1].targetRotation;
         }
         _bones[i].transform.Translation = _bones[i].position;
 
@@ -252,6 +263,8 @@ void PhysicsBone::Serialize(SerializeStream& stream, const void* otherObj)
     SERIALIZE_MEMBER(Damping, _damping);
     SERIALIZE_MEMBER(Stiffness, _stiffness);
     SERIALIZE_MEMBER(GravityScale, _gravityScale);
+    SERIALIZE_MEMBER(Elasticity, _elasticity);
+    SERIALIZE_MEMBER(ShowDebugLines, _showDebugLines);
 }
 
 void PhysicsBone::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
@@ -266,5 +279,8 @@ void PhysicsBone::Deserialize(DeserializeStream& stream, ISerializeModifier* mod
     DESERIALIZE_MEMBER(Damping, _damping);
     DESERIALIZE_MEMBER(Stiffness, _stiffness);
     DESERIALIZE_MEMBER(GravityScale, _gravityScale);
+    DESERIALIZE_MEMBER(Elasticity, _elasticity);
+    DESERIALIZE_MEMBER(ShowDebugLines, _showDebugLines);
 }
+
 
