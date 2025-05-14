@@ -204,13 +204,7 @@ void PhysicsBone::ApplyConstraints()
 
 void PhysicsBone::ApplyTransforms()
 {
-    // Calculate inverse matrix
-    // Outside loop so we only do it once
-    Matrix world;
-    _model->GetLocalToWorldMatrix(world);
-    Matrix invWorld;
-    Matrix::Invert(world, invWorld);
-
+    Array<ModelBoneNode> matrixArray = Array<ModelBoneNode>();
 
     for (size_t i = 1; i < _chainLength; ++i)
     {
@@ -228,17 +222,18 @@ void PhysicsBone::ApplyTransforms()
         }
         _bones[i].transform.Translation = _bones[i].position;
 
-        Matrix result;
-        Matrix::Transformation(_bones[i].transform.Scale, _bones[i].transform.Orientation, _bones[i].transform.Translation, result);
-
-        _model->SetNodeTransformation(_index + i, result * invWorld);
+        ModelBoneNode nodeInfo;
+        nodeInfo.NodeIndex = _index + i;
+        Matrix::Transformation(_bones[i].transform.Scale, _bones[i].transform.Orientation, _bones[i].transform.Translation, nodeInfo.NodeMatrix);
+        matrixArray.Add(nodeInfo);
     }
+
+    _model->SetNodeTransformation(matrixArray, true);
 
     for (size_t i = 0; i < _chainLength; i++)
     {
         _bones[i].previousPosition = GetNodeTransform(_index + i).Translation;
     }
-
 }
 
 Transform PhysicsBone::GetNodeTransform(int node, bool isWorldSpace)

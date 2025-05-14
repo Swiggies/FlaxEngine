@@ -3,6 +3,9 @@
 using FlaxEditor.CustomEditors.Elements;
 using FlaxEditor.GUI;
 using FlaxEngine;
+using FlaxEngine.GUI;
+using System.Linq;
+using System;
 
 namespace FlaxEditor.CustomEditors.Editors
 {
@@ -12,6 +15,7 @@ namespace FlaxEditor.CustomEditors.Editors
     public sealed class SkeletonNodeEditor : CustomEditor
     {
         private ComboBoxElement element;
+        private ButtonElement elementButton;
 
         /// <inheritdoc />
         public override DisplayStyle Style => DisplayStyle.Inline;
@@ -19,9 +23,11 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            element = layout.ComboBox();
-            element.ComboBox.SelectedIndexChanged += OnSelectedIndexChanged;
 
+            var cm = new ItemsListContextMenu();
+
+            elementButton = layout.Button("Pick a bone");
+            elementButton.Button.ButtonClicked += (b) => cm.Show(b, b.Location);
             // Set node names
             if (ParentEditor != null
                 && ParentEditor.Values.Count == 1 && (ParentEditor.Values[0] is Actor boneSocket)
@@ -30,8 +36,21 @@ namespace FlaxEditor.CustomEditors.Editors
             {
                 var nodes = animatedModel.SkinnedModel.Nodes;
                 for (int nodeIndex = 0; nodeIndex < nodes.Length; nodeIndex++)
-                    element.ComboBox.AddItem(nodes[nodeIndex].Name);
+                {
+                    ItemsListContextMenu.Item item = new ItemsListContextMenu.Item();
+                    item.Name = nodes[nodeIndex].Name;
+                    item.Clicked += ItemClicked;
+
+                    cm.AddItem(item);
+                }
             }
+        }
+
+        private void ItemClicked(ItemsListContextMenu.Item obj)
+        {
+            Debug.Log(obj.Name);
+            string value = obj.Name;
+            SetValue(value);
         }
 
         private void OnSelectedIndexChanged(ComboBox comboBox)
@@ -52,7 +71,7 @@ namespace FlaxEditor.CustomEditors.Editors
             else
             {
                 string value = (string)Values[0];
-                element.ComboBox.SelectedItem = value;
+                elementButton.Button.Text = value;
             }
         }
     }
