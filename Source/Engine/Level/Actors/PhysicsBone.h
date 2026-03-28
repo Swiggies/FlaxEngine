@@ -35,22 +35,22 @@ private:
 
 public:
 
-    API_FIELD()
+    API_FIELD(Attributes = "EditorOrder(20), EditorDisplay(\"Physics Bone\")")
     int _chainLength;
 
-    API_FIELD()
+    API_FIELD(Attributes = "EditorOrder(30), EditorDisplay(\"Physics Bone\")")
     float _stiffness = 10.0;
 
-    API_FIELD()
+    API_FIELD(Attributes = "EditorOrder(40), EditorDisplay(\"Physics Bone\")")
     float _damping = 10.0;
 
-    API_FIELD()
+    API_FIELD(Attributes = "EditorOrder(50), EditorDisplay(\"Physics Bone\")")
     float _mass = 0.1;
 
-    API_FIELD()
+    API_FIELD(Attributes = "EditorOrder(60), EditorDisplay(\"Physics Bone\")")
     float _elasticity = 10.0;
 
-    API_FIELD()
+    API_FIELD(Attributes = "EditorOrder(70), EditorDisplay(\"Physics Bone\")")
     float _gravityScale = 0.2;
 
     API_FIELD()
@@ -62,7 +62,7 @@ public:
     /// <summary>
     /// Gets the target node name to link to it.
     /// </summary>
-    API_PROPERTY(Attributes = "EditorOrder(10), EditorDisplay(\"Bone Socket\"), CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.SkeletonNodeEditor\")")
+    API_PROPERTY(Attributes = "EditorOrder(10), EditorDisplay(\"Physics Bone\"), CustomEditorAlias(\"FlaxEditor.CustomEditors.Editors.SkeletonNodeEditor\")")
     FORCE_INLINE const String& GetNode() const
     {
         return _node;

@@ -6,6 +6,7 @@ using FlaxEngine;
 using FlaxEngine.GUI;
 using System.Linq;
 using System;
+using System.Text;
 
 namespace FlaxEditor.CustomEditors.Editors
 {
@@ -23,25 +24,42 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-
-            var cm = new ItemsListContextMenu();
+            var contextMenu = new ItemsListContextMenu();
 
             elementButton = layout.Button("Pick a bone");
-            elementButton.Button.ButtonClicked += (b) => cm.Show(b, b.Location);
+            elementButton.Button.ButtonClicked += (b) => contextMenu.Show(b.Parent, b.BottomLeft);
             // Set node names
             if (ParentEditor != null
-                && ParentEditor.Values.Count == 1 && (ParentEditor.Values[0] is Actor boneSocket)
-                && boneSocket.Parent is AnimatedModel animatedModel && animatedModel.SkinnedModel
+                && ParentEditor.Values.Count == 1 && (ParentEditor.Values[0] is Actor animatedActor)
+                && animatedActor.Parent is AnimatedModel animatedModel && animatedModel.SkinnedModel
                 && !animatedModel.SkinnedModel.WaitForLoaded())
             {
                 var nodes = animatedModel.SkinnedModel.Nodes;
                 for (int nodeIndex = 0; nodeIndex < nodes.Length; nodeIndex++)
                 {
-                    ItemsListContextMenu.Item item = new ItemsListContextMenu.Item();
-                    item.Name = nodes[nodeIndex].Name;
-                    item.Clicked += ItemClicked;
+                    if (nodes[nodeIndex].ParentIndex == -1)
+                    {
+                        var sb = new StringBuilder();
+                        BuildNodeTree(contextMenu, nodes, nodeIndex, 0);
+                    }
+                }
+            }
+        }
 
-                    cm.AddItem(item);
+        private void BuildNodeTree(ItemsListContextMenu cm, SkeletonNode[] nodes, int nodeIndex, int indentLevel)
+        {
+            ItemsListContextMenu.Item item = new ItemsListContextMenu.Item();
+            item.Name = $"{new string(' ', indentLevel)}{nodes[nodeIndex].Name}";
+            item.Clicked += ItemClicked;
+            item.SortScore = nodeIndex;
+
+            cm.AddItem(item);
+
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                if (nodes[i].ParentIndex == nodeIndex)
+                {
+                    BuildNodeTree(cm, nodes, i, indentLevel + 1);
                 }
             }
         }
