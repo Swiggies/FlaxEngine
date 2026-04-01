@@ -1,8 +1,7 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Globalization;
-using System.IO;
 using System.Reflection;
 using System.Xml;
 using FlaxEditor.Content;
@@ -25,12 +24,14 @@ namespace FlaxEditor.Windows.Assets
     /// </summary>
     /// <seealso cref="Animation" />
     /// <seealso cref="FlaxEditor.Windows.Assets.AssetEditorWindow" />
-    public sealed class AnimationWindow : AssetEditorWindowBase<Animation>
+    public sealed class AnimationWindow : ClonedAssetEditorWindowBase<Animation>
     {
         private sealed class Preview : AnimationPreview
         {
             private readonly AnimationWindow _window;
             private AnimationGraph _animGraph;
+
+            public SkinnedModel BaseModel;
 
             public Preview(AnimationWindow window)
             : base(true)
@@ -46,10 +47,11 @@ namespace FlaxEditor.Windows.Assets
                 Object.Destroy(ref _animGraph);
                 if (!model)
                     return;
+                var baseModel = BaseModel ?? model;
 
                 // Use virtual animation graph to playback the animation
                 _animGraph = FlaxEngine.Content.CreateVirtualAsset<AnimationGraph>();
-                _animGraph.InitAsAnimation(model, _window.Asset, true, true);
+                _animGraph.InitAsAnimation(baseModel, _window.Asset, true, true);
                 PreviewActor.AnimationGraph = _animGraph;
             }
 
@@ -69,6 +71,7 @@ namespace FlaxEditor.Windows.Assets
             /// <inheritdoc />
             public override void OnDestroy()
             {
+                BaseModel = null;
                 Object.Destroy(ref _animGraph);
 
                 base.OnDestroy();
@@ -148,6 +151,24 @@ namespace FlaxEditor.Windows.Assets
                 }
             }
 
+            private bool ShowBaseModel => PreviewModel != null;
+
+            [EditorDisplay("Preview"), NoSerialize, AssetReference(true), VisibleIf(nameof(ShowBaseModel))]
+            [Tooltip("The skinned model to use as a retarget source. Animation will be played using its skeleton and retarget into the Preview Model.")]
+            public SkinnedModel BaseModel
+            {
+                get => Window?._preview?.BaseModel;
+                set
+                {
+                    if (Window == null || PreviewModel == value)
+                        return;
+
+                    // Reinit
+                    Window._preview.BaseModel = value;
+                    Window._preview.SetModel(PreviewModel);
+                }
+            }
+
             public void OnLoad(AnimationWindow window)
             {
                 // Link
@@ -179,11 +200,8 @@ namespace FlaxEditor.Windows.Assets
                 public override void Initialize(LayoutElementsContainer layout)
                 {
                     var proxy = (PropertiesProxy)Values[0];
-                    if (proxy.Asset == null || !proxy.Asset.IsLoaded)
-                    {
-                        layout.Label("Loading...", TextAlignment.Center);
+                    if (Utilities.Utils.OnAssetProperties(layout, proxy.Asset))
                         return;
-                    }
 
                     // General properties
                     {
@@ -212,7 +230,8 @@ namespace FlaxEditor.Windows.Assets
                         group.Object(importSettingsValues);
 
                         // Creates the import path UI
-                        Utilities.Utils.CreateImportPathUI(layout, proxy.Window.Item as BinaryAssetItem);
+                        group = layout.Group("Import Path");
+                        Utilities.Utils.CreateImportPathUI(group, proxy.Window.Item as BinaryAssetItem);
 
                         layout.Space(5);
                         var reimportButton = layout.Button("Reimport");
@@ -233,8 +252,9 @@ namespace FlaxEditor.Windows.Assets
         private ToolStripButton _undoButton;
         private ToolStripButton _redoButton;
         private bool _isWaitingForTimelineLoad;
-        private SkinnedModel _initialPreviewModel;
+        private SkinnedModel _initialPreviewModel, _initialBaseModel;
         private float _initialPanel2Splitter = 0.6f;
+        private bool _timelineIsDirty;
 
         /// <summary>
         /// Gets the animation timeline editor.
@@ -275,7 +295,7 @@ namespace FlaxEditor.Windows.Assets
                 Parent = _panel1.Panel1,
                 Enabled = false
             };
-            _timeline.Modified += MarkAsEdited;
+            _timeline.Modified += OnTimelineModified;
             _timeline.SetNoTracksText("Loading...");
 
             // Asset properties
@@ -301,11 +321,31 @@ namespace FlaxEditor.Windows.Assets
         {
             MarkAsEdited();
             UpdateToolstrip();
+            _propertiesPresenter.BuildLayout();
+        }
+
+        private void OnTimelineModified()
+        {
+            _timelineIsDirty = true;
+            MarkAsEdited();
+        }
+
+        private bool RefreshTempAsset()
+        {
+            if (_asset == null || _isWaitingForTimelineLoad)
+                return true;
+            if (_timeline.IsModified)
+            {
+                _timeline.Save(_asset);
+            }
+            _propertiesPresenter.BuildLayoutOnUpdate();
+
+            return false;
         }
 
         private string GetPreviewModelCacheName()
         {
-            return _asset.ID + ".PreviewModel";
+            return _item.ID + ".PreviewModel";
         }
 
         /// <inheritdoc />
@@ -325,7 +365,12 @@ namespace FlaxEditor.Windows.Assets
                 _properties.PreviewModel = _initialPreviewModel;
                 _panel2.SplitterValue = _initialPanel2Splitter;
                 _initialPreviewModel = null;
+                if (_initialBaseModel)
+                {
+                    _properties.BaseModel = _initialBaseModel;
+                }
             }
+            _initialBaseModel = null;
 
             base.OnAssetLoaded();
         }
@@ -336,7 +381,11 @@ namespace FlaxEditor.Windows.Assets
             if (!IsEdited)
                 return;
 
-            _timeline.Save(_asset);
+            if (RefreshTempAsset())
+                return;
+            if (SaveToOriginal())
+                return;
+
             ClearEditedFlag();
             _item.RefreshThumbnail();
         }
@@ -382,6 +431,9 @@ namespace FlaxEditor.Windows.Assets
             _isWaitingForTimelineLoad = true;
 
             base.OnItemReimported(item);
+
+            // Drop virtual asset state and get a new one from the reimported file
+            LoadFromOriginal();
         }
 
         /// <inheritdoc />
@@ -389,15 +441,24 @@ namespace FlaxEditor.Windows.Assets
         {
             base.Update(deltaTime);
 
+            // Check if temporary asset need to be updated
+            if (_timelineIsDirty)
+            {
+                _timelineIsDirty = false;
+                RefreshTempAsset();
+            }
+
+            // Check if need to load timeline
             if (_isWaitingForTimelineLoad && _asset.IsLoaded)
             {
                 _isWaitingForTimelineLoad = false;
-                _timeline._id = _asset.ID;
+                _timeline._id = _item.ID;
                 _timeline.Load(_asset);
                 _undo.Clear();
                 _timeline.Enabled = true;
                 _timeline.SetNoTracksText(null);
                 ClearEditedFlag();
+                _timeline.ShowWholeTimeline();
             }
         }
 
@@ -415,6 +476,8 @@ namespace FlaxEditor.Windows.Assets
             writer.WriteAttributeString("ShowPreviewValues", _timeline.ShowPreviewValues.ToString());
             if (_properties.PreviewModel)
                 writer.WriteAttributeString("PreviewModel", _properties.PreviewModel.ID.ToString());
+            if (_properties.BaseModel)
+                writer.WriteAttributeString("BaseModel", _properties.BaseModel.ID.ToString());
         }
 
         /// <inheritdoc />
@@ -430,6 +493,8 @@ namespace FlaxEditor.Windows.Assets
                 _timeline.ShowPreviewValues = value3;
             if (Guid.TryParse(node.GetAttribute("PreviewModel"), out Guid value4))
                 _initialPreviewModel = FlaxEngine.Content.LoadAsync<SkinnedModel>(value4);
+            if (Guid.TryParse(node.GetAttribute("BaseModel"), out value4))
+                _initialBaseModel = FlaxEngine.Content.LoadAsync<SkinnedModel>(value4);
         }
 
         /// <inheritdoc />
@@ -441,6 +506,10 @@ namespace FlaxEditor.Windows.Assets
         /// <inheritdoc />
         public override void OnDestroy()
         {
+            if (IsDisposing)
+                return;
+            base.OnDestroy();
+
             if (_undo != null)
             {
                 _undo.Enabled = false;
@@ -457,8 +526,6 @@ namespace FlaxEditor.Windows.Assets
             _saveButton = null;
             _undoButton = null;
             _redoButton = null;
-
-            base.OnDestroy();
         }
     }
 }

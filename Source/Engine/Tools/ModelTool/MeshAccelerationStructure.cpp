@@ -1,33 +1,47 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_MODEL_TOOL
 
 #include "MeshAccelerationStructure.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Math.h"
 #include "Engine/Content/Content.h"
 #include "Engine/Content/Assets/Model.h"
+#include "Engine/Graphics/GPUBuffer.h"
 #include "Engine/Graphics/Models/ModelData.h"
+#include "Engine/Graphics/Models/MeshAccessor.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 
-void MeshAccelerationStructure::BuildBVH(int32 node, int32 maxLeafSize, Array<byte>& scratch)
+PACK_STRUCT(struct GPUBVH {
+    Float3 BoundsMin;
+    uint32 Index;
+    Float3 BoundsMax;
+    int32 Count; // Negative for non-leaf nodes
+});
+static_assert(sizeof(GPUBVH) == sizeof(Float4) * 2, "Invalid BVH structure size for GPU.");
+
+void MeshAccelerationStructure::BuildBVH(int32 node, BVHBuild& build)
 {
-    auto& root = _bvh[node];
-    ASSERT_LOW_LAYER(root.Leaf.IsLeaf);
-    if (root.Leaf.TriangleCount <= maxLeafSize)
+    auto* root = &_bvh[node];
+    ASSERT_LOW_LAYER(root->Leaf.IsLeaf);
+    if (build.MaxLeafSize > 0 && root->Leaf.TriangleCount <= build.MaxLeafSize)
+        return;
+    if (build.MaxDepth > 0 && build.NodeDepth >= build.MaxDepth)
         return;
 
     // Spawn two leaves
     const int32 childIndex = _bvh.Count();
     _bvh.AddDefault(2);
+    root = &_bvh[node];
     auto& left = _bvh.Get()[childIndex];
     auto& right = _bvh.Get()[childIndex + 1];
     left.Leaf.IsLeaf = 1;
     right.Leaf.IsLeaf = 1;
-    left.Leaf.MeshIndex = root.Leaf.MeshIndex;
-    right.Leaf.MeshIndex = root.Leaf.MeshIndex;
+    left.Leaf.MeshIndex = root->Leaf.MeshIndex;
+    right.Leaf.MeshIndex = root->Leaf.MeshIndex;
 
     // Mid-point splitting based on the largest axis
-    const Float3 boundsSize = root.Bounds.GetSize();
+    const Float3 boundsSize = root->Bounds.GetSize();
     int32 axisCount = 0;
     int32 axis = 0;
 RETRY:
@@ -51,11 +65,11 @@ RETRY:
         // Go to the next axis
         axis = (axis + 1) % 3;
     }
-    const float midPoint = (float)(root.Bounds.Minimum.Raw[axis] + boundsSize.Raw[axis] * 0.5f);
-    const Mesh& meshData = _meshes[root.Leaf.MeshIndex];
+    const float midPoint = (float)(root->Bounds.Minimum.Raw[axis] + boundsSize.Raw[axis] * 0.5f);
+    const Mesh& meshData = _meshes[root->Leaf.MeshIndex];
     const Float3* vb = meshData.VertexBuffer.Get<Float3>();
-    int32 indexStart = root.Leaf.TriangleIndex * 3;
-    int32 indexEnd = indexStart + root.Leaf.TriangleCount * 3;
+    int32 indexStart = root->Leaf.TriangleIndex * 3;
+    int32 indexEnd = indexStart + root->Leaf.TriangleCount * 3;
     left.Leaf.TriangleCount = 0;
     right.Leaf.TriangleCount = 0;
     if (meshData.Use16BitIndexBuffer)
@@ -64,8 +78,8 @@ RETRY:
         {
             uint16 I0, I1, I2;
         };
-        scratch.Resize(root.Leaf.TriangleCount * sizeof(Tri));
-        auto dst = (Tri*)scratch.Get();
+        build.Scratch.Resize(root->Leaf.TriangleCount * sizeof(Tri));
+        auto dst = (Tri*)build.Scratch.Get();
         auto ib16 = meshData.IndexBuffer.Get<uint16>();
         for (int32 i = indexStart; i < indexEnd;)
         {
@@ -77,9 +91,9 @@ RETRY:
             if (centroid <= midPoint)
                 dst[left.Leaf.TriangleCount++] = tri; // Left
             else
-                dst[root.Leaf.TriangleCount - ++right.Leaf.TriangleCount] = tri; // Right
+                dst[root->Leaf.TriangleCount - ++right.Leaf.TriangleCount] = tri; // Right
         }
-        Platform::MemoryCopy(ib16 + indexStart, dst, root.Leaf.TriangleCount * 3 * sizeof(uint16));
+        Platform::MemoryCopy(ib16 + indexStart, dst, root->Leaf.TriangleCount * 3 * sizeof(uint16));
         if (left.Leaf.TriangleCount == 0 || right.Leaf.TriangleCount == 0)
         {
             axisCount++;
@@ -90,13 +104,13 @@ RETRY:
         indexStart = 0;
         indexEnd = left.Leaf.TriangleCount * 3;
         for (int32 i = indexStart; i < indexEnd; i++)
-            left.Bounds.Merge(vb[((uint16*)scratch.Get())[i]]);
+            left.Bounds.Merge(vb[((uint16*)build.Scratch.Get())[i]]);
 
-        right.Bounds = BoundingBox(vb[dst[root.Leaf.TriangleCount - 1].I0]);
+        right.Bounds = BoundingBox(vb[dst[root->Leaf.TriangleCount - 1].I0]);
         indexStart = left.Leaf.TriangleCount;
-        indexEnd = root.Leaf.TriangleCount * 3;
+        indexEnd = root->Leaf.TriangleCount * 3;
         for (int32 i = indexStart; i < indexEnd; i++)
-            right.Bounds.Merge(vb[((uint16*)scratch.Get())[i]]);
+            right.Bounds.Merge(vb[((uint16*)build.Scratch.Get())[i]]);
     }
     else
     {
@@ -104,8 +118,8 @@ RETRY:
         {
             uint32 I0, I1, I2;
         };
-        scratch.Resize(root.Leaf.TriangleCount * sizeof(Tri));
-        auto dst = (Tri*)scratch.Get();
+        build.Scratch.Resize(root->Leaf.TriangleCount * sizeof(Tri));
+        auto dst = (Tri*)build.Scratch.Get();
         auto ib32 = meshData.IndexBuffer.Get<uint32>();
         for (int32 i = indexStart; i < indexEnd;)
         {
@@ -117,9 +131,9 @@ RETRY:
             if (centroid <= midPoint)
                 dst[left.Leaf.TriangleCount++] = tri; // Left
             else
-                dst[root.Leaf.TriangleCount - ++right.Leaf.TriangleCount] = tri; // Right
+                dst[root->Leaf.TriangleCount - ++right.Leaf.TriangleCount] = tri; // Right
         }
-        Platform::MemoryCopy(ib32 + indexStart, dst, root.Leaf.TriangleCount * 3 * sizeof(uint32));
+        Platform::MemoryCopy(ib32 + indexStart, dst, root->Leaf.TriangleCount * 3 * sizeof(uint32));
         if (left.Leaf.TriangleCount == 0 || right.Leaf.TriangleCount == 0)
         {
             axisCount++;
@@ -130,26 +144,31 @@ RETRY:
         indexStart = 0;
         indexEnd = left.Leaf.TriangleCount * 3;
         for (int32 i = indexStart; i < indexEnd; i++)
-            left.Bounds.Merge(vb[((uint32*)scratch.Get())[i]]);
+            left.Bounds.Merge(vb[((uint32*)build.Scratch.Get())[i]]);
 
-        right.Bounds = BoundingBox(vb[dst[root.Leaf.TriangleCount - 1].I0]);
+        right.Bounds = BoundingBox(vb[dst[root->Leaf.TriangleCount - 1].I0]);
         indexStart = left.Leaf.TriangleCount;
-        indexEnd = root.Leaf.TriangleCount * 3;
+        indexEnd = root->Leaf.TriangleCount * 3;
         for (int32 i = indexStart; i < indexEnd; i++)
-            right.Bounds.Merge(vb[((uint32*)scratch.Get())[i]]);
+            right.Bounds.Merge(vb[((uint32*)build.Scratch.Get())[i]]);
     }
-    ASSERT_LOW_LAYER(left.Leaf.TriangleCount + right.Leaf.TriangleCount == root.Leaf.TriangleCount);
-    left.Leaf.TriangleIndex = root.Leaf.TriangleIndex;
+    ASSERT_LOW_LAYER(left.Leaf.TriangleCount + right.Leaf.TriangleCount == root->Leaf.TriangleCount);
+    left.Leaf.TriangleIndex = root->Leaf.TriangleIndex;
     right.Leaf.TriangleIndex = left.Leaf.TriangleIndex + left.Leaf.TriangleCount;
+    build.MaxNodeTriangles = Math::Max(build.MaxNodeTriangles, (int32)right.Leaf.TriangleCount);
+    build.MaxNodeTriangles = Math::Max(build.MaxNodeTriangles, (int32)right.Leaf.TriangleCount);
 
     // Convert into a node
-    root.Node.IsLeaf = 0;
-    root.Node.ChildIndex = childIndex;
-    root.Node.ChildrenCount = 2;
+    root->Node.IsLeaf = 0;
+    root->Node.ChildIndex = childIndex;
+    root->Node.ChildrenCount = 2;
 
     // Split children
-    BuildBVH(childIndex, maxLeafSize, scratch);
-    BuildBVH(childIndex + 1, maxLeafSize, scratch);
+    build.NodeDepth++;
+    build.MaxNodeDepth = Math::Max(build.NodeDepth, build.MaxNodeDepth);
+    BuildBVH(childIndex, build);
+    BuildBVH(childIndex + 1, build);
+    build.NodeDepth--;
 }
 
 bool MeshAccelerationStructure::PointQueryBVH(int32 node, const Vector3& point, Real& hitDistance, Vector3& hitPoint, Triangle& hitTriangle) const
@@ -160,7 +179,7 @@ bool MeshAccelerationStructure::PointQueryBVH(int32 node, const Vector3& point, 
     {
         // Find closest triangle
         Vector3 p;
-        const Mesh& meshData = _meshes[root.Leaf.MeshIndex];
+        const Mesh& meshData = _meshes.Get()[root.Leaf.MeshIndex];
         const Float3* vb = meshData.VertexBuffer.Get<Float3>();
         const int32 indexStart = root.Leaf.TriangleIndex * 3;
         const int32 indexEnd = indexStart + root.Leaf.TriangleCount * 3;
@@ -229,7 +248,7 @@ bool MeshAccelerationStructure::RayCastBVH(int32 node, const Ray& ray, Real& hit
     if (root.Leaf.IsLeaf)
     {
         // Ray cast along triangles in the leaf 
-        const Mesh& meshData = _meshes[root.Leaf.MeshIndex];
+        const Mesh& meshData = _meshes.Get()[root.Leaf.MeshIndex];
         const Float3* vb = meshData.VertexBuffer.Get<Float3>();
         const int32 indexStart = root.Leaf.TriangleIndex * 3;
         const int32 indexEnd = indexStart + root.Leaf.TriangleCount * 3;
@@ -288,13 +307,21 @@ bool MeshAccelerationStructure::RayCastBVH(int32 node, const Ray& ray, Real& hit
     return hit;
 }
 
+MeshAccelerationStructure::~MeshAccelerationStructure()
+{
+    for (auto& e : _meshes)
+    {
+        if (e.Asset)
+            e.Asset->RemoveReference();
+    }
+}
+
 void MeshAccelerationStructure::Add(Model* model, int32 lodIndex)
 {
     PROFILE_CPU();
     lodIndex = Math::Clamp(lodIndex, model->HighestResidentLODIndex(), model->LODs.Count() - 1);
     ModelLOD& lod = model->LODs[lodIndex];
     _meshes.EnsureCapacity(_meshes.Count() + lod.Meshes.Count());
-    bool failed = false;
     for (int32 i = 0; i < lod.Meshes.Count(); i++)
     {
         auto& mesh = lod.Meshes[i];
@@ -307,35 +334,31 @@ void MeshAccelerationStructure::Add(Model* model, int32 lodIndex)
         }
 
         auto& meshData = _meshes.AddOne();
-        if (model->IsVirtual())
-        {
-            meshData.Indices = mesh.GetTriangleCount() * 3;
-            meshData.Vertices = mesh.GetVertexCount();
-            failed |= mesh.DownloadDataGPU(MeshBufferType::Index, meshData.IndexBuffer);
-            failed |= mesh.DownloadDataGPU(MeshBufferType::Vertex0, meshData.VertexBuffer);
-        }
-        else
-        {
-            failed |= mesh.DownloadDataCPU(MeshBufferType::Index, meshData.IndexBuffer, meshData.Indices);
-            failed |= mesh.DownloadDataCPU(MeshBufferType::Vertex0, meshData.VertexBuffer, meshData.Vertices);
-        }
-        if (failed)
+        meshData.Asset = model;
+        model->AddReference();
+        MeshAccessor accessor;
+        MeshBufferType bufferTypes[2] = { MeshBufferType::Index, MeshBufferType::Vertex0 };
+        if (accessor.LoadMesh(&mesh, false, ToSpan(bufferTypes, 2)))
             return;
-        if (!meshData.IndexBuffer.IsAllocated() && meshData.IndexBuffer.Length() != 0)
-        {
-            // BVH nodes modifies index buffer (sorts data in-place) so clone it
-            meshData.IndexBuffer.Copy(meshData.IndexBuffer.Get(), meshData.IndexBuffer.Length());
-        }
-        meshData.Use16BitIndexBuffer = mesh.Use16BitIndexBuffer();
+        auto indexStream = accessor.Index();
+        auto positionStream = accessor.Position();
+        if (!indexStream.IsValid() || !positionStream.IsValid())
+            return;
+        meshData.Indices = indexStream.GetCount();
+        meshData.Vertices = positionStream.GetCount();
+        meshData.IndexBuffer.Copy(indexStream.GetData());
+        meshData.VertexBuffer.Allocate(meshData.Vertices * sizeof(Float3));
+        positionStream.CopyTo(ToSpan(meshData.VertexBuffer.Get<Float3>(), meshData.Vertices));
+        meshData.Use16BitIndexBuffer = indexStream.GetFormat() == PixelFormat::R16_UInt;
         meshData.Bounds = mesh.GetBox();
     }
 }
 
-void MeshAccelerationStructure::Add(ModelData* modelData, int32 lodIndex, bool copy)
+void MeshAccelerationStructure::Add(const ModelData* modelData, int32 lodIndex, bool copy)
 {
     PROFILE_CPU();
     lodIndex = Math::Clamp(lodIndex, 0, modelData->LODs.Count() - 1);
-    ModelLodData& lod = modelData->LODs[lodIndex];
+    const ModelLodData& lod = modelData->LODs[lodIndex];
     _meshes.EnsureCapacity(_meshes.Count() + lod.Meshes.Count());
     for (int32 i = 0; i < lod.Meshes.Count(); i++)
     {
@@ -350,6 +373,7 @@ void MeshAccelerationStructure::Add(ModelData* modelData, int32 lodIndex, bool c
         }
 
         auto& meshData = _meshes.AddOne();
+        meshData.Asset = nullptr;
         meshData.Indices = mesh->Indices.Count();
         meshData.Vertices = mesh->Positions.Count();
         if (copy)
@@ -369,7 +393,9 @@ void MeshAccelerationStructure::Add(ModelData* modelData, int32 lodIndex, bool c
 
 void MeshAccelerationStructure::Add(Float3* vb, int32 vertices, void* ib, int32 indices, bool use16BitIndex, bool copy)
 {
+    ASSERT(vertices % 3 == 0);
     auto& meshData = _meshes.AddOne();
+    meshData.Asset = nullptr;
     if (copy)
     {
         meshData.VertexBuffer.Copy((const byte*)vb, vertices * sizeof(Float3));
@@ -382,43 +408,122 @@ void MeshAccelerationStructure::Add(Float3* vb, int32 vertices, void* ib, int32 
     meshData.Vertices = vertices;
     meshData.Indices = indices;
     meshData.Use16BitIndexBuffer = use16BitIndex;
+    BoundingBox::FromPoints(meshData.VertexBuffer.Get<Float3>(), vertices, meshData.Bounds);
 }
 
-void MeshAccelerationStructure::BuildBVH(int32 maxLeafSize)
+void MeshAccelerationStructure::MergeMeshes(bool force16BitIndexBuffer)
+{
+    if (_meshes.Count() == 0)
+        return;
+    if (_meshes.Count() == 1 && (!force16BitIndexBuffer || !_meshes[0].Use16BitIndexBuffer))
+        return;
+    PROFILE_CPU();
+    auto meshes = _meshes;
+    _meshes.Clear();
+    _meshes.Resize(1);
+    auto& mesh = _meshes[0];
+    mesh.Asset = nullptr;
+    mesh.Use16BitIndexBuffer = true;
+    mesh.Indices = 0;
+    mesh.Vertices = 0;
+    mesh.Bounds = meshes[0].Bounds;
+    for (auto& e : meshes)
+    {
+        if (!e.Use16BitIndexBuffer)
+            mesh.Use16BitIndexBuffer = false;
+        mesh.Vertices += e.Vertices;
+        mesh.Indices += e.Indices;
+        BoundingBox::Merge(mesh.Bounds, e.Bounds, mesh.Bounds);
+    }
+    mesh.Use16BitIndexBuffer &= mesh.Indices <= MAX_uint16 && !force16BitIndexBuffer;
+    mesh.VertexBuffer.Allocate(mesh.Vertices * sizeof(Float3));
+    mesh.IndexBuffer.Allocate(mesh.Indices * sizeof(uint32));
+    int32 vertexCounter = 0, indexCounter = 0;
+    for (auto& e : meshes)
+    {
+        Platform::MemoryCopy(mesh.VertexBuffer.Get() + vertexCounter * sizeof(Float3), e.VertexBuffer.Get(), e.Vertices * sizeof(Float3));
+        if (e.Use16BitIndexBuffer)
+        {
+            for (int32 i = 0; i < e.Indices; i++)
+            {
+                uint16 index = ((uint16*)e.IndexBuffer.Get())[i];
+                ((uint32*)mesh.IndexBuffer.Get())[indexCounter + i] = vertexCounter + index;
+            }
+        }
+        else
+        {
+            for (int32 i = 0; i < e.Indices; i++)
+            {
+                uint16 index = ((uint32*)e.IndexBuffer.Get())[i];
+                ((uint32*)mesh.IndexBuffer.Get())[indexCounter + i] = vertexCounter + index;
+            }
+        }
+        vertexCounter += e.Vertices;
+        indexCounter += e.Indices;
+        if (e.Asset)
+            e.Asset->RemoveReference();
+    }
+}
+
+void MeshAccelerationStructure::BuildBVH(int32 maxLeafSize, int32 maxDepth)
 {
     if (_meshes.Count() == 0)
         return;
     PROFILE_CPU();
+
+    BVHBuild build;
+    build.MaxLeafSize = maxLeafSize;
+    build.MaxDepth = maxDepth;
 
     // Estimate memory usage
     int32 trianglesCount = 0;
     for (const Mesh& meshData : _meshes)
         trianglesCount += meshData.Indices / 3;
     _bvh.Clear();
-    _bvh.EnsureCapacity(trianglesCount / maxLeafSize);
+    _bvh.EnsureCapacity(trianglesCount / Math::Max(maxLeafSize, 16));
 
-    // Init with the root node and all meshes as leaves
-    auto& root = _bvh.AddOne();
-    root.Node.IsLeaf = 0;
-    root.Node.ChildIndex = 1;
-    root.Node.ChildrenCount = _meshes.Count();
-    root.Bounds = _meshes[0].Bounds;
-    for (int32 i = 0; i < _meshes.Count(); i++)
+    // Skip using root node if BVH contains only one mesh
+    if (_meshes.Count() == 1)
     {
-        const Mesh& meshData = _meshes[i];
+        const Mesh& meshData = _meshes.First();
         auto& child = _bvh.AddOne();
         child.Leaf.IsLeaf = 1;
-        child.Leaf.MeshIndex = i;
+        child.Leaf.MeshIndex = 0;
         child.Leaf.TriangleIndex = 0;
         child.Leaf.TriangleCount = meshData.Indices / 3;
         child.Bounds = meshData.Bounds;
-        BoundingBox::Merge(root.Bounds, meshData.Bounds, root.Bounds);
+        Array<byte> scratch;
+        BuildBVH(0, build);
+    }
+    else
+    {
+        // Init with the root node and all meshes as leaves
+        auto& root = _bvh.AddOne();
+        root.Node.IsLeaf = 0;
+        root.Node.ChildIndex = 1;
+        root.Node.ChildrenCount = _meshes.Count();
+        root.Bounds = _meshes[0].Bounds;
+        for (int32 i = 0; i < _meshes.Count(); i++)
+        {
+            const Mesh& meshData = _meshes[i];
+            auto& child = _bvh.AddOne();
+            child.Leaf.IsLeaf = 1;
+            child.Leaf.MeshIndex = i;
+            child.Leaf.TriangleIndex = 0;
+            child.Leaf.TriangleCount = meshData.Indices / 3;
+            child.Bounds = meshData.Bounds;
+            BoundingBox::Merge(root.Bounds, meshData.Bounds, root.Bounds);
+        }
+
+        // Sub-divide mesh nodes into smaller leaves
+        build.MaxNodeDepth = build.MaxDepth = 2;
+        Array<byte> scratch;
+        for (int32 i = 0; i < _meshes.Count(); i++)
+            BuildBVH(i + 1, build);
+        build.NodeDepth = 0;
     }
 
-    // Sub-divide mesh nodes into smaller leaves
-    Array<byte> scratch;
-    for (int32 i = 0; i < _meshes.Count(); i++)
-        BuildBVH(i + 1, maxLeafSize, scratch);
+    LOG(Info, "BVH nodes: {}, max depth: {}, max triangles: {}", _bvh.Count(), build.MaxNodeDepth, build.MaxNodeTriangles);
 }
 
 bool MeshAccelerationStructure::PointQuery(const Vector3& point, Real& hitDistance, Vector3& hitPoint, Triangle& hitTriangle, Real maxDistance) const
@@ -564,6 +669,82 @@ bool MeshAccelerationStructure::RayCast(const Ray& ray, Real& hitDistance, Vecto
         }
         return hit;
     }
+}
+
+MeshAccelerationStructure::GPU::~GPU()
+{
+    SAFE_DELETE_GPU_RESOURCE(BVHBuffer);
+    SAFE_DELETE_GPU_RESOURCE(VertexBuffer);
+    SAFE_DELETE_GPU_RESOURCE(IndexBuffer);
+}
+
+MeshAccelerationStructure::GPU::operator bool() const
+{
+    // Index buffer is initialized as last one so all other buffers are fine too
+    return IndexBuffer && IndexBuffer->GetSize() != 0;
+}
+
+MeshAccelerationStructure::GPU MeshAccelerationStructure::ToGPU()
+{
+    PROFILE_CPU();
+    GPU gpu;
+
+    // GPU BVH operates on a single mesh with 32-bit indices
+    MergeMeshes(true);
+
+    // Construct BVH
+    const int32 BVH_STACK_SIZE = 32; // This must match HLSL shader
+    BuildBVH(0, BVH_STACK_SIZE);
+
+    // Upload BVH
+    {
+        Array<GPUBVH> bvhData;
+        bvhData.Resize(_bvh.Count());
+        for (int32 i = 0; i < _bvh.Count(); i++)
+        {
+            const auto& src = _bvh.Get()[i];
+            auto& dst = bvhData.Get()[i];
+            dst.BoundsMin = src.Bounds.Minimum;
+            dst.BoundsMax = src.Bounds.Maximum;
+            if (src.Leaf.IsLeaf)
+            {
+                dst.Index = src.Leaf.TriangleIndex * 3;
+                dst.Count = src.Leaf.TriangleCount * 3;
+            }
+            else
+            {
+                dst.Index = src.Node.ChildIndex;
+                dst.Count = -(int32)src.Node.ChildrenCount; // Mark as non-leaf
+                ASSERT(src.Node.ChildrenCount == 2); // GPU shader is hardcoded for 2 children per node
+            }
+        }
+        gpu.BVHBuffer = GPUBuffer::New();
+        auto desc =GPUBufferDescription::Structured(_bvh.Count(), sizeof(GPUBVH));
+        desc.InitData = bvhData.Get();
+        if (gpu.BVHBuffer->Init(desc))
+            return gpu;
+    }
+
+    // Upload vertex buffer
+    {
+        const Mesh& mesh = _meshes[0];
+        gpu.VertexBuffer = GPUBuffer::New();
+        auto desc = GPUBufferDescription::Raw(mesh.Vertices * sizeof(Float3), GPUBufferFlags::ShaderResource);
+        desc.InitData = mesh.VertexBuffer.Get();
+        if (gpu.VertexBuffer->Init(desc))
+            return gpu;
+    }
+
+    // Upload index buffer
+    {
+        const Mesh& mesh = _meshes[0];
+        gpu.IndexBuffer = GPUBuffer::New();
+        auto desc = GPUBufferDescription::Raw(mesh.Indices * sizeof(uint32), GPUBufferFlags::ShaderResource);
+        desc.InitData = mesh.IndexBuffer.Get();
+        gpu.IndexBuffer->Init(desc);
+    }
+
+    return gpu;
 }
 
 #endif

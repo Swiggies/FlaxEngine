@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "GPUTexture.h"
 #include "GPUTextureDescription.h"
@@ -16,6 +16,7 @@
 #include "Engine/Threading/ThreadPoolTask.h"
 #include "Engine/Graphics/GPUDevice.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Scripting/Enums.h"
 
 namespace
@@ -353,6 +354,8 @@ int32 GPUTexture::ComputeRowPitch(int32 mipLevel, int32 rowAlign) const
 
 bool GPUTexture::Init(const GPUTextureDescription& desc)
 {
+    PROFILE_MEM(GraphicsTextures);
+
     // Validate description
     const auto device = GPUDevice::Instance;
     if (desc.Usage == GPUResourceUsage::Dynamic)
@@ -501,6 +504,17 @@ bool GPUTexture::Init(const GPUTextureDescription& desc)
         return true;
     }
 
+#if COMPILE_WITH_PROFILER
+    auto group = ProfilerMemory::Groups::GraphicsTextures;
+    if (_desc.IsRenderTarget())
+        group = ProfilerMemory::Groups::GraphicsRenderTargets;
+    else if (_desc.IsCubeMap())
+        group = ProfilerMemory::Groups::GraphicsCubeMaps;
+    else if (_desc.IsVolume())
+        group = ProfilerMemory::Groups::GraphicsVolumeTextures;
+    ProfilerMemory::IncrementGroup(group, _memoryUsage);
+#endif
+
     // Render targets and depth buffers doesn't support normal textures streaming and are considered to be always resident
     if (IsRegularTexture() == false)
     {
@@ -589,6 +603,17 @@ GPUResourceType GPUTexture::GetResourceType() const
 
 void GPUTexture::OnReleaseGPU()
 {
+#if COMPILE_WITH_PROFILER
+    auto group = ProfilerMemory::Groups::GraphicsTextures;
+    if (_desc.IsRenderTarget())
+        group = ProfilerMemory::Groups::GraphicsRenderTargets;
+    else if (_desc.IsCubeMap())
+        group = ProfilerMemory::Groups::GraphicsCubeMaps;
+    else if (_desc.IsVolume())
+        group = ProfilerMemory::Groups::GraphicsVolumeTextures;
+    ProfilerMemory::DecrementGroup(group, _memoryUsage);
+#endif
+
     _desc.Clear();
     _residentMipLevels = 0;
 }
@@ -603,6 +628,7 @@ GPUTask* GPUTexture::UploadMipMapAsync(const BytesContainer& data, int32 mipInde
 GPUTask* GPUTexture::UploadMipMapAsync(const BytesContainer& data, int32 mipIndex, int32 rowPitch, int32 slicePitch, bool copyData)
 {
     PROFILE_CPU();
+    PROFILE_MEM(GraphicsTextures);
     ASSERT(IsAllocated());
     ASSERT(mipIndex < MipLevels() && data.IsValid());
     ASSERT(data.Length() >= slicePitch);
@@ -628,6 +654,23 @@ GPUTask* GPUTexture::UploadMipMapAsync(const BytesContainer& data, int32 mipInde
     auto task = ::New<GPUUploadTextureMipTask>(this, mipIndex, data, rowPitch, slicePitch, copyData);
     ASSERT_LOW_LAYER(task && task->HasReference(this));
     return task;
+}
+
+bool GPUTexture::UploadData(TextureData& data, bool copyData)
+{
+    if (!IsAllocated())
+        return true;
+    if (data.Width != Width() || data.Height != Height() || data.Depth != Depth() || data.GetArraySize() != ArraySize() || data.Format != Format())
+        return true;
+    for (int32 arrayIndex = 0; arrayIndex < ArraySize(); arrayIndex++)
+    {
+        for (int32 mipLevel = 0; mipLevel < MipLevels(); mipLevel++)
+        {
+            TextureMipData* mip = data.GetData(arrayIndex, mipLevel);
+            UploadMipMapAsync(mip->Data, mipLevel, mip->RowPitch, mip->DepthPitch, copyData);
+        }
+    }
+    return false;
 }
 
 class TextureDownloadDataTask : public ThreadPoolTask
@@ -695,9 +738,10 @@ bool GPUTexture::DownloadData(TextureData& result)
         MISSING_CODE("support volume texture data downloading.");
     }
     PROFILE_CPU();
+    PROFILE_MEM(GraphicsTextures);
 
     // Use faster path for staging resources
-    if (IsStaging())
+    if (IsStaging()) // TODO: what about chips with unified memory? if rendering is not active then we can access GPU memory from CPU directly (eg. mobile, integrated GPUs and some consoles)
     {
         const auto arraySize = ArraySize();
         const auto mipLevels = MipLevels();
@@ -736,7 +780,11 @@ bool GPUTexture::DownloadData(TextureData& result)
         return false;
     }
 
+#if GPU_ENABLE_RESOURCE_NAMING
     const auto name = ToString();
+#else
+    const StringView name = TEXT("Texture");
+#endif
 
     // Ensure not running on main thread - we support DownloadData from textures only on a worker threads (Thread Pool Workers or Content Loaders)
     if (IsInMainThread())
@@ -777,6 +825,7 @@ Task* GPUTexture::DownloadDataAsync(TextureData& result)
         MISSING_CODE("support volume texture data downloading.");
     }
     PROFILE_CPU();
+    PROFILE_MEM(GraphicsTextures);
 
     // Use faster path for staging resources
     if (IsStaging())

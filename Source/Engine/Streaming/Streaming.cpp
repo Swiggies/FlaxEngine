@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Streaming.h"
 #include "StreamableResource.h"
@@ -7,6 +7,7 @@
 #include "Engine/Engine/Engine.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/Threading/TaskGraph.h"
 #include "Engine/Threading/Task.h"
@@ -55,14 +56,10 @@ Array<TextureGroup, InlinedAllocation<32>> Streaming::TextureGroups;
 
 void StreamingSettings::Apply()
 {
+    PROFILE_MEM(ContentStreaming);
     Streaming::TextureGroups = TextureGroups;
     SAFE_DELETE_GPU_RESOURCES(TextureGroupSamplers);
     TextureGroupSamplers.Resize(TextureGroups.Count(), false);
-}
-
-void StreamingSettings::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
-{
-    DESERIALIZE(TextureGroups);
 }
 
 StreamableResource::StreamableResource(StreamingGroup* group)
@@ -96,6 +93,7 @@ void StreamableResource::StartStreaming(bool isDynamic)
     _isDynamic = isDynamic;
     if (!_isStreaming)
     {
+        PROFILE_MEM(ContentStreaming);
         _isStreaming = true;
         ResourcesLock.Lock();
         Resources.Add(this);
@@ -206,6 +204,7 @@ void UpdateResource(StreamableResource* resource, double currentTime)
 
 bool StreamingService::Init()
 {
+    PROFILE_MEM(ContentStreaming);
     System = New<StreamingSystem>();
     Engine::UpdateGraph->AddSystem(System);
     return false;
@@ -222,6 +221,7 @@ void StreamingService::BeforeExit()
 void StreamingSystem::Job(int32 index)
 {
     PROFILE_CPU_NAMED("Streaming.Job");
+    PROFILE_MEM(ContentStreaming);
 
     // TODO: use streaming settings
     const double ResourceUpdatesInterval = 0.1;

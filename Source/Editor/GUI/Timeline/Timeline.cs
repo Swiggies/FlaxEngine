@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -833,6 +833,7 @@ namespace FlaxEditor.GUI.Timeline
             {
                 AutoFocus = false,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Pivot = Float2.Zero,
                 Offsets = Margin.Zero,
                 IsScrollable = true,
                 BottomMargin = 40.0f,
@@ -2147,10 +2148,9 @@ namespace FlaxEditor.GUI.Timeline
         /// </summary>
         public void ShowWholeTimeline()
         {
-            var viewWidth = Width;
-            var timelineWidth = Duration * UnitsPerSecond * Zoom + 8 * StartOffset;
-            _backgroundArea.ViewOffset = Float2.Zero;
-            Zoom = viewWidth / timelineWidth;
+            const float padding = 40f;
+            Zoom = (_backgroundArea.Width - padding * 2f) / (Duration * UnitsPerSecond);
+            _backgroundArea.ViewOffset = new Float2(-_leftEdge.X + padding, _backgroundArea.ViewOffset.Y);
         }
 
         /// <summary>

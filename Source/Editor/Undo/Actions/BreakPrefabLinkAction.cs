@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -33,9 +33,14 @@ namespace FlaxEditor.Actions
                     // Check if this object comes from another nested prefab (to break link only from the top-level prefab)
                     Item nested;
                     nested.ID = ID;
-                    Editor.GetPrefabNestedObject(ref PrefabID, ref PrefabObjectID, out nested.PrefabID, out nested.PrefabObjectID);
-                    if (nested.PrefabID != Guid.Empty && nested.PrefabObjectID != Guid.Empty)
+                    var prefab = FlaxEngine.Content.Load<Prefab>(PrefabID);
+                    if (prefab != null && 
+                        prefab.GetNestedObject(ref PrefabObjectID, out nested.PrefabID, out nested.PrefabObjectID) && 
+                        nested.PrefabID != Guid.Empty && 
+                        nested.PrefabObjectID != Guid.Empty)
+                    {
                         nestedPrefabLinks.Add(nested);
+                    }
                 }
             }
         }

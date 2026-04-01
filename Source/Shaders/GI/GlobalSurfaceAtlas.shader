@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 // Diffuse-only lighting
 #define LIGHTING_NO_SPECULAR 1
@@ -40,9 +40,6 @@ struct AtlasVertexOutput
 
 // Vertex shader for Global Surface Atlas rendering (custom vertex buffer to render per-tile)
 META_VS(true, FEATURE_LEVEL_SM5)
-META_VS_IN_ELEMENT(POSITION, 0, R16G16_FLOAT, 0, ALIGN, PER_VERTEX, 0, true)
-META_VS_IN_ELEMENT(TEXCOORD, 0, R16G16_FLOAT, 0, ALIGN, PER_VERTEX, 0, true)
-META_VS_IN_ELEMENT(TEXCOORD, 1, R32_UINT,  0, ALIGN, PER_VERTEX, 0, true)
 AtlasVertexOutput VS_Atlas(AtlasVertexInput input)
 {
 	AtlasVertexOutput output;
@@ -168,11 +165,19 @@ float4 PS_Lighting(AtlasVertexOutput input) : SV_Target
 		BRANCH
 		if (NoL > 0)
 		{
+#if RADIAL_LIGHT
+			// Shot a ray from light to the texel to see if there is any occluder
+			GlobalSDFTrace trace;
+			trace.Init(Light.Position, -L, bias, toLightDst);
+			GlobalSDFHit hit = RayTraceGlobalSDF(GlobalSDF, GlobalSDFTex, GlobalSDFMip, trace, 1.0f);
+			shadowMask = hit.IsHit() && hit.HitTime < toLightDst - bias * 3 ? LightShadowsStrength : 1;
+#else
 			// Shot a ray from texel into the light to see if there is any occluder
 			GlobalSDFTrace trace;
 			trace.Init(gBuffer.WorldPos + gBuffer.Normal * shadowBias, L, bias, toLightDst - bias);
 			GlobalSDFHit hit = RayTraceGlobalSDF(GlobalSDF, GlobalSDFTex, GlobalSDFMip, trace, 2.0f);
 			shadowMask = hit.IsHit() ? LightShadowsStrength : 1;
+#endif
 		}
 		else
 		{
@@ -237,7 +242,7 @@ void CS_CullObjects(uint3 DispatchThreadId : SV_DispatchThreadID, uint3 GroupId 
 		if (BoxIntersectsSphere(groupMin, groupMax, objectBounds.xyz, objectBounds.w))
 		{
             uint sharedIndex;
-            InterlockedAdd(SharedCulledObjectsCount, 1, sharedIndex);
+            InterlockedAdd(SharedCulledObjectsCount, 1u, sharedIndex);
             if (sharedIndex < GLOBAL_SURFACE_ATLAS_SHARED_CULL_SIZE)
                 SharedCulledObjects[sharedIndex] = objectAddress;
 		}
@@ -266,7 +271,7 @@ void CS_CullObjects(uint3 DispatchThreadId : SV_DispatchThreadID, uint3 GroupId 
 	// Allocate object data size in the buffer
 	uint objectsStart;
 	uint objectsSize = objectsCount + 1; // Include objects count before actual objects data
-	RWGlobalSurfaceAtlasCulledObjects.InterlockedAdd(0, objectsSize, objectsStart); // Counter at 0
+	RWGlobalSurfaceAtlasCulledObjects.InterlockedAdd(0u, objectsSize, objectsStart); // Counter at 0
 	if (objectsStart + objectsSize > CulledObjectsCapacity)
 	{
 		// Not enough space in the buffer
@@ -323,7 +328,6 @@ float4 PS_Debug(Quad_VS2PS input) : SV_Target
 	float3 viewRay = lerp(lerp(ViewFrustumWorldRays[3], ViewFrustumWorldRays[0], input.TexCoord.x), lerp(ViewFrustumWorldRays[2], ViewFrustumWorldRays[1], input.TexCoord.x), 1 - input.TexCoord.y).xyz;
 	viewRay = normalize(viewRay - ViewWorldPos);
 	trace.Init(ViewWorldPos, viewRay, ViewNearPlane, ViewFarPlane);
-	trace.NeedsHitNormal = true;
 	GlobalSDFHit hit = RayTraceGlobalSDF(GlobalSDF, GlobalSDFTex, GlobalSDFMip, trace);
 
     float3 color;
@@ -332,7 +336,6 @@ float4 PS_Debug(Quad_VS2PS input) : SV_Target
         // Sample Global Surface Atlas at the hit location
         float surfaceThreshold = GetGlobalSurfaceAtlasThreshold(GlobalSDF, hit);
         color = SampleGlobalSurfaceAtlas(GlobalSurfaceAtlas, GlobalSurfaceAtlasChunks, GlobalSurfaceAtlasCulledObjects, GlobalSurfaceAtlasObjects, GlobalSurfaceAtlasDepth, GlobalSurfaceAtlasTex, hit.GetHitPosition(trace), -viewRay, surfaceThreshold).rgb;
-	    //color = hit.HitNormal * 0.5f + 0.5f;
     }
     else
     {

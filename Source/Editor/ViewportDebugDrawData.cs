@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -85,6 +85,18 @@ namespace FlaxEditor
             {
                 for (int i = 0; i < vertices.Length; i++)
                     _highlightTriangles.Add(vertices[i]);
+            }
+        }
+
+        /// <summary>
+        /// Draws the collected actors via <see cref="DebugDraw"/>.
+        /// </summary>
+        /// <param name="drawScenes">True if draw all loaded scenes too, otherwise will draw only provided actors.</param>
+        public unsafe void DrawActors(bool drawScenes = false)
+        {
+            fixed (IntPtr* actors = ActorsPtrs)
+            {
+                DebugDraw.DrawActors(new IntPtr(actors), _actors.Count, drawScenes);
             }
         }
 

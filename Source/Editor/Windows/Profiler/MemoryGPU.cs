@@ -1,5 +1,6 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
+#if USE_PROFILER
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -34,6 +35,7 @@ namespace FlaxEditor.Windows.Profiler
         private Dictionary<string, Guid> _assetPathToId;
         private Dictionary<Guid, Resource> _resourceCache;
         private StringBuilder _stringBuilder;
+        private GPUResource[] _gpuResourcesCached;
 
         public MemoryGPU()
         : base("GPU Memory")
@@ -68,6 +70,7 @@ namespace FlaxEditor.Windows.Profiler
             {
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
                 Offsets = Margin.Zero,
+                Pivot = Float2.Zero,
                 IsScrollable = true,
                 Parent = panel,
             };
@@ -136,13 +139,15 @@ namespace FlaxEditor.Windows.Profiler
 
             // Capture current GPU resources usage info
             var contentDatabase = Editor.Instance.ContentDatabase;
-            var gpuResources = GPUDevice.Instance.Resources;
-            var resources = new Resource[gpuResources.Length];
+            GPUDevice.Instance.GetResources(ref _gpuResourcesCached, out var count);
+            var resources = new Resource[count];
             var sb = _stringBuilder;
-            for (int i = 0; i < resources.Length; i++)
+            for (int i = 0; i < count; i++)
             {
-                var gpuResource = gpuResources[i];
+                var gpuResource = _gpuResourcesCached[i];
                 ref var resource = ref resources[i];
+                if (!gpuResource)
+                    continue;
 
                 // Try to reuse cached resource info
                 var gpuResourceId = gpuResource.ID;
@@ -217,6 +222,7 @@ namespace FlaxEditor.Windows.Profiler
             if (_resources == null)
                 _resources = new SamplesBuffer<Resource[]>();
             _resources.Add(resources);
+            Array.Clear(_gpuResourcesCached);
         }
 
         /// <inheritdoc />
@@ -253,6 +259,7 @@ namespace FlaxEditor.Windows.Profiler
             _assetPathToId?.Clear();
             _tableRowsCache?.Clear();
             _stringBuilder?.Clear();
+            _gpuResourcesCached = null;
 
             base.OnDestroy();
         }
@@ -289,13 +296,15 @@ namespace FlaxEditor.Windows.Profiler
             var resources = _resources.Get(_memoryUsageChart.SelectedSampleIndex);
             if (resources == null || resources.Length == 0)
                 return;
-            var resourcesOrdered = resources.OrderByDescending(x => x.MemoryUsage);
+            var resourcesOrdered = resources.OrderByDescending(x => x?.MemoryUsage ?? 0);
 
             // Add rows
             var rowColor2 = Style.Current.Background * 1.4f;
             int rowIndex = 0;
             foreach (var e in resourcesOrdered)
             {
+                if (e == null)
+                    continue;
                 ClickableRow row;
                 if (_tableRowsCache.Count != 0)
                 {
@@ -326,7 +335,7 @@ namespace FlaxEditor.Windows.Profiler
 
                 // Add row to the table
                 row.Width = _table.Width;
-                row.BackgroundColor = rowIndex % 2 == 0 ? rowColor2 : Color.Transparent;
+                row.BackgroundColor = rowIndex % 2 == 1 ? rowColor2 : Color.Transparent;
                 row.Parent = _table;
                 rowIndex++;
             }
@@ -340,3 +349,4 @@ namespace FlaxEditor.Windows.Profiler
         }
     }
 }
+#endif

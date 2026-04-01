@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -233,6 +233,8 @@ namespace FlaxEditor.Surface.Archetypes
         public BlendPointsEditor(Animation.MultiBlend node, bool is2D, float x, float y, float width, float height)
         : base(x, y, width, height)
         {
+            AutoFocus = true;
+
             _node = node;
             _is2D = is2D;
         }
@@ -570,7 +572,7 @@ namespace FlaxEditor.Surface.Archetypes
                 var icon = Editor.Instance.Icons.VisjectBoxOpen32;
                 var size = BlendPoint.DefaultSize * _debugScale;
                 var debugPos = BlendSpacePosToBlendPointPos(_debugPos);
-                var debugRect = new Rectangle(debugPos + new Float2(size * -0.5f) + size * 0.5f, new Float2(size));
+                var debugRect = new Rectangle(debugPos + new Float2(size * -0.5f), new Float2(size));
                 var outline = Color.Black; // Shadow
                 Render2D.DrawSprite(icon, debugRect.MakeExpanded(2.0f), outline);
                 Render2D.DrawSprite(icon, debugRect, style.ProgressNormal);
@@ -920,11 +922,38 @@ namespace FlaxEditor.Surface.Archetypes
             }
 
             /// <inheritdoc />
+            public override void SetValuesPaste(object[] values)
+            {
+                // Fix Guids pasted as string
+                // TODO: let copy/paste system in Visject handle value types to be strongly typed
+                for (int i = 5; i < values.Length; i += 2)
+                    values[i] = Guid.Parse((string)values[i]);
+
+                base.SetValuesPaste(values);
+            }
+
+            /// <inheritdoc />
             public override void OnValuesChanged()
             {
                 base.OnValuesChanged();
 
                 UpdateUI();
+            }
+
+            /// <inheritdoc />
+            public override bool Search(string text)
+            {
+                FlaxEngine.Json.JsonSerializer.ParseID(text, out var id);
+                if (id != Guid.Empty)
+                {
+                    for (int i = 5; i < Values.Length; i += 2)
+                    {
+                        if ((Guid)Values[i] == id)
+                            return true;
+                    }
+                }
+
+                return base.Search(text);
             }
         }
 

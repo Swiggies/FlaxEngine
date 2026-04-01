@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ImportAudio.h"
 
@@ -18,6 +18,7 @@
 #include "Engine/Tools/AudioTool/OggVorbisDecoder.h"
 #include "Engine/Tools/AudioTool/OggVorbisEncoder.h"
 #include "Engine/Serialization/JsonWriters.h"
+#include "Engine/Platform/MessageBox.h"
 
 bool ImportAudio::TryGetImportOptions(const StringView& path, Options& options)
 {
@@ -118,6 +119,7 @@ CreateAssetResult ImportAudio::Import(CreateAssetContext& context, AudioDecoder&
     }
 #else
 #define HANDLE_VORBIS(chunkIndex, dataPtr, dataSize) \
+    MessageBox::Show(TEXT("Vorbis format is not supported."), TEXT("Import warning"), MessageBoxButtons::OK, MessageBoxIcon::Warning);
 	LOG(Warning, "Vorbis format is not supported."); \
 	return CreateAssetResult::Error;
 #endif
@@ -140,6 +142,7 @@ CreateAssetResult ImportAudio::Import(CreateAssetContext& context, AudioDecoder&
     break; \
     default: \
     { \
+        MessageBox::Show(TEXT("Unknown audio format."), TEXT("Import warning"), MessageBoxButtons::OK, MessageBoxIcon::Warning); \
         LOG(Warning, "Unknown audio format."); \
         return CreateAssetResult::Error; \
     } \
@@ -159,19 +162,19 @@ CreateAssetResult ImportAudio::Import(CreateAssetContext& context, AudioDecoder&
     else
     {
         // Split audio data into a several chunks (uniform data spread)
-        const int32 minChunkSize = 1 * 1024 * 1024; // 1 MB
-        const int32 dataAlignment = info.NumChannels * bytesPerSample; // Ensure to never split samples in-between (eg. 24-bit that uses 3 bytes)
-        const int32 chunkSize = Math::Max<int32>(minChunkSize, (int32)Math::AlignUp<uint32>(bufferSize / ASSET_FILE_DATA_CHUNKS, dataAlignment));
-        const int32 chunksCount = Math::CeilToInt((float)bufferSize / chunkSize);
+        const uint32 minChunkSize = 1 * 1024 * 1024; // 1 MB
+        const uint32 dataAlignment = info.NumChannels * bytesPerSample * ASSET_FILE_DATA_CHUNKS; // Ensure to never split samples in-between (eg. 24-bit that uses 3 bytes)
+        const uint32 chunkSize = Math::AlignUp(Math::Max(minChunkSize, bufferSize / ASSET_FILE_DATA_CHUNKS), dataAlignment);
+        const int32 chunksCount = Math::CeilToInt((float)bufferSize / (float)chunkSize);
         ASSERT(chunksCount > 0 && chunksCount <= ASSET_FILE_DATA_CHUNKS);
 
         byte* ptr = sampleBuffer.Get();
-        int32 size = bufferSize;
+        uint32 size = bufferSize;
         for (int32 chunkIndex = 0; chunkIndex < chunksCount; chunkIndex++)
         {
             if (context.AllocateChunk(chunkIndex))
                 return CreateAssetResult::CannotAllocateChunk;
-            const int32 t = Math::Min(size, chunkSize);
+            const uint32 t = Math::Min(size, chunkSize);
 
             WRITE_DATA(chunkIndex, ptr, t);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_TEXTURE_TOOL && COMPILE_WITH_DIRECTXTEX
 
@@ -13,6 +13,7 @@
 #include "Engine/Graphics/Textures/TextureData.h"
 #include "Engine/Graphics/PixelFormatExtensions.h"
 #if USE_EDITOR
+#include "Engine/Platform/MessageBox.h"
 #include "Engine/Graphics/GPUDevice.h"
 #endif
 #include "Engine/Utilities/AnsiPathTempFile.h"
@@ -358,6 +359,9 @@ HRESULT LoadFromEXRFile(const StringView& path, DirectX::ScratchImage& image)
     free(pixels);
     return result;
 #else
+#if USE_EDITOR
+    MessageBox::Show(TEXT("EXR format is not supported."), TEXT("Import warning"), MessageBoxButtons::OK, MessageBoxIcon::Warning);
+#endif
     LOG(Warning, "EXR format is not supported.");
     return E_FAIL;
 #endif
@@ -703,6 +707,8 @@ bool TextureTool::ImportTextureDirectXTex(ImageType type, const StringView& path
     PixelFormat targetFormat = TextureTool::ToPixelFormat(options.Type, width, height, options.Compress);
     if (options.sRGB)
         targetFormat = PixelFormatExtensions::TosRGB(targetFormat);
+    if (options.InternalFormat != PixelFormat::Unknown)
+        targetFormat = options.InternalFormat;
     DXGI_FORMAT targetDxgiFormat = ToDxgiFormat(targetFormat);
 
     // Check mip levels
@@ -715,6 +721,10 @@ bool TextureTool::ImportTextureDirectXTex(ImageType type, const StringView& path
     {
         errorMsg = String::Format(TEXT("Imported texture has not full mip chain, loaded mips count: {0}, expected: {1}"), sourceMipLevels, mipLevels);
         return true;
+    }
+    if (options.GenerateMipMaps && !isPowerOfTwo)
+    {
+        LOG(Warning, "Cannot generate mip maps for texture '{}' that size is not power of two. Use Resize or Max Size to change dimensions.", StringUtils::GetFileName(path), width, height);
     }
 
     // Allocate memory for texture data

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -14,7 +14,7 @@
 #include "Engine/Content/AssetsContainer.h"
 #include "Engine/Animations/Curve.h"
 
-#define SHADER_GRAPH_MAX_CALL_STACK 100
+#define SHADER_GRAPH_MAX_CALL_STACK 50
 
 enum class MaterialSceneTextures;
 template<class BoxType>
@@ -93,22 +93,6 @@ public:
     ShaderGraphParameter()
         : GraphParameter(SpawnParams(Guid::New(), TypeInitializer))
     {
-    }
-
-    ShaderGraphParameter(const ShaderGraphParameter& other)
-        : ShaderGraphParameter()
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-    }
-
-    ShaderGraphParameter& operator=(const ShaderGraphParameter& other)
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-        return *this;
     }
 };
 
@@ -270,6 +254,8 @@ protected:
     SerializedMaterialParam findOrAddSceneTexture(MaterialSceneTextures type);
     SerializedMaterialParam& findOrAddTextureGroupSampler(int32 index);
     SerializedMaterialParam& findOrAddGlobalSDF();
+
+    bool SanitizeMathValue(Value& value, Node* node, Box* box, Value* resultOnInvalid = nullptr);
 
     static String getLocalName(int32 index);
     static String getParamName(int32 index);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_MAC && !USE_EDITOR
 
@@ -9,8 +9,6 @@
 
 void MacGame::InitMainWindowSettings(CreateWindowSettings& settings)
 {
-    // TODO: restore window size and fullscreen mode from the cached local settings saved after previous session
-
     const auto platformSettings = MacPlatformSettings::Get();
     auto windowMode = platformSettings->WindowMode;
 
@@ -41,7 +39,6 @@ void MacGame::InitMainWindowSettings(CreateWindowSettings& settings)
     settings.HasBorder = windowMode == GameWindowMode::Windowed || windowMode == GameWindowMode::Fullscreen;
     settings.AllowMaximize = true;
     settings.AllowMinimize = platformSettings->ResizableWindow;
-
 }
 
 #endif

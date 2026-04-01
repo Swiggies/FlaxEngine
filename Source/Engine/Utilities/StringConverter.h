@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -132,6 +132,8 @@ public:
         this->_static = text;
     }
 };
+
+#define TO_UTF16(str) StringAsUTF16<>(str).Get()
 
 template<typename CharType = Char>
 class StringAsTerminated

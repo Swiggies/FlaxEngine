@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 // -----------------------------------------------------------------------------
 // Original code from SharpDX project. https://github.com/sharpdx/SharpDX/
@@ -60,7 +60,7 @@ namespace FlaxEngine
 #if FLAX_EDITOR
     [System.ComponentModel.TypeConverter(typeof(TypeConverters.Float2Converter))]
 #endif
-    partial struct Float2 : IEquatable<Float2>, IFormattable
+    partial struct Float2 : IEquatable<Float2>, IFormattable, Json.ICustomValueEquals
     {
         private static readonly string _formatString = "X:{0:F2} Y:{1:F2}";
 
@@ -1540,7 +1540,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(Float2 left, Float2 right)
         {
-            return Mathf.NearEqual(left.X, right.X) && Mathf.NearEqual(left.Y, right.Y);
+            return left.Equals(ref right);
         }
 
         /// <summary>
@@ -1552,7 +1552,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator !=(Float2 left, Float2 right)
         {
-            return !Mathf.NearEqual(left.X, right.X) || !Mathf.NearEqual(left.Y, right.Y);
+            return !left.Equals(ref right);
         }
 
         /// <summary>
@@ -1650,6 +1650,13 @@ namespace FlaxEngine
             }
         }
 
+        /// <inheritdoc />
+        public bool ValueEquals(object other)
+        {
+            var o = (Float2)other;
+            return Equals(ref o);
+        }
+
         /// <summary>
         /// Determines whether the specified <see cref="Float2" /> is equal to this instance.
         /// </summary>
@@ -1658,7 +1665,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ref Float2 other)
         {
-            return Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y);
+            return X == other.X && Y == other.Y;
         }
 
         /// <summary>
@@ -1666,7 +1673,7 @@ namespace FlaxEngine
         /// </summary>
         public static bool Equals(ref Float2 a, ref Float2 b)
         {
-            return Mathf.NearEqual(a.X, b.X) && Mathf.NearEqual(a.Y, b.Y);
+            return a.Equals(ref b);
         }
 
         /// <summary>
@@ -1677,7 +1684,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(Float2 other)
         {
-            return Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y);
+            return Equals(ref other);
         }
 
         /// <summary>
@@ -1687,7 +1694,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public override bool Equals(object value)
         {
-            return value is Float2 other && Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y);
+            return value is Float2 other && Equals(ref other);
         }
     }
 }

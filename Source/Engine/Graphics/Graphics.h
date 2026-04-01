@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -9,7 +9,7 @@
 /// <summary>
 /// Graphics device manager that creates, manages and releases graphics device and related objects.
 /// </summary>
-API_CLASS(Static) class FLAXENGINE_API Graphics
+API_CLASS(Static, Attributes="DebugCommand") class FLAXENGINE_API Graphics
 {
     DECLARE_SCRIPTING_TYPE_NO_SPAWN(Graphics);
 public:
@@ -55,9 +55,8 @@ public:
 
     /// <summary>
     /// Enables cascades splits blending for directional light shadows.
-    /// [Deprecated in v1.9]
     /// </summary>
-    API_FIELD() DEPRECATED() static bool AllowCSMBlending;
+    API_FIELD() static bool AllowCSMBlending;
 
     /// <summary>
     /// The Global SDF quality. Controls the volume texture resolution and amount of cascades to use.
@@ -84,6 +83,25 @@ public:
     /// Debug utility to toggle graphics workloads amortization over several frames by systems such as shadows mapping, global illumination or surface atlas. Can be used to test performance in the worst-case scenario (eg. camera-cut).
     /// </summary>
     API_FIELD() static bool SpreadWorkload;
+
+public:
+    // Shadows rendering configuration.
+    API_CLASS(Static, Attributes="DebugCommand") class FLAXENGINE_API Shadows
+    {
+        DECLARE_SCRIPTING_TYPE_MINIMAL(Shadows);
+
+        // The minimum size in pixels of objects to cast shadows. Improves performance by skipping too small objects (eg. sub-pixel) from rendering into shadow maps.
+        API_FIELD() static float MinObjectPixelSize;
+    };
+
+    // Post Processing effects rendering configuration.
+    API_CLASS(Static, Attributes="DebugCommand") class FLAXENGINE_API PostProcessing
+    {
+        DECLARE_SCRIPTING_TYPE_MINIMAL(PostProcessing);
+
+        // Toggles between 2D and 3D LUT texture for Color Grading.
+        API_FIELD() static bool ColorGradingVolumeLUT;
+    };
 
 public:
     /// <summary>

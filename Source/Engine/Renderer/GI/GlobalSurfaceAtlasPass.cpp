@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "GlobalSurfaceAtlasPass.h"
 #include "DynamicDiffuseGlobalIllumination.h"
@@ -15,11 +15,13 @@
 #include "Engine/Content/Content.h"
 #include "Engine/Graphics/GPUContext.h"
 #include "Engine/Graphics/GPUDevice.h"
+#include "Engine/Graphics/GPUPass.h"
 #include "Engine/Graphics/RenderTask.h"
 #include "Engine/Graphics/RenderBuffers.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Graphics/Async/GPUSyncPoint.h"
 #include "Engine/Graphics/Shaders/GPUShader.h"
+#include "Engine/Graphics/Shaders/GPUVertexLayout.h"
 #include "Engine/Level/Actors/StaticModel.h"
 #include "Engine/Level/Scene/SceneRendering.h"
 #include "Engine/Renderer/ColorGradingPass.h"
@@ -426,6 +428,7 @@ public:
             // Write to objects buffer (this must match unpacking logic in HLSL)
             uint32 objectAddress = ObjectsBuffer.Data.Count() / sizeof(Float4);
             ObjectsListBuffer.Write(objectAddress);
+            ObjectsBuffer.Data.EnsureCapacity(ObjectsBuffer.Data.Count() + sizeof(Float4) * (GLOBAL_SURFACE_ATLAS_OBJECT_DATA_STRIDE + 6 * GLOBAL_SURFACE_ATLAS_TILE_DATA_STRIDE));
             auto* objectData = ObjectsBuffer.WriteReserve<Float4>(GLOBAL_SURFACE_ATLAS_OBJECT_DATA_STRIDE);
             objectData[0] = Float4(object.Position, object.Radius);
             objectData[1] = Float4::Zero;
@@ -509,6 +512,7 @@ public:
             {
                 // Dirty object to redraw
                 object->LastFrameUpdated = 0;
+                return;
             }
             GlobalSurfaceAtlasLight* light = Lights.TryGet(a->GetID());
             if (light)
@@ -549,9 +553,6 @@ bool GlobalSurfaceAtlasPass::Init()
     // Check platform support
     const auto device = GPUDevice::Instance;
     _supported = device->GetFeatureLevel() >= FeatureLevel::SM5 && device->Limits.HasCompute && device->Limits.HasTypedUAVLoad;
-#if PLATFORM_APPLE_FAMILY
-    _supported = false; // Vulkan over Metal has some issues in complex scenes with DDGI
-#endif
     return false;
 }
 
@@ -767,7 +768,14 @@ bool GlobalSurfaceAtlasPass::Render(RenderContext& renderContext, GPUContext* co
     for (SceneRendering* scene : renderContext.List->Scenes)
         surfaceAtlasData.ListenSceneRendering(scene);
     if (!_vertexBuffer)
-        _vertexBuffer = New<DynamicVertexBuffer>(0u, (uint32)sizeof(AtlasTileVertex), TEXT("GlobalSurfaceAtlas.VertexBuffer"));
+    {
+        auto layout = GPUVertexLayout::Get({
+            { VertexElement::Types::Position, 0, 0, 0, PixelFormat::R16G16_Float },
+            { VertexElement::Types::TexCoord0, 0, 0, 0, PixelFormat::R16G16_Float },
+            { VertexElement::Types::TexCoord1, 0, 0, 0, PixelFormat::R32_UInt },
+        });
+        _vertexBuffer = New<DynamicVertexBuffer>(0u, (uint32)sizeof(AtlasTileVertex), TEXT("GlobalSurfaceAtlas.VertexBuffer"), layout);
+    }
 
     // Ensure that async objects drawing ended
     _surfaceAtlasData = &surfaceAtlasData;
@@ -931,6 +939,7 @@ bool GlobalSurfaceAtlasPass::Render(RenderContext& renderContext, GPUContext* co
     // Send objects data to the GPU
     {
         PROFILE_GPU_CPU_NAMED("Update Objects");
+        GPUMemoryPass pass(context);
         surfaceAtlasData.ObjectsBuffer.Flush(context);
         surfaceAtlasData.ObjectsListBuffer.Flush(context);
     }
@@ -968,7 +977,7 @@ bool GlobalSurfaceAtlasPass::Render(RenderContext& renderContext, GPUContext* co
         {
             // Get the last counter value (accept staging readback delay or not available data yet)
             notReady = true;
-            auto data = (uint32*)_culledObjectsSizeBuffer->Map(GPUResourceMapMode::Read);
+            auto data = (uint32*)_culledObjectsSizeBuffer->Map(GPUResourceMapMode::Read | GPUResourceMapMode::NoWait);
             if (data)
             {
                 uint32 counter = data[surfaceAtlasData.CulledObjectsCounterIndex];
@@ -1439,7 +1448,6 @@ void GlobalSurfaceAtlasPass::RenderDebug(RenderContext& renderContext, GPUContex
         auto colorGradingLUT = ColorGradingPass::Instance()->RenderLUT(renderContext);
         EyeAdaptationPass::Instance()->Render(renderContext, tempBuffer);
         PostProcessingPass::Instance()->Render(renderContext, tempBuffer, output, colorGradingLUT);
-        RenderTargetPool::Release(colorGradingLUT);
         RenderTargetPool::Release(tempBuffer);
         context->ResetRenderTarget();
 

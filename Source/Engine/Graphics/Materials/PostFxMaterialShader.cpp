@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "PostFxMaterialShader.h"
 #include "MaterialParams.h"
@@ -21,6 +21,8 @@ PACK_STRUCT(struct PostFxMaterialShaderData {
     Float4 ScreenSize;
     Float4 TemporalAAJitter;
     Matrix InverseViewProjectionMatrix;
+    Float3 ViewPadding0;
+    float ScaledTimeParam;
     });
 
 void PostFxMaterialShader::Bind(BindParameters& params)
@@ -31,7 +33,7 @@ void PostFxMaterialShader::Bind(BindParameters& params)
     Span<byte> cb(_cbData.Get(), _cbData.Count());
     ASSERT_LOW_LAYER(cb.Length() >= sizeof(PostFxMaterialShaderData));
     auto materialData = reinterpret_cast<PostFxMaterialShaderData*>(cb.Get());
-    cb = Span<byte>(cb.Get() + sizeof(PostFxMaterialShaderData), cb.Length() - sizeof(PostFxMaterialShaderData));
+    cb = cb.Slice(sizeof(PostFxMaterialShaderData));
     int32 srv = 0;
 
     // Setup parameters
@@ -51,7 +53,8 @@ void PostFxMaterialShader::Bind(BindParameters& params)
         materialData->ViewPos = view.Position;
         materialData->ViewFar = view.Far;
         materialData->ViewDir = view.Direction;
-        materialData->TimeParam = params.TimeParam;
+        materialData->TimeParam = params.Time;
+        materialData->ScaledTimeParam = params.ScaledTime;
         materialData->ViewInfo = view.ViewInfo;
         materialData->ScreenSize = view.ScreenSize;
         materialData->TemporalAAJitter = view.TemporalAAJitter;

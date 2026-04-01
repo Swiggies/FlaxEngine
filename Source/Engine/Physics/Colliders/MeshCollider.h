@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -31,15 +31,16 @@ public:
     bool CanAttach(RigidBody* rigidBody) const override;
     bool CanBeTrigger() const override;
 #if USE_EDITOR
+    void OnDebugDrawSelf() override;
     void OnDebugDrawSelected() override;
 #endif
     bool IntersectsItself(const Ray& ray, Real& distance, Vector3& normal) override;
 
 protected:
     // [Collider]
-#if USE_EDITOR
-    void DrawPhysicsDebug(RenderView& view) override;
-#endif
+    ImplementPhysicsDebug;
     void UpdateBounds() override;
     void GetGeometry(CollisionShape& collision) override;
+    void OnAssetChanged(Asset* asset, void* caller) override;
+    void OnAssetLoaded(Asset* asset, void* caller) override;
 };

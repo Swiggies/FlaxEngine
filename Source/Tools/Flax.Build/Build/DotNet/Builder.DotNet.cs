@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -109,6 +109,7 @@ namespace Flax.Build
                         // Merge module into target environment
                         buildData.TargetOptions.LinkEnv.InputFiles.AddRange(moduleOptions.OutputFiles);
                         buildData.TargetOptions.DependencyFiles.AddRange(moduleOptions.DependencyFiles);
+                        buildData.TargetOptions.NugetPackageReferences.AddRange(moduleOptions.NugetPackageReferences);
                         buildData.TargetOptions.OptionalDependencyFiles.AddRange(moduleOptions.OptionalDependencyFiles);
                         buildData.TargetOptions.Libraries.AddRange(moduleOptions.Libraries);
                         buildData.TargetOptions.DelayLoadLibraries.AddRange(moduleOptions.DelayLoadLibraries);
@@ -134,14 +135,7 @@ namespace Flax.Build
             // Deploy files
             if (!target.IsPreBuilt)
             {
-                using (new ProfileEventScope("DeployFiles"))
-                {
-                    foreach (var srcFile in targetBuildOptions.OptionalDependencyFiles.Where(File.Exists).Union(targetBuildOptions.DependencyFiles))
-                    {
-                        var dstFile = Path.Combine(outputPath, Path.GetFileName(srcFile));
-                        graph.AddCopyFile(dstFile, srcFile);
-                    }
-                }
+                DeployFiles(graph, target, targetBuildOptions, outputPath);
             }
 
             using (new ProfileEventScope("PostBuild"))
@@ -251,6 +245,8 @@ namespace Flax.Build
             args.Add(string.Format("/nullable:{0}", buildOptions.ScriptingAPI.CSharpNullableReferences.ToString().ToLowerInvariant()));
             if (buildOptions.ScriptingAPI.CSharpNullableReferences == CSharpNullableReferences.Disable)
                 args.Add("-nowarn:8632"); // The annotation for nullable reference types should only be used in code within a '#nullable' annotations context.
+            if (buildOptions.Configuration != TargetConfiguration.Release)
+                args.Add("-nowarn:1701"); // Assuming assembly reference 'XXX, Version=8.0.0.0' used by 'Y' matches identity 'X, Version=9.0.0.0' of 'X', you may need to supply runtime policy
 #else
             args.Add("/langversion:7.3");
 #endif
@@ -283,6 +279,18 @@ namespace Flax.Build
                 args.Add(string.Format("/reference:\"{0}{1}.dll\"", referenceAssemblies, reference));
             foreach (var reference in fileReferences)
                 args.Add(string.Format("/reference:\"{0}\"", reference));
+
+            // Reference Nuget package
+            if (buildData.TargetOptions.NugetPackageReferences.Any())
+            {
+                var nugetPath = Utilities.GetNugetPackagesPath();
+                foreach (var reference in buildOptions.NugetPackageReferences)
+                {
+                    var path = reference.GetLibPath(nugetPath);
+                    args.Add(string.Format("/reference:\"{0}\"", path));
+                }
+            }
+
 #if USE_NETCORE
             foreach (var systemAnalyzer in buildOptions.ScriptingAPI.SystemAnalyzers)
                 args.Add(string.Format("/analyzer:\"{0}{1}.dll\"", referenceAnalyzers, systemAnalyzer));

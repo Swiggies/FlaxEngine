@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -259,7 +259,7 @@ public:
     API_FUNCTION(Internal) static Array<VisualScriptLocal> GetVisualScriptLocals();
     API_FUNCTION(Internal) static bool EvaluateVisualScriptLocal(VisualScript* script, API_PARAM(Ref) VisualScriptLocal& local);
     API_FUNCTION(Internal) static void WipeOutLeftoverSceneObjects();
-    API_FUNCTION(Internal) static void GetPrefabNestedObject(API_PARAM(Ref) const Guid& prefabId, API_PARAM(Ref) const Guid& prefabObjectId, API_PARAM(Out) Guid& outPrefabId, API_PARAM(Out) Guid& outPrefabObjectId);
+    API_FUNCTION(Internal) static Array<Window*> GetWindows();
 
 private:
     void OnEditorAssemblyLoaded(MAssembly* assembly);

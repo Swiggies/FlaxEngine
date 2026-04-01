@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "BinaryAssetFactory.h"
 #include "../BinaryAsset.h"
@@ -145,6 +145,10 @@ bool BinaryAssetFactoryBase::UpgradeAsset(const AssetInfo& info, FlaxStorage* st
             context.Input.Header.DeleteChunks();
         context.Input = context.Output;
     } while (upgrader->ShouldUpgrade(context.Input.SerializedVersion));
+
+    // Prevent other threads from loading the storage when it is upgrading
+    // It works because CriticalSection allows recursion
+    ScopeLock upgradeLock(storage->_loadLocker);
 
     // Release storage internal data (should also close file handles)
     {

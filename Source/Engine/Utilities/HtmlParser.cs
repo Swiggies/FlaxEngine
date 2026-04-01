@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 // Parsing HTML Tags in C# by Jonathan Wood (4 Jul 2012)
 // https://www.codeproject.com/Articles/57176/Parsing-HTML-Tags-in-C
@@ -134,6 +134,10 @@ namespace FlaxEngine.Utilities
                     if (isLeadingSlash)
                         Move();
 
+                    // Dont process if wrong slash is used.
+                    if (c =='\\')
+                        return false;
+
                     // Parse tag
                     bool result = ParseTag(ref tag, name);
 
@@ -177,6 +181,8 @@ namespace FlaxEngine.Utilities
             // Get name of this tag
             int start = _pos;
             string s = ParseTagName();
+            if (s == string.Empty)
+                return false;
 
             // Special handling
             bool doctype = _scriptBegin = false;
@@ -204,6 +210,10 @@ namespace FlaxEngine.Utilities
             SkipWhitespace();
             while (Peek() != '>')
             {
+                // Return false if start of new html tag is detected.
+                if (Peek() == '<')
+                    return false;
+                
                 if (Peek() == '/')
                 {
                     // Handle trailing forward slash

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "BoxBrush.h"
 #include "Engine/Core/Math/Matrix.h"
@@ -65,7 +65,7 @@ void BoxBrush::SetMode(BrushMode value)
 
 void BoxBrush::SetCenter(const Vector3& value)
 {
-    if (Vector3::NearEqual(value, _center))
+    if (value == _center)
         return;
 
     _center = value;
@@ -77,7 +77,7 @@ void BoxBrush::SetCenter(const Vector3& value)
 
 void BoxBrush::SetSize(const Vector3& value)
 {
-    if (Vector3::NearEqual(value, _size))
+    if (value == _size)
         return;
 
     _size = value;

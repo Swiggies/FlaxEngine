@@ -1,11 +1,13 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Scene.h"
 #include "SceneAsset.h"
 #include "Engine/Level/Level.h"
 #include "Engine/Content/AssetInfo.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Content/Factories/JsonAssetFactory.h"
+#include "Engine/Foliage/Foliage.h"
 #include "Engine/Physics/Colliders/MeshCollider.h"
 #include "Engine/Level/Actors/StaticModel.h"
 #include "Engine/Level/ActorsCache.h"
@@ -14,6 +16,7 @@
 #include "Engine/Navigation/NavMesh.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 #include "Engine/Serialization/Serialization.h"
+#include "Engine/Terrain/Terrain.h"
 #if USE_EDITOR
 #include "Engine/Engine/Globals.h"
 #endif
@@ -97,6 +100,19 @@ void Scene::SetLightmapSettings(const LightmapSettings& value)
 void Scene::ClearLightmaps()
 {
     LightmapsData.ClearLightmaps();
+
+    // Unlink any actors from lightmap
+    Function<bool(Actor*)> function = [this](Actor* actor)
+    {
+        if (auto* staticModel = Cast<StaticModel>(actor))
+            staticModel->RemoveLightmap();
+        else if (auto* terrain = Cast<Terrain>(actor))
+            terrain->RemoveLightmap();
+        else if (auto* foliage = Cast<Foliage>(actor))
+            foliage->RemoveLightmap();
+        return true;
+    };
+    TreeExecute(function);
 }
 
 void Scene::BuildCSG(float timeoutMs)
@@ -306,6 +322,7 @@ void Scene::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
         if (e != stream.MemberEnd())
         {
             // Upgrade from old single hidden navmesh data into NavMesh actors on a scene
+            MARK_CONTENT_DEPRECATED();
             AssetReference<RawDataAsset> dataAsset;
             Serialization::Deserialize(e->value, dataAsset, modifier);
             const auto settings = NavigationSettings::Get();
@@ -372,11 +389,14 @@ void Scene::BeginPlay(SceneBeginData* data)
         if (model == nullptr)
             CreateCsgModel();
     }
+
+    Ticking.SetTicking(true);
 }
 
 void Scene::EndPlay()
 {
     // Improve scene cleanup performance by removing all data from scene rendering and ticking containers
+    Ticking.SetTicking(false);
     Ticking.Clear();
     Rendering.Clear();
     Navigation.Clear();

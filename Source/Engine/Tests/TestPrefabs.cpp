@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Engine/Content/Content.h"
 #include "Engine/Content/AssetReference.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/ScopeExit.h"
 #include "Engine/Level/Actor.h"
 #include "Engine/Level/Actors/EmptyActor.h"
 #include "Engine/Level/Actors/DirectionalLight.h"
@@ -27,6 +28,7 @@ TEST_CASE("Prefabs")
         // Create Prefab B with two children attached to the root
         AssetReference<Prefab> prefabB = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabB);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabB); };
         Guid id;
         Guid::Parse("665bb01c49a3370f14a023b5395de261", id);
         prefabB->ChangeID(id);
@@ -55,6 +57,7 @@ TEST_CASE("Prefabs")
         // Create Prefab A with nested Prefab B attached to the root
         AssetReference<Prefab> prefabA = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabA);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabA); };
         Guid::Parse("02524a044184af56b6c664a0f98bd761", id);
         prefabA->ChangeID(id);
         auto prefabAInit = prefabA->Init(Prefab::TypeName,
@@ -123,8 +126,6 @@ TEST_CASE("Prefabs")
         // Cleanup
         instanceA->DeleteObject();
         instanceB->DeleteObject();
-        Content::DeleteAsset(prefabA);
-        Content::DeleteAsset(prefabB);
     }
     SECTION("Test Adding Object in Nested Prefab")
     {
@@ -133,6 +134,7 @@ TEST_CASE("Prefabs")
         // Create Prefab B with just root object
         AssetReference<Prefab> prefabB = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabB);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabB); };
         Guid id;
         Guid::Parse("25dbe4b0416be0777a6ce59e8788b10f", id);
         prefabB->ChangeID(id);
@@ -149,6 +151,7 @@ TEST_CASE("Prefabs")
         // Create Prefab A with two nested Prefab B attached to the root
         AssetReference<Prefab> prefabA = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabA);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabA); };
         Guid::Parse("4cb744714f746e31855f41815612d14b", id);
         prefabA->ChangeID(id);
         auto prefabAInit = prefabA->Init(Prefab::TypeName,
@@ -243,8 +246,6 @@ TEST_CASE("Prefabs")
         // Cleanup
         instanceA->DeleteObject();
         instanceB->DeleteObject();
-        Content::DeleteAsset(prefabA);
-        Content::DeleteAsset(prefabB);
     }
     SECTION("Test Syncing Changes In Nested Prefab Instance")
     {
@@ -253,6 +254,7 @@ TEST_CASE("Prefabs")
         // Create TestActor prefab with just root object
         AssetReference<Prefab> testActorPrefab = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(testActorPrefab);
+        SCOPE_EXIT{ Content::DeleteAsset(testActorPrefab); };
         Guid id;
         Guid::Parse("7691e981482f2a486e10cfae149e07d3", id);
         testActorPrefab->ChangeID(id);
@@ -269,6 +271,7 @@ TEST_CASE("Prefabs")
         // Create NestedActor prefab that inherits from TestActor prefab
         AssetReference<Prefab> nestedActorPrefab = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(nestedActorPrefab);
+        SCOPE_EXIT{ Content::DeleteAsset(nestedActorPrefab); };
         Guid::Parse("1d521df4465ad849e274748c6d14b703", id);
         nestedActorPrefab->ChangeID(id);
         auto nestedActorPrefabInit = nestedActorPrefab->Init(Prefab::TypeName,
@@ -328,8 +331,6 @@ TEST_CASE("Prefabs")
         // Cleanup
         nestedActor->DeleteObject();
         testActor->DeleteObject();
-        Content::DeleteAsset(nestedActorPrefab);
-        Content::DeleteAsset(testActorPrefab);
     }
     SECTION("Test Loading Nested Prefab After Changing Root")
     {
@@ -338,6 +339,7 @@ TEST_CASE("Prefabs")
         // Create base prefab with 3 objects
         AssetReference<Prefab> prefabBase = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabBase);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabBase); };
         Guid id;
         Guid::Parse("2b3334524c696dcfa93cabacd2a4f404", id);
         prefabBase->ChangeID(id);
@@ -366,6 +368,7 @@ TEST_CASE("Prefabs")
         // Create nested prefab but with 'old' state where root object is different
         AssetReference<Prefab> prefabNested = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabNested);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabNested); };
         Guid::Parse("a71447e947cbd2deea018a8377636ce6", id);
         prefabNested->ChangeID(id);
         auto prefabNestedInit = prefabNested->Init(Prefab::TypeName,
@@ -411,8 +414,6 @@ TEST_CASE("Prefabs")
         // Cleanup
         instanceNested->DeleteObject();
         instanceBase->DeleteObject();
-        Content::DeleteAsset(prefabNested);
-        Content::DeleteAsset(prefabBase);
     }
     SECTION("Test Loading Nested Prefab After Changing and Deleting Root")
     {
@@ -421,6 +422,7 @@ TEST_CASE("Prefabs")
         // Create base prefab with 1 object
         AssetReference<Prefab> prefabBase = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabBase);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabBase); };
         Guid id;
         Guid::Parse("3b3334524c696dcfa93cabacd2a4f404", id);
         prefabBase->ChangeID(id);
@@ -455,6 +457,7 @@ TEST_CASE("Prefabs")
         // Create nested prefab but with 'old' state where root object is different
         AssetReference<Prefab> prefabNested1 = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabNested1);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabNested1); };
         Guid::Parse("671447e947cbd2deea018a8377636ce6", id);
         prefabNested1->ChangeID(id);
         auto prefabNestedInit1 = prefabNested1->Init(Prefab::TypeName,
@@ -491,6 +494,7 @@ TEST_CASE("Prefabs")
         // Create nested prefab but with 'old' state where root object is different and doesn't exist anymore
         AssetReference<Prefab> prefabNested2 = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefabNested2);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabNested2); };
         Guid::Parse("b71447e947cbd2deea018a8377636ce6", id);
         prefabNested2->ChangeID(id);
         auto prefabNestedInit2 = prefabNested2->Init(Prefab::TypeName,
@@ -555,17 +559,15 @@ TEST_CASE("Prefabs")
         instanceNested2->DeleteObject();
         instanceNested1->DeleteObject();
         instanceBase->DeleteObject();
-        Content::DeleteAsset(prefabNested2);
-        Content::DeleteAsset(prefabNested1);
-        Content::DeleteAsset(prefabBase);
     }
-    SECTION("Test Applying Prefab ChangeTo Object References")
+    SECTION("Test Applying Prefab Change To Object References")
     {
         // https://github.com/FlaxEngine/FlaxEngine/issues/3136
 
         // Create Prefab
         AssetReference<Prefab> prefab = Content::CreateVirtualAsset<Prefab>();
         REQUIRE(prefab);
+        SCOPE_EXIT{ Content::DeleteAsset(prefab); };
         Guid id;
         Guid::Parse("690e55514cd6fdc2a269429a2bf84133", id);
         prefab->ChangeID(id);
@@ -612,6 +614,244 @@ TEST_CASE("Prefabs")
         // Cleanup
         instanceA->DeleteObject();
         instanceB->DeleteObject();
-        Content::DeleteAsset(prefab);
+    }
+    SECTION("Test Applying Prefab With Missing Nested Prefab")
+    {
+        // https://github.com/FlaxEngine/FlaxEngine/issues/3244
+
+        // Create Prefab B with just root object
+        AssetReference<Prefab> prefabB = Content::CreateVirtualAsset<Prefab>();
+        REQUIRE(prefabB);
+        Guid id;
+        Guid::Parse("25dbe4b0416be0777a6ce59e8788b10f", id);
+        prefabB->ChangeID(id);
+        auto prefabBInit = prefabB->Init(Prefab::TypeName,
+                                         "["
+                                         "{"
+                                         "\"ID\": \"aac6b9644492fbca1a6ab0a7904a557e\","
+                                         "\"TypeName\": \"FlaxEngine.ExponentialHeightFog\","
+                                         "\"Name\": \"Prefab B.Root\""
+                                         "}"
+                                         "]");
+        REQUIRE(!prefabBInit);
+
+        // Create Prefab A with nested Prefab B attached to the root
+        AssetReference<Prefab> prefabA = Content::CreateVirtualAsset<Prefab>();
+        REQUIRE(prefabA);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabA); };
+        Guid::Parse("4cb744714f746e31855f41815612d14b", id);
+        prefabA->ChangeID(id);
+        auto prefabAInit = prefabA->Init(Prefab::TypeName,
+                                         "["
+                                         "{"
+                                         "\"ID\": \"244274a04cc60d56a2f024bfeef5772d\","
+                                         "\"TypeName\": \"FlaxEngine.SpotLight\","
+                                         "\"Name\": \"Prefab A.Root\""
+                                         "},"
+                                         "{"
+                                         "\"ID\": \"1e51f1094f430733333f8280e78dfcc3\","
+                                         "\"PrefabID\": \"25dbe4b0416be0777a6ce59e8788b10f\","
+                                         "\"PrefabObjectID\": \"aac6b9644492fbca1a6ab0a7904a557e\","
+                                         "\"ParentID\": \"244274a04cc60d56a2f024bfeef5772d\""
+                                         "}"
+                                         "]");
+        REQUIRE(!prefabAInit);
+
+        // Spawn test instances of both prefabs
+        ScriptingObjectReference<Actor> instanceA = PrefabManager::SpawnPrefab(prefabA);
+        ScriptingObjectReference<Actor> instanceB = PrefabManager::SpawnPrefab(prefabB);
+
+        // Delete nested prefab
+        Content::DeleteAsset(prefabB);
+        
+        // Apply instance A and verify it's fine even tho prefab B doesn't exist anymore
+        bool applyResult = PrefabManager::ApplyAll(instanceA);
+        REQUIRE(!applyResult);
+
+        // Check state of objects
+        REQUIRE(instanceA);
+        REQUIRE(instanceA->Children.Count() == 1);
+        REQUIRE(instanceA->Children[0] != nullptr);
+        REQUIRE(instanceA->Children[0]->Is<ExponentialHeightFog>());
+        REQUIRE(instanceB);
+        REQUIRE(instanceB->Is<ExponentialHeightFog>());
+
+        // Verify if prefab has new data to properly spawn another prefab
+        ScriptingObjectReference<Actor> instanceC = PrefabManager::SpawnPrefab(prefabA);
+        REQUIRE(instanceC);
+        REQUIRE(instanceC->Children.Count() == 1);
+        REQUIRE(instanceC->Children[0] != nullptr);
+        REQUIRE(instanceC->Children[0]->Is<ExponentialHeightFog>());
+
+        // Cleanup
+        instanceA->DeleteObject();
+        instanceB->DeleteObject();
+        instanceC->DeleteObject();
+    }
+    SECTION("Test Loading Nested Prefab With Multiple Instances of Nested Prefab")
+    {
+        // https://github.com/FlaxEngine/FlaxEngine/issues/3255
+
+        // Create Prefab C with basic cross-object references
+        AssetReference<Prefab> prefabC = Content::CreateVirtualAsset<Prefab>();
+        REQUIRE(prefabC);
+        Guid id;
+        Guid::Parse("cccbe4b0416be0777a6ce59e8788b10f", id);
+        prefabC->ChangeID(id);
+        auto prefabCInit = prefabC->Init(Prefab::TypeName,
+            "["
+            "{"
+            "\"ID\": \"aac6b9644492fbca1a6ab0a7904a557e\","
+            "\"TypeName\": \"FlaxEngine.ExponentialHeightFog\","
+            "\"Name\": \"Prefab C.Root\","
+            "\"DirectionalInscatteringLight\": \"bbb6b9644492fbca1a6ab0a7904a557e\""
+            "},"
+            "{"
+            "\"ID\": \"bbb6b9644492fbca1a6ab0a7904a557e\","
+            "\"TypeName\": \"FlaxEngine.DirectionalLight\","
+            "\"ParentID\": \"aac6b9644492fbca1a6ab0a7904a557e\","
+            "\"Name\": \"Prefab C.Light\""
+            "}"
+            "]");
+        REQUIRE(!prefabCInit);
+
+        // Create Prefab B with two nested Prefab C attached to the root
+        AssetReference<Prefab> prefabB = Content::CreateVirtualAsset<Prefab>();
+        REQUIRE(prefabB);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabB); };
+        Guid::Parse("bbb744714f746e31855f41815612d14b", id);
+        prefabB->ChangeID(id);
+        auto prefabBInit = prefabB->Init(Prefab::TypeName,
+            "["
+            "{"
+            "\"ID\": \"244274a04cc60d56a2f024bfeef5772d\","
+            "\"TypeName\": \"FlaxEngine.SpotLight\","
+            "\"Name\": \"Prefab B.Root\""
+            "},"
+            "{"
+            "\"ID\": \"1111f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"cccbe4b0416be0777a6ce59e8788b10f\","
+            "\"PrefabObjectID\": \"aac6b9644492fbca1a6ab0a7904a557e\","
+            "\"ParentID\": \"244274a04cc60d56a2f024bfeef5772d\""
+            "},"
+            "{"
+            "\"ID\": \"2221f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"cccbe4b0416be0777a6ce59e8788b10f\","
+            "\"PrefabObjectID\": \"bbb6b9644492fbca1a6ab0a7904a557e\","
+            "\"ParentID\": \"1111f1094f430733333f8280e78dfcc3\""
+            "},"
+            "{"
+            "\"ID\": \"3331f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"cccbe4b0416be0777a6ce59e8788b10f\","
+            "\"PrefabObjectID\": \"aac6b9644492fbca1a6ab0a7904a557e\","
+            "\"ParentID\": \"244274a04cc60d56a2f024bfeef5772d\""
+            "},"
+            "{"
+            "\"ID\": \"4441f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"cccbe4b0416be0777a6ce59e8788b10f\","
+            "\"PrefabObjectID\": \"bbb6b9644492fbca1a6ab0a7904a557e\","
+            "\"ParentID\": \"3331f1094f430733333f8280e78dfcc3\""
+            "}"
+            "]");
+        REQUIRE(!prefabBInit);
+
+        // Create Prefab A as variant of Prefab B (no local changes, just object remapped)
+        AssetReference<Prefab> prefabA = Content::CreateVirtualAsset<Prefab>();
+        REQUIRE(prefabA);
+        SCOPE_EXIT{ Content::DeleteAsset(prefabA); };
+        Guid::Parse("aaa744714f746e31855f41815612d14b", id);
+        prefabA->ChangeID(id);
+        auto prefabAInit = prefabA->Init(Prefab::TypeName,
+            "["
+            "{"
+            "\"ID\": \"123274a04cc60d56a2f024bfeef5772d\","
+            "\"PrefabID\": \"bbb744714f746e31855f41815612d14b\","
+            "\"PrefabObjectID\": \"244274a04cc60d56a2f024bfeef5772d\","
+            "\"Name\": \"Prefab A.Root\""
+            "},"
+            "{"
+            "\"ID\": \"1211f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"bbb744714f746e31855f41815612d14b\","
+            "\"PrefabObjectID\": \"1111f1094f430733333f8280e78dfcc3\","
+            "\"ParentID\": \"123274a04cc60d56a2f024bfeef5772d\""
+            "},"
+            "{"
+            "\"ID\": \"4221f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"bbb744714f746e31855f41815612d14b\","
+            "\"PrefabObjectID\": \"2221f1094f430733333f8280e78dfcc3\","
+            "\"ParentID\": \"1211f1094f430733333f8280e78dfcc3\""
+            "},"
+            "{"
+            "\"ID\": \"3131f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"bbb744714f746e31855f41815612d14b\","
+            "\"PrefabObjectID\": \"3331f1094f430733333f8280e78dfcc3\","
+            "\"ParentID\": \"123274a04cc60d56a2f024bfeef5772d\""
+            "},"
+            "{"
+            "\"ID\": \"5441f1094f430733333f8280e78dfcc3\","
+            "\"PrefabID\": \"bbb744714f746e31855f41815612d14b\","
+            "\"PrefabObjectID\": \"4441f1094f430733333f8280e78dfcc3\","
+            "\"ParentID\": \"3131f1094f430733333f8280e78dfcc3\""
+            "}"
+            "]");
+        REQUIRE(!prefabAInit);
+
+        // Spawn test instances of both prefabs
+        ScriptingObjectReference<Actor> instanceA = PrefabManager::SpawnPrefab(prefabA);
+        ScriptingObjectReference<Actor> instanceB = PrefabManager::SpawnPrefab(prefabB);
+        ScriptingObjectReference<Actor> instanceC = PrefabManager::SpawnPrefab(prefabC);
+
+        // Check state of objects
+        REQUIRE(instanceC);
+        REQUIRE(instanceC->Is<ExponentialHeightFog>());
+        REQUIRE(instanceC->Children.Count() == 1);
+        CHECK(instanceC.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceC->Children[0]);
+        REQUIRE(instanceB);
+        REQUIRE(instanceB->Children.Count() == 2);
+        ScriptingObjectReference<Actor> instanceB1 = instanceB->Children[0];
+        ScriptingObjectReference<Actor> instanceB2 = instanceB->Children[1];
+        REQUIRE(instanceB1->Is<ExponentialHeightFog>());
+        REQUIRE(instanceB1->Children.Count() == 1);
+        CHECK(instanceB1.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceB1->Children[0]);
+        REQUIRE(instanceB2->Is<ExponentialHeightFog>());
+        REQUIRE(instanceB2->Children.Count() == 1);
+        CHECK(instanceB2.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceB2->Children[0]);
+        REQUIRE(instanceA);
+        REQUIRE(instanceA->Children.Count() == 2);
+        ScriptingObjectReference<Actor> instanceA1 = instanceA->Children[0];
+        ScriptingObjectReference<Actor> instanceA2 = instanceA->Children[1];
+        REQUIRE(instanceA1->Is<ExponentialHeightFog>());
+        REQUIRE(instanceA1->Children.Count() == 1);
+        CHECK(instanceA1.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceA1->Children[0]);
+        REQUIRE(instanceA2->Is<ExponentialHeightFog>());
+        REQUIRE(instanceA1->Children.Count() == 1);
+        CHECK(instanceA2.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceA2->Children[0]);
+
+        // Add instance of Prefab C to Prefab B
+        instanceC->SetName(StringView(TEXT("New")));
+        instanceC->SetParent(instanceB);
+        bool applyResult = PrefabManager::ApplyAll(instanceB);
+        REQUIRE(!applyResult);
+
+        // Check if Prefab A reflects that change
+        REQUIRE(instanceA);
+        REQUIRE(instanceA->Children.Count() == 3);
+        instanceA1 = instanceA->Children[0];
+        instanceA2 = instanceA->Children[1];
+        ScriptingObjectReference<Actor> instanceA3 = instanceA->Children[2];
+        REQUIRE(instanceA1->Is<ExponentialHeightFog>());
+        REQUIRE(instanceA1->Children.Count() == 1);
+        CHECK(instanceA1.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceA1->Children[0]);
+        REQUIRE(instanceA2->Is<ExponentialHeightFog>());
+        REQUIRE(instanceA2->Children.Count() == 1);
+        CHECK(instanceA2.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceA2->Children[0]);
+        REQUIRE(instanceA3->Is<ExponentialHeightFog>());
+        REQUIRE(instanceA3->Children.Count() == 1);
+        CHECK(instanceA3.As<ExponentialHeightFog>()->DirectionalInscatteringLight == instanceA3->Children[0]);
+
+        // Cleanup
+        instanceA->DeleteObject();
+        instanceB->DeleteObject();
+        instanceC->DeleteObject();
     }
 }

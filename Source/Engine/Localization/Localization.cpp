@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Localization.h"
 #include "CultureInfo.h"
@@ -9,6 +9,7 @@
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Content/Content.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Serialization/Serialization.h"
 #include <locale>
 
@@ -34,13 +35,20 @@ public:
         if (id.IsEmpty())
             return fallback;
 
+#define TRY_RETURN(messages) \
+        if (messages && messages->Count() > index) \
+        { \
+            const String& result = messages->At(index); \
+            if (result.HasChars()) \
+                return result; \
+        }
+
         // Try current tables
         for (auto& e : LocalizedStringTables)
         {
             const auto table = e.Get();
             const auto messages = table ? table->Entries.TryGet(id) : nullptr;
-            if (messages && messages->Count() > index)
-                return messages->At(index);
+            TRY_RETURN(messages);
         }
 
         // Try fallback tables for current tables
@@ -49,8 +57,7 @@ public:
             const auto table = e.Get();
             const auto fallbackTable = table ? table->FallbackTable.Get() : nullptr;
             const auto messages = fallbackTable ? fallbackTable->Entries.TryGet(id) : nullptr;
-            if (messages && messages->Count() > index)
-                return messages->At(index);
+            TRY_RETURN(messages);
         }
 
         // Try fallback language tables
@@ -58,8 +65,7 @@ public:
         {
             const auto table = e.Get();
             const auto messages = table ? table->Entries.TryGet(id) : nullptr;
-            if (messages && messages->Count() > index)
-                return messages->At(index);
+            TRY_RETURN(messages);
         }
 
         return fallback;
@@ -79,6 +85,17 @@ void LocalizationSettings::Apply()
 {
     Instance.OnLocalizationChanged();
 }
+
+#if USE_EDITOR
+
+void LocalizationSettings::Serialize(SerializeStream& stream, const void* otherObj)
+{
+    SERIALIZE_GET_OTHER_OBJ(LocalizationSettings);
+    SERIALIZE(LocalizedStringTables);
+    SERIALIZE(DefaultFallbackLanguage);
+}
+
+#endif
 
 void LocalizationSettings::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
 {
@@ -155,6 +172,7 @@ String LocalizedString::ToStringPlural(int32 n) const
 void LocalizationService::OnLocalizationChanged()
 {
     PROFILE_CPU();
+    PROFILE_MEM(Localization);
 
     Instance.LocalizedStringTables.Clear();
     Instance.FallbackStringTables.Clear();
@@ -263,6 +281,8 @@ void LocalizationService::OnLocalizationChanged()
 
 bool LocalizationService::Init()
 {
+    PROFILE_MEM(Localization);
+
     // Use system language as default
     CurrentLanguage = CurrentCulture = CultureInfo(Platform::GetUserLocaleName());
 

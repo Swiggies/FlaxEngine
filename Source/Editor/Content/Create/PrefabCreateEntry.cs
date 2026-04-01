@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Scripting;
@@ -14,6 +14,9 @@ namespace FlaxEditor.Content.Create
     /// <seealso cref="FlaxEditor.Content.Create.CreateFileEntry" />
     public class PrefabCreateEntry : CreateFileEntry
     {
+        /// <inheritdoc />
+        public override bool CanBeCreated => _options.RootActorType != null;
+
         /// <summary>
         /// The create options.
         /// </summary>
@@ -73,6 +76,9 @@ namespace FlaxEditor.Content.Create
     /// <seealso cref="FlaxEditor.Content.Create.CreateFileEntry" />
     public class WidgetCreateEntry : CreateFileEntry
     {
+        /// <inheritdoc/>
+        public override bool CanBeCreated => _options.RootControlType != null;
+
         /// <summary>
         /// The create options.
         /// </summary>
@@ -111,7 +117,8 @@ namespace FlaxEditor.Content.Create
 
             private static bool IsValid(Type type)
             {
-                return (type.IsPublic || type.IsNestedPublic) && !type.IsAbstract && !type.IsGenericType;
+                var controlTypes = Editor.Instance.CodeEditing.Controls.Get();
+                return (type.IsPublic || type.IsNestedPublic) && !type.IsAbstract && !type.IsGenericType && controlTypes.Contains(new ScriptType(type));
             }
         }
 

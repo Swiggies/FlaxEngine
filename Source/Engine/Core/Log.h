@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,26 +6,6 @@
 #include "Engine/Core/Delegate.h"
 #include "Engine/Core/Types/String.h"
 #include "Engine/Core/Types/StringView.h"
-
-// Enable/disable auto flush function
-#define LOG_ENABLE_AUTO_FLUSH 1
-
-/// <summary>
-/// Sends a formatted message to the log file (message type - describes level of the log (see LogType enum))
-/// </summary>
-#define LOG(messageType, format, ...) Log::Logger::Write(LogType::messageType, ::String::Format(TEXT(format), ##__VA_ARGS__))
-
-/// <summary>
-/// Sends a string message to the log file (message type - describes level of the log (see LogType enum))
-/// </summary>
-#define LOG_STR(messageType, str) Log::Logger::Write(LogType::messageType, str)
-
-#if LOG_ENABLE_AUTO_FLUSH
-// Flushes the log file buffer
-#define LOG_FLUSH() Log::Logger::Flush()
-#else
-#define LOG_FLUSH()
-#endif
 
 /// <summary>
 /// The log message types.
@@ -52,6 +32,31 @@ API_ENUM() enum class LogType
     /// </summary>
     Fatal = 8,
 };
+
+#if LOG_ENABLE
+
+// Enable/disable auto flush function
+#define LOG_ENABLE_AUTO_FLUSH 1
+
+/// <summary>
+/// Sends a formatted message to the log file (message type - describes level of the log (see LogType enum))
+/// </summary>
+#define LOG(messageType, format, ...) Log::Logger::Write(LogType::messageType, ::String::Format(TEXT(format), ##__VA_ARGS__))
+
+/// <summary>
+/// Sends a string message to the log file (message type - describes level of the log (see LogType enum))
+/// </summary>
+#define LOG_STR(messageType, str) Log::Logger::Write(LogType::messageType, str)
+
+#if LOG_ENABLE_AUTO_FLUSH
+// Noop as log is auto-flushed on write
+#define LOG_FLUSH()
+#else
+// Flushes the log file buffer
+#define LOG_FLUSH() Log::Logger::Flush()
+#endif
+
+#define LOG_FLOOR() Log::Logger::WriteFloor()
 
 extern const Char* ToString(LogType e);
 
@@ -185,3 +190,12 @@ namespace Log
         static void ProcessLogMessage(LogType type, const StringView& msg, fmt_flax::memory_buffer& w);
     };
 }
+
+#else
+
+#define LOG(messageType, format, ...) {}
+#define LOG_STR(messageType, str) {}
+#define LOG_FLUSH() {}
+#define LOG_FLOOR() {}
+
+#endif

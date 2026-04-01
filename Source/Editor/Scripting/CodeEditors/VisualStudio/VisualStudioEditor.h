@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -10,7 +10,7 @@
 /// <summary>
 /// Microsoft Visual Studio version types
 /// </summary>
-DECLARE_ENUM_8(VisualStudioVersion, VS2008, VS2010, VS2012, VS2013, VS2015, VS2017, VS2019, VS2022);
+DECLARE_ENUM_9(VisualStudioVersion, VS2008, VS2010, VS2012, VS2013, VS2015, VS2017, VS2019, VS2022, VS2026);
 
 /// <summary>
 /// Implementation of code editor utility that is using Microsoft Visual Studio.
@@ -56,6 +56,7 @@ public:
     // [CodeEditor]
     CodeEditorTypes GetType() const override;
     String GetName() const override;
+    String GetGenerateProjectCustomArgs() const override;
     void OpenFile(const String& path, int32 line) override;
     void OpenSolution() override;
     void OnFileAdded(const String& path) override;

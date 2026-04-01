@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -32,6 +32,11 @@ public:
     /// The maximum cull distance for the instances that are located in this cluster (including child clusters).
     /// </summary>
     float MaxCullDistance;
+
+    /// <summary>
+    /// Flag used by clusters that are not typical quad-tree nodes but have no volume (eg. lots of instances placed on top of each other).
+    /// </summary>
+    int32 IsMinor : 1;
 
     /// <summary>
     /// The child clusters. If any element is valid then all are created.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -13,6 +13,11 @@ private:
     FlaxStorage* _storage;
 
 public:
+    FlaxStorageReference()
+        : _storage(nullptr)
+    {
+    }
+
     FlaxStorageReference(FlaxStorage* storage)
         : _storage(storage)
     {

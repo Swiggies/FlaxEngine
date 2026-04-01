@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -134,7 +134,8 @@ namespace FlaxEditor.Actions
                 var obj = Object.Find<SceneObject>(ref item.ID);
                 if (obj != null)
                 {
-                    scenes.Add(obj.Parent.Scene);
+                    if (obj.Parent != null)
+                        scenes.Add(obj.Parent.Scene);
                     if (obj is Actor actor)
                         actor.SetParent(newParent, _worldPositionsStays, true);
                     else

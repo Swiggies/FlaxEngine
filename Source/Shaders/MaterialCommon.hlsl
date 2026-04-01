@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __MATERIAL_COMMON__
 #define __MATERIAL_COMMON__
@@ -30,6 +30,9 @@
 #endif
 #ifndef MATERIAL_SHADING_MODEL
 #define MATERIAL_SHADING_MODEL SHADING_MODEL_LIT
+#endif
+#ifndef MATERIAL_TEXCOORDS
+#define MATERIAL_TEXCOORDS 1
 #endif
 #ifndef USE_INSTANCING
 #define USE_INSTANCING 0
@@ -173,6 +176,8 @@ cbuffer ViewData : register(b1)
     float4 TemporalAAJitter;
     float3 LargeWorldsChunkIndex;
     float LargeWorldsChunkSize;
+    float3 ViewPadding0;
+    float ScaledTimeParam;
 };
 #endif
 
@@ -188,10 +193,21 @@ cbuffer DrawData : register(b2)
 struct ModelInput
 {
     float3 Position : POSITION;
-    float2 TexCoord : TEXCOORD0;
+#if MATERIAL_TEXCOORDS > 0
+    float2 TexCoord0 : TEXCOORD0;
+#endif
+#if MATERIAL_TEXCOORDS > 1
+    float2 TexCoord1 : TEXCOORD1;
+#endif
+#if MATERIAL_TEXCOORDS > 2
+    float2 TexCoord2 : TEXCOORD2;
+#endif
+#if MATERIAL_TEXCOORDS > 3
+    float2 TexCoord3 : TEXCOORD3;
+#endif
+    float2 LightmapUV : LIGHTMAP;
     float4 Normal : NORMAL;
     float4 Tangent : TANGENT;
-    float2 LightmapUV : TEXCOORD1;
 #if USE_VERTEX_COLOR
 	half4 Color : COLOR;
 #endif
@@ -211,11 +227,25 @@ struct ModelInput_PosOnly
 struct ModelInput_Skinned
 {
     float3 Position : POSITION;
-    float2 TexCoord : TEXCOORD0;
+#if MATERIAL_TEXCOORDS > 0
+    float2 TexCoord0 : TEXCOORD0;
+#endif
+#if MATERIAL_TEXCOORDS > 1
+    float2 TexCoord1 : TEXCOORD1;
+#endif
+#if MATERIAL_TEXCOORDS > 2
+    float2 TexCoord2 : TEXCOORD2;
+#endif
+#if MATERIAL_TEXCOORDS > 3
+    float2 TexCoord3 : TEXCOORD3;
+#endif
     float4 Normal : NORMAL;
     float4 Tangent : TANGENT;
+#if USE_VERTEX_COLOR
+	half4 Color : COLOR;
+#endif
     uint4 BlendIndices : BLENDINDICES;
-    float4 BlendWeights : BLENDWEIGHT;
+    float4 BlendWeights : BLENDWEIGHTS;
 };
 
 struct Model_VS2PS
@@ -232,6 +262,14 @@ struct GBufferOutput
     float4 RT2 : SV_Target3;
     float4 RT3 : SV_Target4;
 };
+
+float3 UnpackNormalMap(float2 value)
+{
+    float3 normal;
+    normal.xy = value * 2.0 - 1.0;
+    normal.z = sqrt(saturate(1.0 - dot(normal.xy, normal.xy)));
+    return normal;
+}
 
 float3x3 CalcTangentBasis(float3 normal, float3 pos, float2 uv)
 {
@@ -273,10 +311,11 @@ float3 AOMultiBounce(float visibility, float3 albedo)
 
 float2 Flipbook(float2 uv, float frame, float2 sizeXY, float2 flipXY = 0.0f)
 {
-    float2 frameXY = float2((uint)frame % (uint)sizeXY.y, (uint)frame / (uint)sizeXY.x);
-    float2 flipFrameXY = sizeXY - frameXY - float2(1, 1);
-    frameXY = lerp(frameXY, flipFrameXY, flipXY);
-    return (uv + frameXY) / sizeXY;
+    float tile = (float)(int)fmod(frame, sizeXY.x * sizeXY.y);
+    float2 tileCount = float2(1.0, 1.0) / sizeXY;
+    float tileY = abs(flipXY.y * sizeXY.y - (floor(tile * tileCount.x) + flipXY.y * 1));
+    float tileX = abs(flipXY.x * sizeXY.x - ((tile - sizeXY.x * floor(tile * tileCount.x)) + flipXY.x * 1));
+    return (uv + float2(tileX, tileY)) * tileCount;
 }
 
 // Calculates the world-position offset to stabilize tiling (eg. via triplanar mapping) due to Large Worlds view origin offset.

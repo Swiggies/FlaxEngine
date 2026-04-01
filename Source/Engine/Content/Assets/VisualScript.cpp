@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "VisualScript.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Types/Span.h"
 #include "Engine/Core/Types/DataContainer.h"
 #include "Engine/Content/Content.h"
 #include "Engine/Content/Factories/BinaryAssetFactory.h"
@@ -17,6 +18,7 @@
 #include "Engine/Serialization/Serialization.h"
 #include "Engine/Serialization/JsonWriter.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Utilities/StringConverter.h"
 #include "Engine/Threading/MainThreadTask.h"
 #include "Engine/Level/SceneObject.h"
@@ -36,10 +38,12 @@ namespace
 
     void PrintStack(LogType type)
     {
+#if LOG_ENABLE
         const String stack = VisualScripting::GetStackTrace();
         Log::Logger::Write(type, TEXT("Visual Script stack trace:"));
         Log::Logger::Write(type, stack);
         Log::Logger::Write(type, TEXT(""));
+#endif
     }
 
     bool SerializeValue(const Variant& a, const Variant& b)
@@ -450,7 +454,7 @@ void VisualScriptExecutor::ProcessGroupFunction(Box* boxBase, Node* node, Value&
                 if (version == 4)
                 {
                     signature.IsStatic = stream.ReadBool();
-                    stream.ReadVariantType(&signature.ReturnType);
+                    stream.Read(signature.ReturnType);
                     int32 signatureParamsCount;
                     stream.ReadInt32(&signatureParamsCount);
                     signature.Params.Resize(signatureParamsCount);
@@ -460,7 +464,7 @@ void VisualScriptExecutor::ProcessGroupFunction(Box* boxBase, Node* node, Value&
                         int32 parameterNameLength;
                         stream.ReadInt32(&parameterNameLength);
                         stream.SetPosition(stream.GetPosition() + parameterNameLength * sizeof(Char));
-                        stream.ReadVariantType(&param.Type);
+                        stream.Read(param.Type);
                         param.IsOut = stream.ReadBool();
                     }
                 }
@@ -1320,8 +1324,27 @@ VisualScript::VisualScript(const SpawnParams& params, const AssetInfo* info)
 {
 }
 
+#if USE_EDITOR
+
+bool VisualScript::Save(const StringView& path)
+{
+    if (OnCheckSave(path))
+        return true;
+    ScopeLock lock(Locker);
+    MemoryWriteStream writeStream;
+    if (Graph.Save(&writeStream, true))
+        return true;
+    BytesContainer data;
+    data.Link(ToSpan(writeStream));
+    return SaveSurface(data, Meta);
+}
+
+#endif
+
 Asset::LoadResult VisualScript::load()
 {
+    PROFILE_MEM(ScriptingVisual);
+
     // Build Visual Script typename that is based on asset id
     String typeName = _id.ToString();
     StringUtils::ConvertUTF162ANSI(typeName.Get(), _typenameChars, 32);
@@ -1334,13 +1357,13 @@ Asset::LoadResult VisualScript::load()
         return LoadResult::MissingDataChunk;
     MemoryReadStream metadataStream(metadataChunk->Get(), metadataChunk->Size());
     int32 version;
-    metadataStream.ReadInt32(&version);
+    metadataStream.Read(version);
     switch (version)
     {
     case 1:
     {
-        metadataStream.ReadString(&Meta.BaseTypename, 31);
-        metadataStream.ReadInt32((int32*)&Meta.Flags);
+        metadataStream.Read(Meta.BaseTypename, 31);
+        metadataStream.Read((int32&)Meta.Flags);
         break;
     }
     default:
@@ -1393,10 +1416,10 @@ Asset::LoadResult VisualScript::load()
             {
             case 1:
             {
-                signatureStream.ReadStringAnsi(&method.Name, 71);
+                signatureStream.Read(method.Name, 71);
                 method.MethodFlags = (MethodFlags)signatureStream.ReadByte();
                 method.Signature.IsStatic = ((byte)method.MethodFlags & (byte)MethodFlags::Static) != 0;
-                signatureStream.ReadVariantType(&method.Signature.ReturnType);
+                signatureStream.Read(method.Signature.ReturnType);
                 int32 parametersCount;
                 signatureStream.ReadInt32(&parametersCount);
                 method.Signature.Params.Resize(parametersCount);
@@ -1404,8 +1427,8 @@ Asset::LoadResult VisualScript::load()
                 for (int32 i = 0; i < parametersCount; i++)
                 {
                     auto& param = method.Signature.Params[i];
-                    signatureStream.ReadStringAnsi(&method.ParamNames[i], 13);
-                    signatureStream.ReadVariantType(&param.Type);
+                    signatureStream.Read(method.ParamNames[i], 13);
+                    signatureStream.Read(param.Type);
                     param.IsOut = signatureStream.ReadByte() != 0;
                     bool hasDefaultValue = signatureStream.ReadByte() != 0;
                 }
@@ -1514,6 +1537,7 @@ Asset::LoadResult VisualScript::load()
 
 void VisualScript::unload(bool isReloading)
 {
+    PROFILE_MEM(ScriptingVisual);
 #if USE_EDITOR
     if (isReloading)
     {
@@ -1570,6 +1594,7 @@ AssetChunksFlag VisualScript::getChunksToPreload() const
 
 void VisualScript::CacheScriptingType()
 {
+    PROFILE_MEM(ScriptingVisual);
     ScopeLock lock(VisualScriptingBinaryModule::Locker);
     auto& binaryModule = VisualScriptingModule;
 
@@ -1675,6 +1700,8 @@ void VisualScript::CacheScriptingType()
 VisualScriptingBinaryModule::VisualScriptingBinaryModule()
     : _name("Visual Scripting")
 {
+    // Visual Scripts can be unloaded and loaded again even in game
+    CanReload = true;
 }
 
 ScriptingObject* VisualScriptingBinaryModule::VisualScriptObjectSpawn(const ScriptingObjectSpawnParams& params)
@@ -1705,6 +1732,7 @@ ScriptingObject* VisualScriptingBinaryModule::VisualScriptObjectSpawn(const Scri
     VisualScript* visualScript = VisualScriptingModule.Scripts[params.Type.TypeIndex];
 
     // Initialize instance data
+    PROFILE_MEM(ScriptingVisual);
     ScopeLock lock(visualScript->Locker);
     auto& instanceParams = visualScript->_instances[object->GetID()].Params;
     instanceParams.Resize(visualScript->Graph.Parameters.Count());
@@ -1716,9 +1744,9 @@ ScriptingObject* VisualScriptingBinaryModule::VisualScriptObjectSpawn(const Scri
         {
             // Special case for C# object property in Visual Script so duplicate the object instead of cloning the reference to it
             MemoryWriteStream writeStream;
-            writeStream.WriteVariant(param);
-            MemoryReadStream readStream(writeStream.GetHandle(), writeStream.GetPosition());
-            readStream.ReadVariant(&param);
+            writeStream.Write(param);
+            MemoryReadStream readStream(ToSpan(writeStream));
+            readStream.Read(param);
         }
     }
 
@@ -1729,6 +1757,8 @@ ScriptingObject* VisualScriptingBinaryModule::VisualScriptObjectSpawn(const Scri
 
 void VisualScriptingBinaryModule::OnScriptsReloading()
 {
+    PROFILE_MEM(ScriptingVisual);
+
     // Clear any cached types from that module across all loaded Visual Scripts
     for (auto& script : Scripts)
     {
@@ -1777,6 +1807,7 @@ void VisualScriptingBinaryModule::OnScriptsReloading()
 
 void VisualScriptingBinaryModule::OnEvent(ScriptingObject* object, Span<Variant> parameters, ScriptingTypeHandle eventType, StringView eventName)
 {
+    PROFILE_MEM(ScriptingVisual);
     if (object)
     {
         // Object event
@@ -1882,9 +1913,13 @@ bool VisualScriptingBinaryModule::InvokeMethod(void* method, const Variant& inst
         if (!instanceObject || instanceObject->GetTypeHandle() != vsMethod->Script->GetScriptingType())
         {
             if (!instanceObject)
+            {
                 LOG(Error, "Failed to call method '{0}.{1}' (args count: {2}) without object instance", String(vsMethod->Script->GetScriptTypeName()), String(vsMethod->Name), vsMethod->ParamNames.Count());
+            }
             else
+            {
                 LOG(Error, "Failed to call method '{0}.{1}' (args count: {2}) with invalid object instance of type '{3}'", String(vsMethod->Script->GetScriptTypeName()), String(vsMethod->Name), vsMethod->ParamNames.Count(), String(instanceObject->GetType().Fullname));
+            }
             return true;
         }
     }
@@ -1934,6 +1969,7 @@ bool VisualScriptingBinaryModule::GetFieldValue(void* field, const Variant& inst
 
 bool VisualScriptingBinaryModule::SetFieldValue(void* field, const Variant& instance, Variant& value)
 {
+    PROFILE_MEM(ScriptingVisual);
     const auto vsFiled = (VisualScript::Field*)field;
     const auto instanceObject = (ScriptingObject*)instance;
     if (!instanceObject)
@@ -2020,6 +2056,7 @@ void VisualScriptingBinaryModule::SerializeObject(JsonWriter& stream, ScriptingO
 
 void VisualScriptingBinaryModule::DeserializeObject(ISerializable::DeserializeStream& stream, ScriptingObject* object, ISerializeModifier* modifier)
 {
+    PROFILE_MEM(ScriptingVisual);
     ASSERT(stream.IsObject());
     Locker.Lock();
     const auto asset = Scripts[object->GetTypeHandle().TypeIndex].Get();
@@ -2141,8 +2178,9 @@ const Variant& VisualScript::GetScriptInstanceParameterValue(const StringView& n
     return Variant::Null;
 }
 
-void VisualScript::SetScriptInstanceParameterValue(const StringView& name, ScriptingObject* instance, const Variant& value) const
+void VisualScript::SetScriptInstanceParameterValue(const StringView& name, ScriptingObject* instance, const Variant& value)
 {
+    PROFILE_MEM(ScriptingVisual);
     CHECK(instance);
     for (int32 paramIndex = 0; paramIndex < Graph.Parameters.Count(); paramIndex++)
     {
@@ -2162,8 +2200,9 @@ void VisualScript::SetScriptInstanceParameterValue(const StringView& name, Scrip
     LOG(Warning, "Failed to set {0} parameter '{1}'", ToString(), name);
 }
 
-void VisualScript::SetScriptInstanceParameterValue(const StringView& name, ScriptingObject* instance, Variant&& value) const
+void VisualScript::SetScriptInstanceParameterValue(const StringView& name, ScriptingObject* instance, Variant&& value)
 {
+    PROFILE_MEM(ScriptingVisual);
     CHECK(instance);
     for (int32 paramIndex = 0; paramIndex < Graph.Parameters.Count(); paramIndex++)
     {
@@ -2201,7 +2240,7 @@ const VisualScript::Field* VisualScript::FindField(const StringAnsiView& name) c
     return nullptr;
 }
 
-BytesContainer VisualScript::LoadSurface()
+BytesContainer VisualScript::LoadSurface() const
 {
     if (WaitForLoaded())
         return BytesContainer();
@@ -2219,19 +2258,10 @@ BytesContainer VisualScript::LoadSurface()
 
 #if USE_EDITOR
 
-bool VisualScript::SaveSurface(const BytesContainer& data, const Metadata& meta)
+bool VisualScript::SaveSurface(const BytesContainer& data, const Metadata& meta) const
 {
-    // Wait for asset to be loaded or don't if last load failed
-    if (LastLoadFailed())
-    {
-        LOG(Warning, "Saving asset that failed to load.");
-    }
-    else if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave())
         return true;
-    }
-
     ScopeLock lock(Locker);
 
     // Release all chunks
@@ -2244,11 +2274,11 @@ bool VisualScript::SaveSurface(const BytesContainer& data, const Metadata& meta)
     // Set metadata
     MemoryWriteStream metaStream(512);
     {
-        metaStream.WriteInt32(1);
-        metaStream.WriteString(meta.BaseTypename, 31);
-        metaStream.WriteInt32((int32)meta.Flags);
+        metaStream.Write(1);
+        metaStream.Write(meta.BaseTypename, 31);
+        metaStream.Write((int32)meta.Flags);
     }
-    GetOrCreateChunk(1)->Data.Copy(metaStream.GetHandle(), metaStream.GetPosition());
+    GetOrCreateChunk(1)->Data.Copy(ToSpan(metaStream));
 
     // Save
     AssetInitData assetData;
@@ -2370,6 +2400,7 @@ VisualScriptingBinaryModule* VisualScripting::GetBinaryModule()
 
 Variant VisualScripting::Invoke(VisualScript::Method* method, ScriptingObject* instance, Span<Variant> parameters)
 {
+    PROFILE_MEM(ScriptingVisual);
     CHECK_RETURN(method && method->Script->IsLoaded(), Variant::Zero);
     PROFILE_CPU_SRC_LOC(method->ProfilerData);
 
@@ -2410,6 +2441,7 @@ bool VisualScripting::Evaluate(VisualScript* script, ScriptingObject* instance, 
     const auto box = node->GetBox(boxId);
     if (!box)
         return false;
+    PROFILE_MEM(ScriptingVisual);
 
     // Add to the calling stack
     ScopeContext scope;

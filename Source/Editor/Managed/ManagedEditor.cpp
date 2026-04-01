@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ManagedEditor.h"
 #include "Editor/Editor.h"
@@ -11,8 +11,10 @@
 #include "Engine/Scripting/ManagedCLR/MClass.h"
 #include "Engine/Scripting/ManagedCLR/MException.h"
 #include "Engine/Scripting/Internal/MainThreadManagedInvokeAction.h"
+#include "Engine/Platform/WindowsManager.h"
 #include "Engine/Content/Assets/VisualScript.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Level/Actor.h"
 #include "Engine/CSG/CSGBuilder.h"
 #include "Engine/Engine/CommandLine.h"
 #include "Engine/Renderer/ProbesRenderer.h"
@@ -74,7 +76,7 @@ void OnLightmapsBuildFinished(bool failed)
         OnLightmapsBake(ShadowsOfMordor::BuildProgressStep::GenerateLightmapCharts, 0, 0, false);
 }
 
-void OnBakeEvent(bool started, const ProbesRenderer::Entry& e)
+void OnBakeEvent(bool started, Actor* e)
 {
     if (Internal_EnvProbeBake == nullptr)
     {
@@ -82,7 +84,7 @@ void OnBakeEvent(bool started, const ProbesRenderer::Entry& e)
         ASSERT(Internal_EnvProbeBake);
     }
 
-    MObject* probeObj = e.Actor ? e.Actor->GetManagedInstance() : nullptr;
+    MObject* probeObj = e ? e->GetManagedInstance() : nullptr;
 
     MainThreadManagedInvokeAction::ParamsBuilder params;
     params.AddParam(started);
@@ -90,12 +92,12 @@ void OnBakeEvent(bool started, const ProbesRenderer::Entry& e)
     MainThreadManagedInvokeAction::Invoke(Internal_EnvProbeBake, params);
 }
 
-void OnRegisterBake(const ProbesRenderer::Entry& e)
+void OnRegisterBake(Actor* e)
 {
     OnBakeEvent(true, e);
 }
 
-void OnFinishBake(const ProbesRenderer::Entry& e)
+void OnFinishBake(Actor* e)
 {
     OnBakeEvent(false, e);
 }
@@ -156,7 +158,9 @@ ManagedEditor::ManagedEditor()
     lightmapsBuilder->OnBuildProgress.Bind<OnLightmapsBuildProgress>();
     lightmapsBuilder->OnBuildFinished.Bind<OnLightmapsBuildFinished>();
     CSG::Builder::OnBrushModified.Bind<OnBrushModified>();
+#if LOG_ENABLE
     Log::Logger::OnMessage.Bind<OnLogMessage>();
+#endif
     VisualScripting::DebugFlow.Bind<OnVisualScriptingDebugFlow>();
 }
 
@@ -172,7 +176,9 @@ ManagedEditor::~ManagedEditor()
     lightmapsBuilder->OnBuildProgress.Unbind<OnLightmapsBuildProgress>();
     lightmapsBuilder->OnBuildFinished.Unbind<OnLightmapsBuildFinished>();
     CSG::Builder::OnBrushModified.Unbind<OnBrushModified>();
+#if LOG_ENABLE
     Log::Logger::OnMessage.Unbind<OnLogMessage>();
+#endif
     VisualScripting::DebugFlow.Unbind<OnVisualScriptingDebugFlow>();
 }
 
@@ -606,6 +612,11 @@ void ManagedEditor::WipeOutLeftoverSceneObjects()
             {
                 if (sceneObject->HasParent())
                     continue; // Skip sub-objects
+                auto* actor = Cast<Actor>(sceneObject);
+                if (!actor)
+                    actor = sceneObject->GetParent();
+                if (actor && actor->HasTag(TEXT("__EditorInternal")))
+                    continue; // Skip internal objects used by Editor (eg. EditorScene)
 
                 LOG(Error, "Object '{}' (ID={}, Type={}) is still in memory after play end but should be destroyed (memory leak).", sceneObject->GetNamePath(), sceneObject->GetID(), sceneObject->GetType().ToString());
                 sceneObject->DeleteObject();
@@ -617,19 +628,12 @@ void ManagedEditor::WipeOutLeftoverSceneObjects()
         ObjectsRemovalService::Flush();
 }
 
-void ManagedEditor::GetPrefabNestedObject(const Guid& prefabId, const Guid& prefabObjectId, Guid& outPrefabId, Guid& outPrefabObjectId)
+Array<Window*> ManagedEditor::GetWindows()
 {
-    outPrefabId = Guid::Empty;
-    outPrefabObjectId = Guid::Empty;
-    const auto prefab = Content::Load<Prefab>(prefabId);
-    if (!prefab)
-        return;
-    const ISerializable::DeserializeStream** prefabObjectDataPtr = prefab->ObjectsDataCache.TryGet(prefabObjectId);
-    if (!prefabObjectDataPtr)
-        return;
-    const ISerializable::DeserializeStream& prefabObjectData = **prefabObjectDataPtr;
-    JsonTools::GetGuidIfValid(outPrefabId, prefabObjectData, "PrefabID");
-    JsonTools::GetGuidIfValid(outPrefabObjectId, prefabObjectData, "PrefabObjectID");
+    WindowsManager::WindowsLocker.Lock();
+    auto result = WindowsManager::Windows;
+    WindowsManager::WindowsLocker.Unlock();
+    return result;
 }
 
 void ManagedEditor::OnEditorAssemblyLoaded(MAssembly* assembly)

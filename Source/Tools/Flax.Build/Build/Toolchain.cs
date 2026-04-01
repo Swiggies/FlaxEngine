@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using System.IO;
@@ -102,6 +102,11 @@ namespace Flax.Build
         {
             options.CompileEnv.IncludePaths.AddRange(SystemIncludePaths);
             options.LinkEnv.LibraryPaths.AddRange(SystemLibraryPaths);
+
+            if (options.Architecture == TargetArchitecture.x64 || options.Architecture == TargetArchitecture.x86)
+                options.CompileEnv.CpuArchitecture = CpuArchitecture.AVX;
+            else if (options.Architecture == TargetArchitecture.ARM64 || options.Architecture == TargetArchitecture.ARM)
+                options.CompileEnv.CpuArchitecture = CpuArchitecture.NEON;
         }
 
         /// <summary>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Task.h"
 #include "ThreadPoolTask.h"
@@ -7,6 +7,7 @@
 #include "Engine/Core/Types/DateTime.h"
 #include "Engine/Core/Collections/Array.h"
 #include "Engine/Core/Math/Math.h"
+#include "Engine/Core/Types/Span.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 
 void Task::Start()
@@ -39,9 +40,8 @@ void Task::Cancel()
 bool Task::Wait(double timeoutMilliseconds) const
 {
     PROFILE_CPU();
-    double startTime = Platform::GetTimeSeconds() * 0.001;
-
-    // TODO: no active waiting! use a semaphore!
+    ZoneColor(TracyWaitZoneColor);
+    const double startTime = Platform::GetTimeSeconds();
 
     do
     {
@@ -53,7 +53,7 @@ bool Task::Wait(double timeoutMilliseconds) const
             // Wait for child if has
             if (_continueWith)
             {
-                auto spendTime = Platform::GetTimeSeconds() * 0.001 - startTime;
+                const auto spendTime = (Platform::GetTimeSeconds() - startTime) * 1000.0;
                 return _continueWith->Wait(timeoutMilliseconds - spendTime);
             }
 
@@ -65,11 +65,23 @@ bool Task::Wait(double timeoutMilliseconds) const
             return true;
 
         Platform::Sleep(1);
-    } while (timeoutMilliseconds <= 0.0 || Platform::GetTimeSeconds() * 0.001 - startTime < timeoutMilliseconds);
+    } while (timeoutMilliseconds <= 0.0 || (Platform::GetTimeSeconds() - startTime) * 1000.0 < timeoutMilliseconds);
 
     // Timeout reached!
     LOG(Warning, "\'{0}\' has timed out. Wait time: {1} ms", ToString(), timeoutMilliseconds);
     return true;
+}
+
+bool Task::WaitAll(const Span<Task*>& tasks, double timeoutMilliseconds)
+{
+    PROFILE_CPU();
+    ZoneColor(TracyWaitZoneColor);
+    for (int32 i = 0; i < tasks.Length(); i++)
+    {
+        if (tasks[i]->Wait())
+            return true;
+    }
+    return false;
 }
 
 Task* Task::ContinueWith(Task* task)
@@ -136,9 +148,8 @@ Task* Task::StartNew(Function<bool()>::Signature& action, Object* target)
 
 void Task::Execute()
 {
-    if (IsCanceled())
+    if (!IsQueued())
         return;
-    ASSERT(IsQueued());
     SetState(TaskState::Running);
 
     // Perform an operation
@@ -196,8 +207,8 @@ void Task::OnCancel()
     if (IsRunning())
     {
         // Wait for it a little bit
-        const double timeout = 2000.0;
-        LOG(Warning, "Cannot cancel \'{0}\' because it's still running, waiting for end with timeout: {1} ms", ToString(), timeout);
+        constexpr double timeout = 10000.0; // 10s
+        //LOG(Warning, "Cannot cancel \'{0}\' because it's still running, waiting for end with timeout: {1}ms", ToString(), timeout);
         Wait(timeout);
     }
 
@@ -214,6 +225,27 @@ void Task::OnEnd()
 {
     ASSERT(!IsRunning());
 
-    // Add to delete
-    DeleteObject(30.0f, false);
+    if (_continueWith && !_continueWith->IsEnded())
+    {
+        // Let next task do the cleanup (to ensure whole tasks chain shares the lifetime)
+        _continueWith->_rootForRemoval = _rootForRemoval ? _rootForRemoval : this;
+    }
+    else
+    {
+        constexpr float timeToLive = 30.0f;
+
+        // Remove task chain starting from the root
+        if (_rootForRemoval)
+        {
+            auto task = _rootForRemoval;
+            while (task != this)
+            {
+                task->DeleteObject(timeToLive, false);
+                task = task->_continueWith;
+            }
+        }
+
+        // Add to delete
+        DeleteObject(timeToLive, false);
+    }
 }

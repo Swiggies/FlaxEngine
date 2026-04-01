@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_DIRECTX11
 
@@ -10,13 +10,24 @@
 #include "GPUTimerQueryDX11.h"
 #include "GPUBufferDX11.h"
 #include "GPUSamplerDX11.h"
+#include "GPUVertexLayoutDX11.h"
 #include "GPUSwapChainDX11.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Utilities.h"
+#include "Engine/Core/Math/Color32.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/GraphicsDevice/DirectX/RenderToolsDX.h"
+#include "Engine/Graphics/PixelFormatExtensions.h"
 #include "Engine/Engine/CommandLine.h"
-
+#include "Engine/Profiler/ProfilerMemory.h"
+#if COMPILE_WITH_NVAPI
+#include <ThirdParty/nvapi/nvapi.h>
+bool EnableNvapi = false;
+#endif
+#if COMPILE_WITH_AGS
+#include <ThirdParty/AGS/amd_ags.h>
+AGSContext* AgsContext = nullptr;
+#endif
 #if !USE_EDITOR && PLATFORM_WINDOWS
 #include "Engine/Core/Config/PlatformSettings.h"
 #endif
@@ -146,6 +157,24 @@ static bool TryCreateDevice(IDXGIAdapter* adapter, D3D_FEATURE_LEVEL maxFeatureL
     return false;
 }
 
+GPUVertexLayoutDX11::GPUVertexLayoutDX11(GPUDeviceDX11* device, const Elements& elements, bool explicitOffsets)
+    : GPUResourceBase<GPUDeviceDX11, GPUVertexLayout>(device, StringView::Empty)
+    , InputElementsCount(elements.Count())
+{
+    SetElements(elements, explicitOffsets);
+    for (int32 i = 0; i < elements.Count(); i++)
+    {
+        const VertexElement& src = GetElements().Get()[i];
+        D3D11_INPUT_ELEMENT_DESC& dst = InputElements[i];
+        dst.SemanticName = RenderToolsDX::GetVertexInputSemantic(src.Type, dst.SemanticIndex);
+        dst.Format = RenderToolsDX::ToDxgiFormat(src.Format);
+        dst.InputSlot = src.Slot;
+        dst.AlignedByteOffset = src.Offset;
+        dst.InputSlotClass = src.PerInstance ? D3D11_INPUT_PER_INSTANCE_DATA : D3D11_INPUT_PER_VERTEX_DATA;
+        dst.InstanceDataStepRate = src.PerInstance ? 1 : 0;
+    }
+}
+
 GPUDevice* GPUDeviceDX11::Create()
 {
     // Configuration
@@ -156,9 +185,9 @@ GPUDevice* GPUDeviceDX11::Create()
 #else
     D3D_FEATURE_LEVEL maxAllowedFeatureLevel = D3D_FEATURE_LEVEL_11_0;
 #endif
-    if (CommandLine::Options.D3D10)
+    if (CommandLine::Options.D3D10.IsTrue())
         maxAllowedFeatureLevel = D3D_FEATURE_LEVEL_10_0;
-    else if (CommandLine::Options.D3D11)
+    else if (CommandLine::Options.D3D11.IsTrue())
         maxAllowedFeatureLevel = D3D_FEATURE_LEVEL_11_0;
 #if !USE_EDITOR && PLATFORM_WINDOWS
 	auto winSettings = WindowsPlatformSettings::Get();
@@ -259,11 +288,11 @@ GPUDevice* GPUDeviceDX11::Create()
     }
     GPUAdapterDX selectedAdapter = adapters[selectedAdapterIndex];
     uint32 vendorId = 0;
-    if (CommandLine::Options.NVIDIA)
+    if (CommandLine::Options.NVIDIA.IsTrue())
         vendorId = GPU_VENDOR_ID_NVIDIA;
-    else if (CommandLine::Options.AMD)
+    else if (CommandLine::Options.AMD.IsTrue())
         vendorId = GPU_VENDOR_ID_AMD;
-    else if (CommandLine::Options.Intel)
+    else if (CommandLine::Options.Intel.IsTrue())
         vendorId = GPU_VENDOR_ID_INTEL;
     if (vendorId != 0)
     {
@@ -276,8 +305,6 @@ GPUDevice* GPUDeviceDX11::Create()
             }
         }
     }
-
-    // Validate adapter
     if (!selectedAdapter.IsValid())
     {
         LOG(Error, "Failed to choose valid DirectX adapter!");
@@ -385,9 +412,83 @@ ID3D11BlendState* GPUDeviceDX11::GetBlendState(const BlendingMode& blending)
     return state;
 }
 
+GPUBuffer* GPUDeviceDX11::GetDummyVB()
+{
+    if (!_dummyVB)
+    {
+        _dummyVB = CreateBuffer(TEXT("DummyVertexBuffer"));
+        auto* layout = GPUVertexLayout::Get({{ VertexElement::Types::Attribute3, 0, 0, 0, PixelFormat::R32G32B32A32_Float }});
+        _dummyVB->Init(GPUBufferDescription::Vertex(layout, sizeof(Color), 1, &Color::Transparent));
+    }
+    return _dummyVB;
+}
+
 bool GPUDeviceDX11::Init()
 {
     HRESULT result;
+
+    // Driver extensions
+#if COMPILE_WITH_NVAPI
+    if (_adapter->IsNVIDIA())
+    {
+        NvAPI_Status status = NvAPI_Initialize();
+        if (status == NVAPI_OK)
+        {
+            EnableNvapi = true;
+
+            NvU32 driverVersion;
+            NvAPI_ShortString buildBranch("");
+            if (NvAPI_SYS_GetDriverAndBranchVersion(&driverVersion, buildBranch) == NVAPI_OK)
+            {
+                LOG(Info, "NvApi driver version: {}, {}", driverVersion, TO_UTF16(buildBranch));
+            }
+        }
+        else
+        {
+            NvAPI_ShortString desc;
+            NvAPI_GetErrorMessage(status, desc);
+            LOG(Warning, "NvAPI_Initialize failed with result {} ({})", (int32)status, String(desc));
+        }
+    }
+#endif
+#if COMPILE_WITH_AGS
+    if (_adapter->IsAMD())
+    {
+        AGSGPUInfo gpuInfo = {};
+        AGSConfiguration config = {};
+        AGSReturnCode returnCode = agsInitialize(AGS_CURRENT_VERSION, &config, &AgsContext, &gpuInfo);
+        if (returnCode == AGS_SUCCESS)
+        {
+            LOG(Info, "AMD driver version: {}, Radeon Software Version {}", TO_UTF16(gpuInfo.driverVersion), TO_UTF16(gpuInfo.radeonSoftwareVersion));
+            for (int32 i = 0; i < gpuInfo.numDevices; i++)
+            {
+                AGSDeviceInfo& deviceInfo = gpuInfo.devices[i];
+                const Char* asicFamily[] =
+                {
+                    TEXT("Unknown"),
+                    TEXT("Pre GCN"),
+                    TEXT("GCN Gen1"),
+                    TEXT("GCN Gen2"),
+                    TEXT("GCN Gen3"),
+                    TEXT("GCN Gen4"),
+                    TEXT("Vega"),
+                    TEXT("RDNA"),
+                    TEXT("RDNA2"),
+                    TEXT("RDNA3"),
+                    TEXT("RDNA4"),
+                };
+                LOG(Info, " > GPU {}: {} ({})", i, TO_UTF16(deviceInfo.adapterString), asicFamily[deviceInfo.asicFamily <= AGSAsicFamily_RDNA4 ? deviceInfo.asicFamily : 0]);
+                LOG(Info, "   CUs: {}, WGPs: {}, ROPs: {}", deviceInfo.numCUs, deviceInfo.numWGPs, deviceInfo.numROPs);
+                LOG(Info, "   Core clock: {} MHz, Memory clock: {} MHz, {:.2f} Tflops", deviceInfo.coreClock, deviceInfo.memoryClock, deviceInfo.teraFlops);
+                LOG(Info, "   Local memory: {} MB ({:.2f} GB/s), Shared memory: {} MB", (int32)(deviceInfo.localMemoryInBytes / (1024ull * 1024ull)), (float)deviceInfo.memoryBandwidth / 1024.0f, (int32)(deviceInfo.sharedMemoryInBytes / (1024ull * 1024ull)));
+            }
+        }
+        else
+        {
+            LOG(Warning, "agsInitialize failed with result {} ({})", (int32)returnCode);
+        }
+    }
+#endif
 
     // Get DXGI adapter
     ComPtr<IDXGIAdapter> adapter;
@@ -407,7 +508,7 @@ bool GPUDeviceDX11::Init()
 
     // Create DirectX device
     D3D_FEATURE_LEVEL createdFeatureLevel = static_cast<D3D_FEATURE_LEVEL>(0);
-    auto targetFeatureLevel = GetD3DFeatureLevel();
+    D3D_FEATURE_LEVEL targetFeatureLevel = _adapter->MaxFeatureLevel;
     VALIDATE_DIRECTX_CALL(D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, flags, &targetFeatureLevel, 1, D3D11_SDK_VERSION, &_device, &createdFeatureLevel, &_imContext));
     ASSERT(_device);
     ASSERT(_imContext);
@@ -542,6 +643,7 @@ bool GPUDeviceDX11::Init()
             D3D11_MESSAGE_ID_DEVICE_DRAW_INDEX_BUFFER_TOO_SMALL,
             D3D11_MESSAGE_ID_DEVICE_DRAW_RENDERTARGETVIEW_NOT_SET,
             D3D11_MESSAGE_ID_SETPRIVATEDATA_CHANGINGPARAMS,
+            D3D11_MESSAGE_ID_DEVICE_DRAW_VERTEX_BUFFER_TOO_SMALL,
         };
 
         filter.DenyList.NumIDs = ARRAY_COUNT(disabledMessages);
@@ -733,7 +835,7 @@ void GPUDeviceDX11::DrawEnd()
 {
     GPUDeviceDX::DrawEnd();
 
-#if GPU_ENABLE_DIAGNOSTICS
+#if GPU_ENABLE_DIAGNOSTICS && LOG_ENABLE
     // Flush debug messages queue
     ComPtr<ID3D11InfoQueue> infoQueue;
     VALIDATE_DIRECTX_CALL(_device->QueryInterface(IID_PPV_ARGS(&infoQueue)));
@@ -779,16 +881,19 @@ void GPUDeviceDX11::DrawEnd()
 
 GPUTexture* GPUDeviceDX11::CreateTexture(const StringView& name)
 {
+    PROFILE_MEM(GraphicsTextures);
     return New<GPUTextureDX11>(this, name);
 }
 
 GPUShader* GPUDeviceDX11::CreateShader(const StringView& name)
 {
+    PROFILE_MEM(GraphicsShaders);
     return New<GPUShaderDX11>(this, name);
 }
 
 GPUPipelineState* GPUDeviceDX11::CreatePipelineState()
 {
+    PROFILE_MEM(GraphicsCommands);
     return New<GPUPipelineStateDX11>(this);
 }
 
@@ -799,12 +904,18 @@ GPUTimerQuery* GPUDeviceDX11::CreateTimerQuery()
 
 GPUBuffer* GPUDeviceDX11::CreateBuffer(const StringView& name)
 {
+    PROFILE_MEM(GraphicsBuffers);
     return New<GPUBufferDX11>(this, name);
 }
 
 GPUSampler* GPUDeviceDX11::CreateSampler()
 {
     return New<GPUSamplerDX11>(this);
+}
+
+GPUVertexLayout* GPUDeviceDX11::CreateVertexLayout(const VertexElements& elements, bool explicitOffsets)
+{
+    return New<GPUVertexLayoutDX11>(this, elements, explicitOffsets);
 }
 
 GPUSwapChain* GPUDeviceDX11::CreateSwapChain(Window* window)
@@ -814,6 +925,7 @@ GPUSwapChain* GPUDeviceDX11::CreateSwapChain(Window* window)
 
 GPUConstantBuffer* GPUDeviceDX11::CreateConstantBuffer(uint32 size, const StringView& name)
 {
+    PROFILE_MEM(GraphicsShaders);
     ID3D11Buffer* buffer = nullptr;
     uint32 memorySize = 0;
     if (size)

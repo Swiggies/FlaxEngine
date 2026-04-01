@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.IO;
 using System.Collections.Generic;
@@ -12,7 +12,7 @@ namespace Flax.Build
         /// Specifies the minimum iOS version to use (eg. 14).
         /// </summary>
         [CommandLine("iOSMinVer", "<version>", "Specifies the minimum iOS version to use (eg. 14).")]
-        public static string iOSMinVer = "14";
+        public static string iOSMinVer = "15";
     }
 }
 

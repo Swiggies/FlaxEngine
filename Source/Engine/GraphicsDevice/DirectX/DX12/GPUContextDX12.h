@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,6 +6,7 @@
 #include "IShaderResourceDX12.h"
 #include "DescriptorHeapDX12.h"
 #include "../IncludeDirectXHeaders.h"
+#include <ThirdParty/tracy/tracy/TracyD3D12.hpp>
 
 #if GRAPHICS_API_DIRECTX12
 
@@ -15,11 +16,12 @@ class GPUBufferDX12;
 class GPUSamplerDX12;
 class GPUConstantBufferDX12;
 class GPUTextureViewDX12;
+class GPUVertexLayoutDX12;
 
 /// <summary>
 /// Size of the resource barriers buffer size (will be flushed on overflow)
 /// </summary>
-#define DX12_RB_BUFFER_SIZE 16
+#define DX12_RB_BUFFER_SIZE 64
 
 /// <summary>
 /// GPU Commands Context implementation for DirectX 12
@@ -61,6 +63,7 @@ private:
     GPUTextureViewDX12* _rtHandles[GPU_MAX_RT_BINDED];
     IShaderResourceDX12* _srHandles[GPU_MAX_SR_BINDED];
     IShaderResourceDX12* _uaHandles[GPU_MAX_UA_BINDED];
+    GPUVertexLayoutDX12* _vertexLayout;
     GPUBufferDX12* _ibHandle;
     GPUBufferDX12* _vbHandles[GPU_MAX_VB_BINDED];
     D3D12_INDEX_BUFFER_VIEW _ibView;
@@ -68,6 +71,12 @@ private:
     D3D12_RESOURCE_BARRIER _rbBuffer[DX12_RB_BUFFER_SIZE];
     GPUConstantBufferDX12* _cbHandles[GPU_MAX_CB_BINDED];
     GPUSamplerDX12* _samplers[GPU_MAX_SAMPLER_BINDED - GPU_STATIC_SAMPLERS_COUNT];
+
+#if COMPILE_WITH_PROFILER
+    void* _tracyContext;
+    struct TracyZone { byte Data[TracyD3D12ZoneSize]; };
+    Array<TracyZone, InlinedAllocation<32>> _tracyZones;
+#endif
 
 public:
 
@@ -152,6 +161,7 @@ public:
     // [GPUContext]
     void FrameBegin() override;
     void FrameEnd() override;
+    void OnPresent() override;
 #if GPU_ALLOW_PROFILE_EVENTS
     void EventBegin(const Char* name) override;
     void EventEnd() override;
@@ -176,7 +186,7 @@ public:
     void BindCB(int32 slot, GPUConstantBuffer* cb) override;
     void BindSR(int32 slot, GPUResourceView* view) override;
     void BindUA(int32 slot, GPUResourceView* view) override;
-    void BindVB(const Span<GPUBuffer*>& vertexBuffers, const uint32* vertexBuffersOffsets = nullptr) override;
+    void BindVB(const Span<GPUBuffer*>& vertexBuffers, const uint32* vertexBuffersOffsets = nullptr, GPUVertexLayout* vertexLayout = nullptr) override;
     void BindIB(GPUBuffer* indexBuffer) override;
     void BindSampler(int32 slot, GPUSampler* sampler) override;
     void UpdateCB(GPUConstantBuffer* cb, const void* data) override;
@@ -191,7 +201,7 @@ public:
     void SetScissor(const Rectangle& scissorRect) override;
     GPUPipelineState* GetState() const override;
     void SetState(GPUPipelineState* state) override;
-    void ClearState() override;
+    void ResetState() override;
     void FlushState() override;
     void Flush() override;
     void UpdateBuffer(GPUBuffer* buffer, const void* data, uint32 size, uint32 offset) override;
@@ -204,6 +214,8 @@ public:
     void CopySubresource(GPUResource* dstResource, uint32 dstSubresource, GPUResource* srcResource, uint32 srcSubresource) override;
     void SetResourceState(GPUResource* resource, uint64 state, int32 subresource) override;
     void ForceRebindDescriptors() override;
+    void Transition(GPUResource* resource, GPUResourceAccess access) override;
+    void OverlapUA(bool end) override;
 };
 
 #endif

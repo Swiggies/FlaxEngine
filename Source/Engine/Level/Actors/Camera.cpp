@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Camera.h"
 #include "Engine/Level/SceneObjectsFactory.h"
 #include "Engine/Core/Math/Matrix.h"
+#include "Engine/Core/Math/Double4x4.h"
 #include "Engine/Core/Math/Viewport.h"
 #include "Engine/Content/Assets/Model.h"
 #include "Engine/Content/Content.h"
@@ -69,7 +70,7 @@ float Camera::GetFieldOfView() const
 void Camera::SetFieldOfView(float value)
 {
     value = Math::Clamp(value, 1.0f, 179.9f);
-    if (Math::NotNearEqual(_fov, value))
+    if (_fov != value)
     {
         _fov = value;
         UpdateCache();
@@ -84,7 +85,7 @@ float Camera::GetCustomAspectRatio() const
 void Camera::SetCustomAspectRatio(float value)
 {
     value = Math::Clamp(value, 0.0f, 100.0f);
-    if (Math::NotNearEqual(_customAspectRatio, value))
+    if (_customAspectRatio != value)
     {
         _customAspectRatio = value;
         UpdateCache();
@@ -99,7 +100,7 @@ float Camera::GetNearPlane() const
 void Camera::SetNearPlane(float value)
 {
     value = Math::Clamp(value, 0.001f, _far - 1.0f);
-    if (Math::NotNearEqual(_near, value))
+    if (_near != value)
     {
         _near = value;
         UpdateCache();
@@ -114,7 +115,7 @@ float Camera::GetFarPlane() const
 void Camera::SetFarPlane(float value)
 {
     value = Math::Max(value, _near + 1.0f);
-    if (Math::NotNearEqual(_far, value))
+    if (_far != value)
     {
         _far = value;
         UpdateCache();
@@ -129,7 +130,7 @@ float Camera::GetOrthographicSize() const
 void Camera::SetOrthographicSize(float value)
 {
     value = Math::Clamp(value, 0.0f, 1000000.0f);
-    if (Math::NotNearEqual(_orthoSize, value))
+    if (_orthoSize != value)
     {
         _orthoSize = value;
         UpdateCache();
@@ -144,7 +145,7 @@ float Camera::GetOrthographicScale() const
 void Camera::SetOrthographicScale(float value)
 {
     value = Math::Clamp(value, 0.0001f, 1000000.0f);
-    if (Math::NotNearEqual(_orthoScale, value))
+    if (_orthoScale != value)
     {
         _orthoScale = value;
         UpdateCache();
@@ -208,7 +209,7 @@ Ray Camera::ConvertMouseToRay(const Float2& mousePosition) const
 Ray Camera::ConvertMouseToRay(const Float2& mousePosition, const Viewport& viewport) const
 {
     Vector3 position = GetPosition();
-    if (viewport.Width < ZeroTolerance || viewport.Height < ZeroTolerance)
+    if (viewport.Width < ZeroTolerance || viewport.Height < ZeroTolerance || mousePosition.IsNaN())
         return Ray(position, GetDirection());
 
     // Use different logic in orthographic projection
@@ -238,7 +239,7 @@ Ray Camera::ConvertMouseToRay(const Float2& mousePosition, const Viewport& viewp
     viewport.Unproject(farPoint, ivp, farPoint);
 
     Vector3 dir = Vector3::Normalize(farPoint - nearPoint);
-    if (dir.IsZero())
+    if (dir.IsZero() || dir.IsNanOrInfinity())
         return Ray::Identity;
     return Ray(nearPoint, dir);
 }
@@ -246,11 +247,16 @@ Ray Camera::ConvertMouseToRay(const Float2& mousePosition, const Viewport& viewp
 Viewport Camera::GetViewport() const
 {
     Viewport result = Viewport(Float2::Zero);
+    float dpiScale = Platform::GetDpiScale();
 
 #if USE_EDITOR
     // Editor
     if (Editor::Managed)
+    {
         result.Size = Editor::Managed->GetGameWindowSize();
+        if (auto* window = Editor::Managed->GetGameWindow())
+            dpiScale = window->GetDpiScale();
+    }
 #else
 	// Game
 	auto mainWin = Engine::MainWindow;
@@ -258,8 +264,12 @@ Viewport Camera::GetViewport() const
 	{
 		const auto size = mainWin->GetClientSize();
 		result.Size = size;
+        dpiScale = mainWin->GetDpiScale();
 	}
 #endif
+
+    // Remove DPI scale (game viewport coords are unscaled)
+    result.Size /= dpiScale;
 
     // Fallback to the default value
     if (result.Size.MinValue() <= ZeroTolerance)
@@ -293,12 +303,15 @@ void Camera::GetMatrices(Matrix& view, Matrix& projection, const Viewport& viewp
     }
 
     // Create view matrix
-    const Float3 direction = GetDirection();
-    const Float3 position = _transform.Translation - origin;
-    const Float3 target = position + direction;
-    Float3 up;
-    Float3::Transform(Float3::Up, GetOrientation(), up);
-    Matrix::LookAt(position, target, up, view);
+    const Vector3 direction = Vector3::Transform(Vector3::Forward, GetOrientation());
+    const Vector3 position = _transform.Translation - origin;
+    const Vector3 target = position + direction;
+
+    Vector3 up;
+    Vector3::Transform(Vector3::Up, GetOrientation(), up);
+    Real4x4 viewResult;
+    Real4x4::LookAt(position, target, up, viewResult);
+    view = Matrix(viewResult);
 }
 
 #if USE_EDITOR
@@ -361,6 +374,7 @@ void Camera::Draw(RenderContext& renderContext)
         BoundingSphere::FromBox(_previewModelBox, draw.Bounds);
         draw.Bounds.Center -= renderContext.View.Origin;
         draw.PerInstanceRandom = GetPerInstanceRandom();
+        draw.StencilValue = 0;
         draw.LODBias = 0;
         draw.ForcedLOD = -1;
         draw.SortOrder = 0;

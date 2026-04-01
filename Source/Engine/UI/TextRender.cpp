@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "TextRender.h"
 #include "Engine/Core/Math/OrientedBoundingBox.h"
@@ -13,23 +13,45 @@
 #include "Engine/Render2D/FontManager.h"
 #include "Engine/Render2D/FontTextureAtlas.h"
 #include "Engine/Renderer/RenderList.h"
+#include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Serialization/Serialization.h"
 #include "Engine/Content/Assets/MaterialInstance.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Core/Types/Variant.h"
 #include "Engine/Graphics/RenderTools.h"
+#include "Engine/Graphics/Shaders/GPUVertexLayout.h"
 #include "Engine/Localization/Localization.h"
 #if USE_EDITOR
 #include "Editor/Editor.h"
 #endif
 
+PACK_STRUCT(struct TextRenderVertex
+{
+    Float3 Position;
+    Color32 Color;
+    FloatR10G10B10A2 Normal;
+    FloatR10G10B10A2 Tangent;
+    Half2 TexCoord;
+
+    static GPUVertexLayout* GetLayout()
+    {
+        return GPUVertexLayout::Get({
+            { VertexElement::Types::Position, 0, 0, 0, PixelFormat::R32G32B32_Float },
+            { VertexElement::Types::Color, 0, 0, 0, PixelFormat::R8G8B8A8_UNorm },
+            { VertexElement::Types::Normal, 0, 0, 0, PixelFormat::R10G10B10A2_UNorm },
+            { VertexElement::Types::Tangent, 0, 0, 0, PixelFormat::R10G10B10A2_UNorm },
+            { VertexElement::Types::TexCoord, 0, 0, 0, PixelFormat::R16G16_Float },
+        });
+    }
+});
+
 TextRender::TextRender(const SpawnParams& params)
     : Actor(params)
     , _size(32)
     , _ib(0, sizeof(uint16))
-    , _vb0(0, sizeof(VB0ElementType))
-    , _vb1(0, sizeof(VB1ElementType))
-    , _vb2(0, sizeof(VB2ElementType))
+    , _vb(0, sizeof(TextRenderVertex), String::Empty, TextRenderVertex::GetLayout())
 {
     _color = Color::White;
     _localBox = BoundingBox(Vector3::Zero);
@@ -100,15 +122,16 @@ void TextRender::SetLayoutOptions(TextLayoutOptions& value)
 
 void TextRender::UpdateLayout()
 {
+    PROFILE_CPU();
+    PROFILE_MEM(UI);
+
     // Clear
     _ib.Clear();
-    _vb0.Clear();
-    _vb1.Clear();
-    _vb2.Clear();
+    _vb.Clear();
     _localBox = BoundingBox(Vector3::Zero);
     BoundingBox::Transform(_localBox, _transform, _box);
     BoundingSphere::FromBox(_box, _sphere);
-#if USE_PRECISE_MESH_INTERSECTS
+#if MODEL_USE_PRECISE_MESH_INTERSECTS
     _collisionProxy.Clear();
 #endif
 
@@ -149,7 +172,7 @@ void TextRender::UpdateLayout()
 
     // Pick a font (remove DPI text scale as the text is being placed in the world)
     auto font = Font->CreateFont(_size);
-    float scale = 1.0f / FontManager::FontScale;
+    float scale = _layoutOptions.Scale / FontManager::FontScale;
 
     // Prepare
     FontTextureAtlas* fontAtlas = nullptr;
@@ -158,17 +181,19 @@ void TextRender::UpdateLayout()
     int32 kerning;
 
     // Perform layout
-    Array<FontLineCache> lines;
+    Array<FontLineCache, InlinedAllocation<8>> lines;
     font->ProcessText(text, lines, _layoutOptions);
 
     // Prepare buffers capacity
     _ib.Data.EnsureCapacity(text.Length() * 6 * sizeof(uint16));
-    _vb0.Data.EnsureCapacity(text.Length() * 4 * sizeof(VB0ElementType));
-    _vb1.Data.EnsureCapacity(text.Length() * 4 * sizeof(VB1ElementType));
-    _vb2.Data.EnsureCapacity(text.Length() * 4 * sizeof(VB2ElementType));
+    _vb.Data.EnsureCapacity(text.Length() * 4 * sizeof(TextRenderVertex));
     _buffersDirty = true;
 
     // Init draw chunks data
+    Array<MaterialInstance*, InlinedAllocation<8>> materials;
+    materials.Resize(_drawChunks.Count());
+    for (int32 i = 0; i < materials.Count(); i++)
+        materials[i] = _drawChunks[i].Material;
     DrawChunk drawChunk;
     drawChunk.Actor = this;
     drawChunk.StartIndex = 0;
@@ -221,10 +246,12 @@ void TextRender::UpdateLayout()
                     }
 
                     // Setup material
-                    drawChunk.Material = Content::CreateVirtualAsset<MaterialInstance>();
+                    if (_drawChunks.Count() < materials.Count())
+                        drawChunk.Material = materials[_drawChunks.Count()];
+                    else
+                        drawChunk.Material = Content::CreateVirtualAsset<MaterialInstance>();
                     drawChunk.Material->SetBaseMaterial(Material.Get());
-                    for (auto& param : drawChunk.Material->Params)
-                        param.SetIsOverride(false);
+                    drawChunk.Material->ResetParameters();
 
                     // Set the font parameter
                     static StringView FontParamName = TEXT("Font");
@@ -268,20 +295,15 @@ void TextRender::UpdateLayout()
                     byte sign = 0;
 
                     // Write vertices
-                    VB0ElementType vb0;
-                    VB1ElementType vb1;
-                    VB2ElementType vb2;
+                    TextRenderVertex v;
 #define WRITE_VB(pos, uv) \
-					vb0.Position = Float3(-pos, 0.0f); \
-					box.Merge(vb0.Position); \
-					_vb0.Write(vb0); \
-					vb1.TexCoord = Half2(uv); \
-					vb1.Normal = Float1010102(normal * 0.5f + 0.5f, 0); \
-					vb1.Tangent = Float1010102(tangent * 0.5f + 0.5f, sign); \
-					vb1.LightmapUVs = Half2::Zero; \
-					_vb1.Write(vb1); \
-					vb2.Color = color; \
-					_vb2.Write(vb2)
+					v.Position = Float3(-pos, 0.0f); \
+					box.Merge(v.Position); \
+					v.TexCoord = Half2(uv); \
+					v.Normal = FloatR10G10B10A2(normal * 0.5f + 0.5f, 0); \
+					v.Tangent = FloatR10G10B10A2(tangent * 0.5f + 0.5f, sign); \
+					v.Color = color; \
+					_vb.Write(v)
                     //
                     WRITE_VB(charRect.GetBottomRight(), rightBottomUV);
                     WRITE_VB(charRect.GetBottomLeft(), Float2(upperLeftUV.X, rightBottomUV.Y));
@@ -314,10 +336,10 @@ void TextRender::UpdateLayout()
         _drawChunks.Add(drawChunk);
     }
 
-#if USE_PRECISE_MESH_INTERSECTS
+#if MODEL_USE_PRECISE_MESH_INTERSECTS
     // Setup collision proxy for detailed collision detection for triangles
     const int32 totalIndicesCount = _ib.Data.Count() / sizeof(uint16);
-    _collisionProxy.Init(_vb0.Data.Count() / sizeof(Float3), totalIndicesCount / 3, (Float3*)_vb0.Data.Get(), (uint16*)_ib.Data.Get());
+    _collisionProxy.Init(_vb.Data.Count() / sizeof(TextRenderVertex), totalIndicesCount / 3, (const Float3*)_vb.Data.Get(), (const uint16*)_ib.Data.Get(), sizeof(TextRenderVertex));
 #endif
 
     // Update text bounds (from build vertex positions)
@@ -330,7 +352,7 @@ void TextRender::UpdateLayout()
     BoundingBox::Transform(_localBox, _transform, _box);
     BoundingSphere::FromBox(_box, _sphere);
     if (_sceneRenderingKey != -1)
-        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey);
+        GetSceneRendering()->UpdateActor(this, _sceneRenderingKey, ISceneRenderingListener::Auto | ISceneRenderingListener::AutoDelayDuringRendering);
 }
 
 bool TextRender::HasContentLoaded() const
@@ -351,16 +373,14 @@ void TextRender::Draw(RenderContext& renderContext)
     GEOMETRY_DRAW_STATE_EVENT_BEGIN(_drawState, world);
 
     const DrawPass drawModes = DrawModes & renderContext.View.Pass & renderContext.View.GetShadowsDrawPassMask(ShadowsMode);
-    if (_vb0.Data.Count() > 0 && drawModes != DrawPass::None)
+    if (_vb.Data.Count() > 0 && drawModes != DrawPass::None)
     {
         // Flush buffers
         if (_buffersDirty)
         {
             _buffersDirty = false;
             _ib.Flush();
-            _vb0.Flush();
-            _vb1.Flush();
-            _vb2.Flush();
+            _vb.Flush();
         }
 
         // Setup draw call
@@ -370,12 +390,10 @@ void TextRender::Draw(RenderContext& renderContext)
         drawCall.ObjectRadius = (float)_sphere.Radius;
         drawCall.Surface.GeometrySize = _localBox.GetSize();
         drawCall.Surface.PrevWorld = _drawState.PrevWorld;
-        drawCall.WorldDeterminantSign = RenderTools::GetWorldDeterminantSign(drawCall.World);
         drawCall.PerInstanceRandom = GetPerInstanceRandom();
+        drawCall.SetStencilValue(_layer);
         drawCall.Geometry.IndexBuffer = _ib.GetBuffer();
-        drawCall.Geometry.VertexBuffers[0] = _vb0.GetBuffer();
-        drawCall.Geometry.VertexBuffers[1] = _vb1.GetBuffer();
-        drawCall.Geometry.VertexBuffers[2] = _vb2.GetBuffer();
+        drawCall.Geometry.VertexBuffers[0] = _vb.GetBuffer();
         drawCall.InstanceCount = 1;
 
         // Submit draw calls
@@ -420,7 +438,7 @@ void TextRender::OnLayerChanged()
 
 bool TextRender::IntersectsItself(const Ray& ray, Real& distance, Vector3& normal)
 {
-#if USE_PRECISE_MESH_INTERSECTS
+#if MODEL_USE_PRECISE_MESH_INTERSECTS
     if (_box.Intersects(ray))
     {
         return _collisionProxy.Intersects(ray, _transform, distance, normal);
@@ -476,10 +494,16 @@ void TextRender::Deserialize(DeserializeStream& stream, ISerializeModifier* modi
 
     // [Deprecated on 07.02.2022, expires on 07.02.2024]
     if (modifier->EngineBuild <= 6330)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSDF;
+    }
     // [Deprecated on 27.04.2022, expires on 27.04.2024]
     if (modifier->EngineBuild <= 6331)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSurfaceAtlas;
+    }
 
     _isDirty = true;
 }

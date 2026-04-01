@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -120,7 +120,6 @@ private:
     MaterialValue _ddx, _ddy, _cameraVector;
 
 public:
-
     MaterialGenerator();
     ~MaterialGenerator();
 
@@ -211,6 +210,7 @@ public:
 
     static MaterialValue getUVs;
     static MaterialValue getTime;
+    static MaterialValue getScaledTime;
     static MaterialValue getNormal;
     static MaterialValue getNormalZero;
     static MaterialValue getVertexColor;

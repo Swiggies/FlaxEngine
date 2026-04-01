@@ -241,7 +241,11 @@ namespace Flax.Deploy
 
             if (!File.Exists(solutionFile))
             {
-                throw new Exception(string.Format("Unable to build solution {0}. Solution file not found.", solutionFile));
+                // CMake VS2026 generator prefers .slnx solution files, just swap the extension for CMake dependencies
+                if (File.Exists(Path.ChangeExtension(solutionFile, "slnx")))
+                    solutionFile = Path.ChangeExtension(solutionFile, "slnx");
+                else
+                    throw new Exception(string.Format("Unable to build solution {0}. Solution file not found.", solutionFile));
             }
 
             string cmdLine = string.Format("\"{0}\" /m /t:Restore,Build /p:Configuration=\"{1}\" /p:Platform=\"{2}\" {3} /nologo", solutionFile, buildConfig, buildPlatform, Verbosity);
@@ -278,12 +282,14 @@ namespace Flax.Deploy
             Utilities.Run(msBuild, cmdLine);
         }
 
-        internal static void CodeSign(string file, string certificatePath, string certificatePass)
+        internal static void CodeSign(string file, string certificate, string password)
         {
             if (!File.Exists(file))
                 throw new FileNotFoundException("Missing file to sign.", file);
-            if (!File.Exists(certificatePath))
-                throw new FileNotFoundException("Missing certificate to sign with.", certificatePath);
+            if (string.IsNullOrEmpty(certificate))
+                throw new Exception("Missing certificate to sign.");
+
+            // Get path to signtool
             var sdks = WindowsPlatformBase.GetSDKs();
             if (sdks.Count == 0)
                 throw new Exception("No Windows SDK found. Cannot sign file.");
@@ -306,7 +312,22 @@ namespace Flax.Deploy
                     // Ignore version formatting exception
                 }
             }
-            var cmdLine = string.Format("sign /debug /f \"{0}\" /p \"{1}\" /tr http://timestamp.comodoca.com /td sha256 /fd sha256 \"{2}\"", certificatePath, certificatePass, file);
+
+            // Sign code
+            string cmdLine;
+            var time = "/tr http://time.certum.pl /td sha256";
+            if (File.Exists(certificate))
+            {
+                // Sign with certificate from file
+                cmdLine = $"sign /debug /f \"{certificate}\" {time} /fd sha256 \"{file}\"";
+                if (!string.IsNullOrEmpty(password))
+                    cmdLine += $" /p \"{password}\"";
+            }
+            else
+            {
+                // Sign with identity
+                cmdLine = $"sign /debug /n \"{certificate}\" {time} /fd sha256 /v \"{file}\"";
+            }
             Utilities.Run(signtool, cmdLine, null, null, Utilities.RunOptions.Default | Utilities.RunOptions.ThrowExceptionOnError);
         }
     }

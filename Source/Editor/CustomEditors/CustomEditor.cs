@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections;
@@ -52,6 +52,7 @@ namespace FlaxEditor.CustomEditors
         private readonly List<CustomEditor> _children = new List<CustomEditor>();
         private ValueContainer _values;
         private bool _isSetBlocked;
+        private bool _isRebuilding;
         private bool _skipChildrenRefresh;
         private bool _hasValueDirty;
         private bool _rebuildOnRefresh;
@@ -178,7 +179,7 @@ namespace FlaxEditor.CustomEditors
         public void RebuildLayout()
         {
             // Skip rebuilding during init
-            if (CurrentCustomEditor == this)
+            if (CurrentCustomEditor == this || _isRebuilding)
                 return;
 
             // Special case for root objects to run normal layout build
@@ -197,6 +198,7 @@ namespace FlaxEditor.CustomEditors
                 _parent?.RebuildLayout();
                 return;
             }
+            _isRebuilding = true;
             var control = layout.ContainerControl;
             var parent = _parent;
             var parentScrollV = (_presenter?.Panel.Parent as Panel)?.VScrollBar?.Value ?? -1;
@@ -216,6 +218,7 @@ namespace FlaxEditor.CustomEditors
             // Restore scroll value
             if (parentScrollV > -1 && _presenter != null && _presenter.Panel.Parent is Panel panel && panel.VScrollBar != null)
                 panel.VScrollBar.Value = parentScrollV;
+            _isRebuilding = false;
         }
 
         /// <summary>
@@ -749,6 +752,15 @@ namespace FlaxEditor.CustomEditors
             }
         }
 
+        private Actor FindActor(CustomEditor editor)
+        {
+            if (editor.Values[0] is Actor actor)
+                return actor;
+            if (editor.ParentEditor != null)
+                return FindActor(editor.ParentEditor);
+            return null;
+        }
+
         private Actor FindPrefabRoot(CustomEditor editor)
         {
             if (editor.Values[0] is Actor actor)
@@ -767,32 +779,35 @@ namespace FlaxEditor.CustomEditors
             return FindPrefabRoot(actor.Parent);
         }
 
-        private SceneObject FindObjectWithPrefabObjectId(Actor actor, ref Guid prefabObjectId)
+        private SceneObject FindObjectWithPrefabObjectId(Actor actor, ref Guid prefabObjectId, Actor endPoint)
         {
+            var visited = new HashSet<Actor>();
+            return FindObjectWithPrefabObjectId(actor, ref prefabObjectId, endPoint, visited);
+        }
+
+        private SceneObject FindObjectWithPrefabObjectId(Actor actor, ref Guid prefabObjectId, Actor endPoint, HashSet<Actor> visited)
+        {
+            if (visited.Contains(actor) || actor is Scene || actor == endPoint)
+                return null;
             if (actor.PrefabObjectID == prefabObjectId)
                 return actor;
 
             for (int i = 0; i < actor.ScriptsCount; i++)
             {
-                if (actor.GetScript(i).PrefabObjectID == prefabObjectId)
-                {
-                    var a = actor.GetScript(i);
-                    if (a != null)
-                        return a;
-                }
+                var script = actor.GetScript(i);
+                if (script != null && script.PrefabObjectID == prefabObjectId)
+                    return script;
             }
 
             for (int i = 0; i < actor.ChildrenCount; i++)
             {
-                if (actor.GetChild(i).PrefabObjectID == prefabObjectId)
-                {
-                    var a = actor.GetChild(i);
-                    if (a != null)
-                        return a;
-                }
+                var child = actor.GetChild(i);
+                if (child != null && child.PrefabObjectID == prefabObjectId)
+                    return child;
             }
 
-            return null;
+            // Go up in the hierarchy
+            return FindObjectWithPrefabObjectId(actor.Parent, ref prefabObjectId, endPoint, visited);
         }
 
         /// <summary>
@@ -826,7 +841,7 @@ namespace FlaxEditor.CustomEditors
                 }
 
                 var prefabObjectId = referenceSceneObject.PrefabObjectID;
-                var prefabInstanceRef = FindObjectWithPrefabObjectId(prefabInstanceRoot, ref prefabObjectId);
+                var prefabInstanceRef = FindObjectWithPrefabObjectId(FindActor(this), ref prefabObjectId, prefabInstanceRoot);
                 if (prefabInstanceRef == null)
                 {
                     Editor.LogWarning("Missing prefab instance reference in the prefab instance. Cannot revert to it.");

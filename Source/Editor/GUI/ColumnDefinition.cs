@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -51,7 +51,7 @@ namespace FlaxEditor.GUI
         /// <summary>
         /// The column title horizontal text alignment
         /// </summary>
-        public TextAlignment TitleAlignment = TextAlignment.Near;
+        public TextAlignment TitleAlignment = TextAlignment.Center;
 
         /// <summary>
         /// The column title margin.

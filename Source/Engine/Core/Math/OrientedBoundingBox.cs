@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -397,7 +397,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ref OrientedBoundingBox value)
         {
-            return (Extents == value.Extents) && (Transformation == value.Transformation);
+            return Extents == value.Extents && Transformation == value.Transformation;
         }
 
         /// <summary>

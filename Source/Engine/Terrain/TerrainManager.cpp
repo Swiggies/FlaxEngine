@@ -1,19 +1,21 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "TerrainManager.h"
 #include "Terrain.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/Graphics/GPUDevice.h"
 #include "Engine/Graphics/GPUBuffer.h"
+#include "Engine/Graphics/Shaders/GPUVertexLayout.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Color32.h"
 #include "Engine/Core/Collections/ChunkedArray.h"
 #include "Engine/Core/Collections/Dictionary.h"
-#include "Engine/Content/Content.h"
 #include "Engine/Engine/EngineService.h"
+#include "Engine/Content/Content.h"
 #include "Engine/Content/Assets/MaterialBase.h"
 #include "Engine/Content/AssetReference.h"
-#include "Engine/Core/Log.h"
 #include "Engine/Renderer/DrawCall.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 
 // Must match structure defined in Terrain.shader
 struct TerrainVertex
@@ -25,7 +27,6 @@ struct TerrainVertex
 class GeometryData
 {
 public:
-
     GPUBuffer* VertexBuffer;
     GPUBuffer* IndexBuffer;
     uint32 IndicesCount;
@@ -49,11 +50,11 @@ ChunkedArray<GeometryData, 1024> Pool;
 Dictionary<uint32, GeometryData*> Lookup;
 Array<byte> TempData;
 AssetReference<MaterialBase> DefaultTerrainMaterial;
+GPUVertexLayout* TerrainVertexLayout = nullptr;
 
 class TerrainManagerService : public EngineService
 {
 public:
-
     TerrainManagerService()
         : EngineService(TEXT("Terrain Manager"), 40)
     {
@@ -94,6 +95,7 @@ bool TerrainManager::GetChunkGeometry(DrawCall& drawCall, int32 chunkSize, int32
         data->GetChunkGeometry(drawCall);
         return false;
     }
+    PROFILE_MEM(LevelTerrain);
 
     // Prepare
     const int32 vertexCount = (chunkSize + 1) >> lodIndex;
@@ -132,7 +134,14 @@ bool TerrainManager::GetChunkGeometry(DrawCall& drawCall, int32 chunkSize, int32
             vertex++;
         }
     }
-    auto desc = GPUBufferDescription::Vertex(sizeof(TerrainVertex), vertexCount2, TempData.Get());
+    if (!TerrainVertexLayout)
+    {
+        TerrainVertexLayout = GPUVertexLayout::Get({
+            { VertexElement::Types::TexCoord0, 0, 0, 0, PixelFormat::R32G32_Float },
+            { VertexElement::Types::TexCoord1, 0, 0, 0, PixelFormat::R8G8B8A8_UNorm },
+        });
+    }
+    auto desc = GPUBufferDescription::Vertex(TerrainVertexLayout, sizeof(TerrainVertex), vertexCount2, TempData.Get());
     if (vb->Init(desc))
     {
         Delete(vb);

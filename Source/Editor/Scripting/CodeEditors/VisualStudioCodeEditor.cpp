@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "VisualStudioCodeEditor.h"
 #include "Engine/Platform/FileSystem.h"
@@ -126,6 +126,11 @@ CodeEditorTypes VisualStudioCodeEditor::GetType() const
 String VisualStudioCodeEditor::GetName() const
 {
     return _isInsiders ? TEXT("Visual Studio Code - Insiders") : TEXT("Visual Studio Code");
+}
+
+String VisualStudioCodeEditor::GetGenerateProjectCustomArgs() const
+{
+    return TEXT("-vs2022 -vscode");
 }
 
 void VisualStudioCodeEditor::OpenFile(const String& path, int32 line)

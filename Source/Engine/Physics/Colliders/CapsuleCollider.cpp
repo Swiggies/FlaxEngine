@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "CapsuleCollider.h"
 
@@ -11,7 +11,7 @@ CapsuleCollider::CapsuleCollider(const SpawnParams& params)
 
 void CapsuleCollider::SetRadius(const float value)
 {
-    if (Math::NearEqual(value, _radius))
+    if (value == _radius)
         return;
 
     _radius = value;
@@ -22,7 +22,7 @@ void CapsuleCollider::SetRadius(const float value)
 
 void CapsuleCollider::SetHeight(const float value)
 {
-    if (Math::NearEqual(value, _height))
+    if (value == _height)
         return;
 
     _height = value;
@@ -43,24 +43,33 @@ void CapsuleCollider::DrawPhysicsDebug(RenderView& view)
         return;
     Quaternion rotation;
     Quaternion::Multiply(_transform.Orientation, Quaternion::Euler(0, 90, 0), rotation);
-    const float scaling = _cachedScale.GetAbsolute().MaxValue();
     const float minSize = 0.001f;
-    const float radius = Math::Max(Math::Abs(_radius) * scaling, minSize);
-    const float height = Math::Max(Math::Abs(_height) * scaling, minSize);
+    const float radius = Math::Max(Math::Abs(_radius) * _cachedScale, minSize);
+    const float height = Math::Max(Math::Abs(_height) * _cachedScale, minSize);
     if (view.Mode == ViewMode::PhysicsColliders && !GetIsTrigger())
         DEBUG_DRAW_CAPSULE(_transform.LocalToWorld(_center), rotation, radius, height, _staticActor ? Color::CornflowerBlue : Color::Orchid, 0, true);
     else
         DEBUG_DRAW_WIRE_CAPSULE(_transform.LocalToWorld(_center), rotation, radius, height, Color::GreenYellow * 0.8f, 0, true);
 }
 
+void CapsuleCollider::OnDebugDrawSelf()
+{
+    Quaternion rotation;
+    Quaternion::Multiply(_transform.Orientation, Quaternion::Euler(0, 90, 0), rotation);
+    const float minSize = 0.001f;
+    const float radius = Math::Max(Math::Abs(_radius) * _cachedScale, minSize);
+    const float height = Math::Max(Math::Abs(_height) * _cachedScale, minSize);
+    const Vector3 position = _transform.LocalToWorld(_center);
+    DEBUG_DRAW_WIRE_CAPSULE(position, rotation, radius, height, Color::GreenYellow, 0, false);
+}
+
 void CapsuleCollider::OnDebugDrawSelected()
 {
     Quaternion rotation;
     Quaternion::Multiply(_transform.Orientation, Quaternion::Euler(0, 90, 0), rotation);
-    const float scaling = _cachedScale.GetAbsolute().MaxValue();
     const float minSize = 0.001f;
-    const float radius = Math::Max(Math::Abs(_radius) * scaling, minSize);
-    const float height = Math::Max(Math::Abs(_height) * scaling, minSize);
+    const float radius = Math::Max(Math::Abs(_radius) * _cachedScale, minSize);
+    const float height = Math::Max(Math::Abs(_height) * _cachedScale, minSize);
     const Vector3 position = _transform.LocalToWorld(_center);
     DEBUG_DRAW_WIRE_CAPSULE(position, rotation, radius, height, Color::GreenYellow, 0, false);
 
@@ -92,9 +101,8 @@ void CapsuleCollider::UpdateBounds()
 
 void CapsuleCollider::GetGeometry(CollisionShape& collision)
 {
-    const float scaling = _cachedScale.GetAbsolute().MaxValue();
     const float minSize = 0.001f;
-    const float radius = Math::Max(Math::Abs(_radius) * scaling, minSize);
-    const float height = Math::Max(Math::Abs(_height) * scaling, minSize);
+    const float radius = Math::Max(Math::Abs(_radius) * _cachedScale, minSize);
+    const float height = Math::Max(Math::Abs(_height) * _cachedScale, minSize);
     collision.SetCapsule(radius, height * 0.5f);
 }

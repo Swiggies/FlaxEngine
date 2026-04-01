@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Globalization;
@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 
 namespace FlaxEngine
 {
-    partial struct Rectangle : IEquatable<Rectangle>
+    partial struct Rectangle : IEquatable<Rectangle>, Json.ICustomValueEquals
     {
         /// <summary>
         /// A <see cref="Rectangle"/> which represents an empty space.
@@ -499,21 +499,19 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ref Rectangle other)
         {
-            return Location.Equals(ref other.Location) && Size.Equals(ref other.Size);
+            return Location == other.Location && Size == other.Size;
         }
 
         /// <inheritdoc />
         public bool Equals(Rectangle other)
         {
-            return Location.Equals(ref other.Location) && Size.Equals(ref other.Size);
+            return Equals(ref other);
         }
 
         /// <inheritdoc />
         public override bool Equals(object obj)
         {
-            if (ReferenceEquals(null, obj))
-                return false;
-            return obj is Rectangle && Equals((Rectangle)obj);
+            return obj is Rectangle other && Equals(ref other);
         }
 
         /// <inheritdoc />
@@ -523,6 +521,13 @@ namespace FlaxEngine
             {
                 return (Location.GetHashCode() * 397) ^ Size.GetHashCode();
             }
+        }
+
+        /// <inheritdoc />
+        public bool ValueEquals(object other)
+        {
+            var o = (Rectangle)other;
+            return Equals(ref o);
         }
 
         /// <inheritdoc />

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -65,7 +65,10 @@ namespace Flax.Build
                     if (ApplyConsoleColors)
                         Console.ForegroundColor = color;
 
-                    Console.WriteLine(Indent + message);
+                    if (color != ConsoleColor.Red)
+                        Console.WriteLine(Indent + message);
+                    else
+                        Console.Error.WriteLine(Indent + message);
 
                     if (ApplyConsoleColors)
                         Console.ResetColor();

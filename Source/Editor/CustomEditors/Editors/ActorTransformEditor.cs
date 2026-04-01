@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -14,22 +14,17 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <summary>
         /// The X axis color.
         /// </summary>
-        public static Color AxisColorX = new Color(1.0f, 0.0f, 0.02745f, 1.0f);
+        public static Color AxisColorX = new Color(0.8f, 0.0f, 0.027f, 1.0f);
 
         /// <summary>
         /// The Y axis color.
         /// </summary>
-        public static Color AxisColorY = new Color(0.239215f, 1.0f, 0.047058f, 1.0f);
+        public static Color AxisColorY = new Color(0.239215f, 0.65f, 0.047058f, 1.0f);
 
         /// <summary>
         /// The Z axis color.
         /// </summary>
-        public static Color AxisColorZ = new Color(0.0f, 0.0235294f, 1.0f, 1.0f);
-
-        /// <summary>
-        /// The axes colors grey out scale when input field is not focused.
-        /// </summary>
-        public static float AxisGreyOutFactor = 0.6f;
+        public static Color AxisColorZ = new Color(0.0f, 0.42352f, 0.8f, 1.0f);
 
         /// <summary>
         /// Custom editor for actor position property.
@@ -41,24 +36,22 @@ namespace FlaxEditor.CustomEditors.Editors
             public override void Initialize(LayoutElementsContainer layout)
             {
                 base.Initialize(layout);
-                
+
                 if (XElement.ValueBox.Parent is UniformGridPanel ug)
                 {
-                    ug.Height += 2;
-                    ug.SlotSpacing = new Float2(4);
-                    ug.SlotPadding = new Margin(0, 0, 1, 1);
+                    ug.SlotPadding = new Margin(3.0f, 0.0f, 0.0f, 0.0f);
+                    CheckLayout(ug);
                 }
 
                 // Override colors
-                var back = FlaxEngine.GUI.Style.Current.TextBoxBackground;
-                XElement.ValueBox.BorderColor = Color.Lerp(AxisColorX, back, AxisGreyOutFactor);
                 XElement.ValueBox.BorderSelectedColor = AxisColorX;
-                XElement.ValueBox.Category = Utils.ValueCategory.Distance;
-                YElement.ValueBox.BorderColor = Color.Lerp(AxisColorY, back, AxisGreyOutFactor);
                 YElement.ValueBox.BorderSelectedColor = AxisColorY;
-                YElement.ValueBox.Category = Utils.ValueCategory.Distance;
-                ZElement.ValueBox.BorderColor = Color.Lerp(AxisColorZ, back, AxisGreyOutFactor);
                 ZElement.ValueBox.BorderSelectedColor = AxisColorZ;
+                XElement.ValueBox.HighlightColor = AxisColorX;
+                XElement.ValueBox.Category = Utils.ValueCategory.Distance;
+                YElement.ValueBox.HighlightColor = AxisColorY;
+                YElement.ValueBox.Category = Utils.ValueCategory.Distance;
+                ZElement.ValueBox.HighlightColor = AxisColorZ;
                 ZElement.ValueBox.Category = Utils.ValueCategory.Distance;
             }
         }
@@ -76,21 +69,19 @@ namespace FlaxEditor.CustomEditors.Editors
                 
                 if (XElement.ValueBox.Parent is UniformGridPanel ug)
                 {
-                    ug.Height += 2;
-                    ug.SlotSpacing = new Float2(4);
-                    ug.SlotPadding = new Margin(0, 0, 1, 1);
+                    ug.SlotPadding = new Margin(3.0f, 0.0f, 0.0f, 0.0f);
+                    CheckLayout(ug);
                 }
 
                 // Override colors
-                var back = FlaxEngine.GUI.Style.Current.TextBoxBackground;
-                XElement.ValueBox.BorderColor = Color.Lerp(AxisColorX, back, AxisGreyOutFactor);
                 XElement.ValueBox.BorderSelectedColor = AxisColorX;
-                XElement.ValueBox.Category = Utils.ValueCategory.Angle;
-                YElement.ValueBox.BorderColor = Color.Lerp(AxisColorY, back, AxisGreyOutFactor);
                 YElement.ValueBox.BorderSelectedColor = AxisColorY;
-                YElement.ValueBox.Category = Utils.ValueCategory.Angle;
-                ZElement.ValueBox.BorderColor = Color.Lerp(AxisColorZ, back, AxisGreyOutFactor);
                 ZElement.ValueBox.BorderSelectedColor = AxisColorZ;
+                XElement.ValueBox.HighlightColor = AxisColorX;
+                XElement.ValueBox.Category = Utils.ValueCategory.Angle;
+                YElement.ValueBox.HighlightColor = AxisColorY;
+                YElement.ValueBox.Category = Utils.ValueCategory.Angle;
+                ZElement.ValueBox.HighlightColor = AxisColorZ;
                 ZElement.ValueBox.Category = Utils.ValueCategory.Angle;
             }
         }
@@ -114,7 +105,6 @@ namespace FlaxEditor.CustomEditors.Editors
 
                 _linkButton = new Button
                 {
-                    BackgroundBrush = new SpriteBrush(Editor.Instance.Icons.Link32),
                     Parent = LinkedLabel,
                     Width = 18,
                     Height = 18,
@@ -136,23 +126,21 @@ namespace FlaxEditor.CustomEditors.Editors
                             menu.AddButton("Link", ToggleLink).LinkTooltip("Links scale components for uniform scaling");
                     };
                 }
-                
+
                 if (XElement.ValueBox.Parent is UniformGridPanel ug)
                 {
-                    ug.Height += 2;
-                    ug.SlotSpacing = new Float2(4);
-                    ug.SlotPadding = new Margin(0, 0, 1, 1);
+                    ug.SlotPadding = new Margin(3.0f, 0.0f, 0.0f, 0.0f);
+                    CheckLayout(ug);
                 }
 
                 // Override colors
                 var back = FlaxEngine.GUI.Style.Current.TextBoxBackground;
-                var grayOutFactor = 0.6f;
-                XElement.ValueBox.BorderColor = Color.Lerp(AxisColorX, back, grayOutFactor);
                 XElement.ValueBox.BorderSelectedColor = AxisColorX;
-                YElement.ValueBox.BorderColor = Color.Lerp(AxisColorY, back, grayOutFactor);
                 YElement.ValueBox.BorderSelectedColor = AxisColorY;
-                ZElement.ValueBox.BorderColor = Color.Lerp(AxisColorZ, back, grayOutFactor);
                 ZElement.ValueBox.BorderSelectedColor = AxisColorZ;
+                XElement.ValueBox.HighlightColor = AxisColorX;
+                YElement.ValueBox.HighlightColor = AxisColorY;
+                ZElement.ValueBox.HighlightColor = AxisColorZ;
             }
 
             /// <summary>
@@ -201,7 +189,16 @@ namespace FlaxEditor.CustomEditors.Editors
                 _linkButton.SetColors(backgroundColor);
                 _linkButton.BorderColor = _linkButton.BorderColorSelected = _linkButton.BorderColorHighlighted = Color.Transparent;
                 _linkButton.TooltipText = LinkValues ? "Unlinks scale components from uniform scaling" : "Links scale components for uniform scaling";
+                _linkButton.BackgroundBrush = new SpriteBrush(LinkValues ? Editor.Instance.Icons.Link32 : Editor.Instance.Icons.BrokenLink32);
             }
+        }
+
+        private static void CheckLayout(UniformGridPanel ug)
+        {
+            // Enlarge to fix border visibility
+            ug.Height += 2;
+            ug.SlotSpacing += new Float2(2);
+            ug.SlotPadding += new Margin(0, 0, 1, 1);
         }
     }
 }

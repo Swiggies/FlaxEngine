@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Linq;
@@ -198,6 +198,11 @@ namespace FlaxEditor.Viewport
             actor.Position = PostProcessSpawnedActorLocation(actor, ref hitLocation);
             _owner.Spawn(actor);
             _viewport.Focus();
+
+            // Scroll to the new actor in the hierarchy
+            var actorNode = Editor.Instance.Scene.GetActorNode(actor);
+            if (actorNode?.TreeNode.ParentTree.Parent is Panel treePanel)
+                FlaxEngine.Scripting.InvokeOnUpdate(() => treePanel.ScrollViewTo(actorNode.TreeNode));
         }
 
         private void Spawn(ScriptItem item, SceneGraphNode hit, ref Float2 location, ref Vector3 hitLocation, ref Vector3 hitNormal)

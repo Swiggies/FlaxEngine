@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -70,9 +70,9 @@ namespace FlaxEditor.Tools.Terrain.Sculpt
 
             // Prepare
             var chunkSize = terrain.ChunkSize;
-            var heightmapSize = chunkSize * FlaxEngine.Terrain.PatchEdgeChunksCount + 1;
+            var heightmapSize = terrain.HeightmapSize;
             var heightmapLength = heightmapSize * heightmapSize;
-            var patchSize = chunkSize * FlaxEngine.Terrain.UnitsPerVertex * FlaxEngine.Terrain.PatchEdgeChunksCount;
+            var patchSize = terrain.PatchSize;
             var tempBuffer = (float*)gizmo.GetHeightmapTempBuffer(heightmapLength * sizeof(float)).ToPointer();
             var unitsPerVertexInv = 1.0f / FlaxEngine.Terrain.UnitsPerVertex;
 

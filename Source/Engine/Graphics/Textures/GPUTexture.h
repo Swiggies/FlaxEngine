@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -438,6 +438,12 @@ public:
     API_FUNCTION() virtual GPUTextureView* ViewReadOnlyDepth() const = 0;
 
     /// <summary>
+    /// Gets the view to the texture as stencil buffer.
+    /// </summary>
+    /// <returns>The view to the stencil resource descriptor.</returns>
+    API_FUNCTION() virtual GPUTextureView* ViewStencil() const = 0;
+
+    /// <summary>
     /// Implicit conversion to the first surface (only for 2D textures).
     /// </summary>
     /// <returns>The view to the main texture surface.</returns>
@@ -499,7 +505,7 @@ public:
     /// <summary>
     /// Uploads mip map data to the GPU. Creates async GPU task.
     /// </summary>
-    /// <param name="data">Data to upload (it must be valid for the next a few frames due to GPU latency and async works executing)</param>
+    /// <param name="data">Data to upload, it must match texture dimensions. It must be valid for the next couple of frames due to GPU async task latency or use data copy.</param>
     /// <param name="mipIndex">Mip level index.</param>
     /// <param name="copyData">If true, the data will be copied to the async execution task instead of using the input pointer provided.</param>
     /// <returns>Created async task or null if cannot.</returns>
@@ -508,7 +514,7 @@ public:
     /// <summary>
     /// Uploads mip map data to the GPU. Creates async GPU task.
     /// </summary>
-    /// <param name="data">Data to upload (it must be valid for the next a few frames due to GPU latency and async works executing)</param>
+    /// <param name="data">Data to upload, it must match texture dimensions. It must be valid for the next couple of frames due to GPU async task latency or use data copy.</param>
     /// <param name="mipIndex">Mip level index.</param>
     /// <param name="rowPitch">The data row pitch.</param>
     /// <param name="slicePitch">The data slice pitch.</param>
@@ -517,11 +523,19 @@ public:
     GPUTask* UploadMipMapAsync(const BytesContainer& data, int32 mipIndex, int32 rowPitch, int32 slicePitch, bool copyData = false);
 
     /// <summary>
-    /// Stops current thread execution to gather texture data from the GPU.
+    /// Uploads texture data to the GPU. Actual data copy to the GPU memory is performed via async task.
     /// </summary>
-    /// <param name="result">The result data.</param>
+    /// <param name="data">Data to upload, it must match texture dimensions. It must be valid for the next couple of frames due to GPU async task latency or use data copy.</param>
+    /// <param name="copyData">If true, the data will be copied to the async execution task instead of using the input pointer provided.</param>
+    /// <returns>True if cannot upload data, otherwise false.</returns>
+    API_FUNCTION() bool UploadData(TextureData& data, bool copyData = false);
+
+    /// <summary>
+    /// Downloads the texture data to be accessible from CPU. For frequent access, use staging textures, otherwise current thread will be stalled to wait for the GPU frame to copy data into staging buffer.
+    /// </summary>
+    /// <param name="result">The destination texture data container.</param>
     /// <returns>True if cannot download data, otherwise false.</returns>
-    bool DownloadData(TextureData& result);
+    API_FUNCTION() bool DownloadData(TextureData& result);
 
     /// <summary>
     /// Creates GPU async task that will gather texture data from the GPU.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Linq;
@@ -65,6 +65,9 @@ namespace FlaxEditor.Content
     /// <seealso cref="FlaxEditor.Content.Create.CreateFileEntry" />
     public class GenericJsonCreateEntry : CreateFileEntry
     {
+        /// <inheritdoc/>
+        public override bool CanBeCreated => _options.Type != null; 
+
         /// <summary>
         /// The create options.
         /// </summary>

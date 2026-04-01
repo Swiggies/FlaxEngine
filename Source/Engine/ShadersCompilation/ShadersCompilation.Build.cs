@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using System.IO;
@@ -63,6 +63,8 @@ public class ShadersCompilation : EngineModule
             options.PrivateDependencies.Add("ShaderCompilerPS4");
         if (Sdk.HasValid("PS5Sdk"))
             options.PrivateDependencies.Add("ShaderCompilerPS5");
+        if (Flax.Build.Platform.GetPlatform(TargetPlatform.XboxScarlett, true) != null)
+            options.PrivateDependencies.Add("ShaderCompilerXboxScarlett");
     }
 
     /// <inheritdoc />

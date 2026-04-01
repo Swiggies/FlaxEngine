@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -17,6 +17,15 @@ API_STRUCT(NoDefault, Template, MarshalAs=JsonAsset*) struct JsonAssetReference 
     JsonAssetReference(JsonAsset* asset)
     {
         OnSet(asset);
+    }
+
+    explicit JsonAssetReference(decltype(__nullptr))
+    {
+    }
+
+    explicit JsonAssetReference(IAssetReference* owner)
+        : AssetReference<JsonAsset>(owner)
+    {
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -12,10 +12,7 @@ namespace FlaxEditor.Windows.Assets
 {
     public sealed partial class PrefabWindow
     {
-        /// <summary>
-        /// The current selection (readonly).
-        /// </summary>
-        public readonly List<SceneGraphNode> Selection = new List<SceneGraphNode>();
+        private readonly List<SceneGraphNode> _selection = new List<SceneGraphNode>();
 
         /// <summary>
         /// Occurs when selection gets changed.
@@ -54,7 +51,7 @@ namespace FlaxEditor.Windows.Assets
         /// <param name="before">The selection before the change.</param>
         public void OnSelectionChanged(SceneGraphNode[] before)
         {
-            if (LockSelectedObjects)
+            if (LockSelection)
                 return;
 
             Undo.AddAction(new SelectionChangeAction(before, Selection.ToArray(), OnSelectionUndo));
@@ -100,10 +97,7 @@ namespace FlaxEditor.Windows.Assets
 
                 // For single node selected scroll view so user can see it
                 if (nodes.Count == 1)
-                {
-                    nodes[0].ExpandAllParents(true);
-                    ScrollViewTo(nodes[0]);
-                }
+                    ScrollToSelectedNode();
             }
 
             // Update properties editor

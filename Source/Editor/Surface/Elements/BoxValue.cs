@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using RealValueBox = FlaxEditor.GUI.Input.DoubleValueBox;
@@ -64,6 +64,7 @@ namespace FlaxEditor.Surface.Elements
         {
             ParentNode = parentNode;
             Archetype = archetype;
+            AutoFocus = true;
 
             var back = Style.Current.TextBoxBackground;
             var grayOutFactor = 0.6f;

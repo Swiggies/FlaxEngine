@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -119,21 +119,26 @@ public:
     static void ComputeCascadeUpdateFrequency(int32 cascadeIndex, int32 cascadeCount, int32& updateFrequency, int32& updatePhrase, int32 updateMaxCountPerFrame = 1);
 
     // Checks if cached data should be updated during the given frame.
-    FORCE_INLINE static bool ShouldUpdateCascade(int32 frameIndex, int32 cascadeIndex, int32 cascadeCount, int32 updateMaxCountPerFrame = 1, bool updateForce = false)
-    {
-        int32 updateFrequency, updatePhrase;
-        ComputeCascadeUpdateFrequency(cascadeIndex, cascadeCount, updateFrequency, updatePhrase, updateMaxCountPerFrame);
-        return (frameIndex % updateFrequency == updatePhrase) || updateForce;
-    }
+    static bool ShouldUpdateCascade(int32 frameIndex, int32 cascadeIndex, int32 cascadeCount, int32 updateMaxCountPerFrame = 1, bool updateForce = false);
 
     // Calculates temporal offset in the dithering factor that gets cleaned out by TAA.
     // Returns 0-1 value based on unscaled draw time for temporal effects to reduce artifacts from screen-space dithering when using Temporal Anti-Aliasing.
     static float ComputeTemporalTime();
 
-    static void CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal);
-    static void CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal, const Float3& tangent);
+    // [Deprecated in v1.10]
+    DEPRECATED("Use CalculateTangentFrame with unpacked Float3/Float4.") static void CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal);
+    // [Deprecated in v1.10]
+    DEPRECATED("Use CalculateTangentFrame with unpacked Float3/Float4.") static void CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal, const Float3& tangent);
+
+    // Result normal/tangent are already packed into [0;1] range.
+    API_FUNCTION() static void CalculateTangentFrame(API_PARAM(Out) Float3& resultNormal, API_PARAM(Out) Float4& resultTangent, API_PARAM(Ref) const Float3& normal);
+    // Result normal/tangent are already packed into [0;1] range.
+    API_FUNCTION() static void CalculateTangentFrame(API_PARAM(Out) Float3& resultNormal, API_PARAM(Out) Float4& resultTangent, API_PARAM(Ref) const Float3& normal, API_PARAM(Ref) const Float3& tangent);
 
     static void ComputeSphereModelDrawMatrix(const RenderView& view, const Float3& position, float radius, Matrix& resultWorld, bool& resultIsViewInside);
+
+    // Calculates error for a given render target format to reduce floating-point precision artifacts via QuantizeColor (from Noise.hlsl).
+    static Float3 GetColorQuantizationError(PixelFormat format);
 };
 
 // Calculates mip levels count for a texture 1D.

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -87,8 +87,11 @@ namespace FlaxEditor.CustomEditors
             var targetTypeType = TypeUtils.GetType(targetType);
             if (canUseRefPicker)
             {
+                // TODO: add generic way of CustomEditor for ref pickers (use it on AssetRefEditor/GPUTextureEditor/...)
                 if (typeof(Asset).IsAssignableFrom(targetTypeType))
                     return new AssetRefEditor();
+                if (typeof(GPUTexture).IsAssignableFrom(targetTypeType))
+                    return new GPUTextureEditor();
                 if (typeof(FlaxEngine.Object).IsAssignableFrom(targetTypeType))
                     return new FlaxObjectRefEditor();
             }

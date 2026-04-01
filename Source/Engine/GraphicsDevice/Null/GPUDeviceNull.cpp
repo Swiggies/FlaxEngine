@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_NULL
 
@@ -11,8 +11,10 @@
 #include "GPUTimerQueryNull.h"
 #include "GPUBufferNull.h"
 #include "GPUSamplerNull.h"
+#include "GPUVertexLayoutNull.h"
 #include "GPUSwapChainNull.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Graphics/Async/GPUTasksManager.h"
 
 GPUDeviceNull::GPUDeviceNull()
@@ -144,16 +146,19 @@ void GPUDeviceNull::WaitForGPU()
 
 GPUTexture* GPUDeviceNull::CreateTexture(const StringView& name)
 {
+    PROFILE_MEM(GraphicsTextures);
     return New<GPUTextureNull>();
 }
 
 GPUShader* GPUDeviceNull::CreateShader(const StringView& name)
 {
+    PROFILE_MEM(GraphicsShaders);
     return New<GPUShaderNull>();
 }
 
 GPUPipelineState* GPUDeviceNull::CreatePipelineState()
 {
+    PROFILE_MEM(GraphicsCommands);
     return New<GPUPipelineStateNull>();
 }
 
@@ -164,12 +169,18 @@ GPUTimerQuery* GPUDeviceNull::CreateTimerQuery()
 
 GPUBuffer* GPUDeviceNull::CreateBuffer(const StringView& name)
 {
+    PROFILE_MEM(GraphicsBuffers);
     return New<GPUBufferNull>();
 }
 
 GPUSampler* GPUDeviceNull::CreateSampler()
 {
     return New<GPUSamplerNull>();
+}
+
+GPUVertexLayout* GPUDeviceNull::CreateVertexLayout(const VertexElements& elements, bool explicitOffsets)
+{
+    return New<GPUVertexLayoutNull>(elements);
 }
 
 GPUSwapChain* GPUDeviceNull::CreateSwapChain(Window* window)

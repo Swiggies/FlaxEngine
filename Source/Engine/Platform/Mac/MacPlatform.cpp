@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_MAC
 
@@ -54,7 +54,7 @@ String ComputerName;
 
 DialogResult MessageBox::Show(Window* parent, const StringView& text, const StringView& caption, MessageBoxButtons buttons, MessageBoxIcon icon)
 {
-    if (CommandLine::Options.Headless)
+    if (CommandLine::Options.Headless.IsTrue())
         return DialogResult::None;
 	NSAlert* alert = [[NSAlert alloc] init];
     ASSERT(alert);
@@ -258,7 +258,10 @@ bool MacPlatform::Init()
 
     // Get device id
     {
-        io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
+#if MAC_OS_X_VERSION_MAX_ALLOWED < 120000
+#define kIOMainPortDefault kIOMasterPortDefault
+#endif
+        io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMainPortDefault, "IOService:/");
         CFStringRef deviceUuid = (CFStringRef)IORegistryEntryCreateCFProperty(ioRegistryRoot, CFSTR(kIOPlatformUUIDKey), kCFAllocatorDefault, 0);
         IOObjectRelease(ioRegistryRoot);
         String uuidStr = AppleUtils::ToString(deviceUuid);
@@ -305,15 +308,14 @@ void MacPlatform::LogInfo()
 {
     ApplePlatform::LogInfo();
 
-    char str[250];
-    size_t strSize = sizeof(str);
-    if (sysctlbyname("kern.osrelease", str, &strSize, nullptr, 0) != 0)
-        str[0] = 0;
-    String osRelease(str);
-    if (sysctlbyname("kern.osproductversion", str, &strSize, nullptr, 0) != 0)
-        str[0] = 0;
-    String osProductVer(str);
-    LOG(Info, "macOS {1} (kernel {0})", osRelease, osProductVer);
+    constexpr int32 BufferSize = 250;
+    char osRelease[BufferSize], osProductVer[BufferSize];
+    size_t strSize = BufferSize;
+    if (sysctlbyname("kern.osrelease", osRelease, &strSize, nullptr, 0) != 0)
+        osRelease[0] = 0;
+    if (sysctlbyname("kern.osproductversion", osProductVer, &strSize, nullptr, 0) != 0)
+        osProductVer[0] = 0;
+    LOG(Info, "macOS {1} (kernel {0})", StringAsUTF16<BufferSize>(osRelease).Get(), StringAsUTF16<BufferSize>(osProductVer).Get());
 }
 
 void MacPlatform::BeforeRun()
@@ -486,6 +488,7 @@ int32 MacPlatform::CreateProcess(CreateProcessSettings& settings)
                       String line((const char*)data.bytes, data.length);
                       if (settings.SaveOutput)
                         settings.Output.Add(line.Get(), line.Length());
+#if LOG_ENABLE
                       if (settings.LogOutput)
                       {
                         StringView lineView(line);
@@ -493,6 +496,7 @@ int32 MacPlatform::CreateProcess(CreateProcessSettings& settings)
                             lineView = StringView(line.Get(), line.Length() - 1);
                         Log::Logger::Write(LogType::Info, lineView);
                       }
+#endif
                     [[stdoutPipe fileHandleForReading] waitForDataInBackgroundAndNotify];
                 }
             }
@@ -513,6 +517,7 @@ int32 MacPlatform::CreateProcess(CreateProcessSettings& settings)
                       String line((const char*)data.bytes, data.length);
                       if (settings.SaveOutput)
                         settings.Output.Add(line.Get(), line.Length());
+#if LOG_ENABLE
                       if (settings.LogOutput)
                       {
                         StringView lineView(line);
@@ -520,6 +525,7 @@ int32 MacPlatform::CreateProcess(CreateProcessSettings& settings)
                             lineView = StringView(line.Get(), line.Length() - 1);
                         Log::Logger::Write(LogType::Error, lineView);
                       }
+#endif
                     [[stderrPipe fileHandleForReading] waitForDataInBackgroundAndNotify];
                 }
             }

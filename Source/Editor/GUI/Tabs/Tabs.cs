@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -47,6 +47,7 @@ namespace FlaxEditor.GUI.Tabs
                 if (EnabledInHierarchy && Tab.Enabled)
                 {
                     Tabs.SelectedTab = Tab;
+                    Tab.PerformLayout(true);
                     Tabs.Focus();
                 }
                 return true;

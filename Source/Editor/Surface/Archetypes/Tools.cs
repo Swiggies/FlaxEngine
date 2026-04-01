@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -199,7 +199,7 @@ namespace FlaxEditor.Surface.Archetypes
             private Label _labelValue;
             private FloatValueBox _timeValue;
             private ColorValueBox _colorValue;
-            private const int MaxStops = 8;
+            private const int MaxStops = 12;
 
             /// <inheritdoc />
             public ColorGradientNode(uint id, VisjectSurfaceContext context, NodeArchetype nodeArch, GroupArchetype groupArch)
@@ -453,7 +453,7 @@ namespace FlaxEditor.Surface.Archetypes
             }
         }
 
-        private class CurveNode<T> : SurfaceNode where T : struct
+        private class CurveNode<T> : ResizableSurfaceNode where T : struct
         {
             private BezierCurveEditor<T> _curve;
             private bool _isSavingCurve;
@@ -467,7 +467,7 @@ namespace FlaxEditor.Surface.Archetypes
                     Create = (id, context, arch, groupArch) => new CurveNode<T>(id, context, arch, groupArch),
                     Description = "An animation spline represented by a set of keyframes, each representing an endpoint of a Bezier curve.",
                     Flags = NodeFlags.AllGraphs,
-                    Size = new Float2(400, 180.0f),
+                    Size = new Float2(400, 180),
                     DefaultValues = new object[]
                     {
                         // Keyframes count
@@ -491,6 +491,8 @@ namespace FlaxEditor.Surface.Archetypes
                         0.0f, zero, zero, zero,
                         0.0f, zero, zero, zero,
                         0.0f, zero, zero, zero,
+
+                        new Float2(400, 180),
                     },
                     Elements = new[]
                     {
@@ -504,28 +506,50 @@ namespace FlaxEditor.Surface.Archetypes
             public CurveNode(uint id, VisjectSurfaceContext context, NodeArchetype nodeArch, GroupArchetype groupArch)
             : base(id, context, nodeArch, groupArch)
             {
+                _sizeValueIndex = 29; // Index of the Size stored in Values array
             }
-
+                
             /// <inheritdoc />
             public override void OnLoaded(SurfaceNodeActions action)
             {
                 base.OnLoaded(action);
 
+                // Create curve editor
                 var upperLeft = GetBox(0).BottomLeft;
                 var upperRight = GetBox(1).BottomRight;
                 float curveMargin = 20.0f;
-
                 _curve = new BezierCurveEditor<T>
                 {
                     MaxKeyframes = 7,
                     Bounds = new Rectangle(upperLeft + new Float2(curveMargin, 10.0f), upperRight.X - upperLeft.X - curveMargin * 2.0f, 140.0f),
-                    Parent = this
+                    Parent = this,
+                    AnchorMax = Float2.One,
                 };
                 _curve.Edited += OnCurveEdited;
                 _curve.UnlockChildrenRecursive();
                 _curve.PerformLayout();
 
+                // Sync keyframes
                 UpdateCurveKeyframes();
+            }
+
+            /// <inheritdoc />
+            public override void OnSurfaceLoaded(SurfaceNodeActions action)
+            {
+                base.OnSurfaceLoaded(action);
+
+                // Ensure the whole curve is shown
+                _curve.ShowWholeCurve();
+            }
+
+            public override void OnValuesChanged()
+            {
+                base.OnValuesChanged();
+
+                if (!_isSavingCurve)
+                {
+                    UpdateCurveKeyframes();
+                }
             }
 
             private void OnCurveEdited()
@@ -551,17 +575,6 @@ namespace FlaxEditor.Surface.Archetypes
                 SetValues(values);
 
                 _isSavingCurve = false;
-            }
-
-            /// <inheritdoc />
-            public override void OnValuesChanged()
-            {
-                base.OnValuesChanged();
-
-                if (!_isSavingCurve)
-                {
-                    UpdateCurveKeyframes();
-                }
             }
 
             private void UpdateCurveKeyframes()
@@ -1386,10 +1399,11 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Time",
                 Description = "Game time constant",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(110, 20),
+                Size = new Float2(110, 40),
                 Elements = new[]
                 {
-                    NodeElementArchetype.Factory.Output(0, "", typeof(float), 0),
+                    NodeElementArchetype.Factory.Output(0, "Time", typeof(float), 0),
+                    NodeElementArchetype.Factory.Output(1, "Scaled Time", typeof(float), 1),
                 }
             },
             new NodeArchetype
@@ -1499,14 +1513,18 @@ namespace FlaxEditor.Surface.Archetypes
                     2,
 
                     // Stop 0
-                    0.1f,
-                    Color.CornflowerBlue,
+                    0.05f,
+                    Color.Black,
 
                     // Stop 1
-                    0.9f,
-                    Color.GreenYellow,
+                    0.95f,
+                    Color.White,
 
-                    // Empty stops 2-7
+                    // Empty stops 2-11
+                    0.0f, Color.Black,
+                    0.0f, Color.Black,
+                    0.0f, Color.Black,
+                    0.0f, Color.Black,
                     0.0f, Color.Black,
                     0.0f, Color.Black,
                     0.0f, Color.Black,
@@ -1570,7 +1588,7 @@ namespace FlaxEditor.Surface.Archetypes
                 DefaultValues = new object[]
                 {
                     Guid.Empty,
-                    string.Empty
+                    string.Empty,
                 },
                 Elements = new[]
                 {

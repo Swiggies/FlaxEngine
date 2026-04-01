@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Engine.h"
 #include "Game.h"
@@ -71,10 +71,20 @@ Action Engine::Draw;
 Action Engine::Pause;
 Action Engine::Unpause;
 Action Engine::RequestingExit;
+Delegate<StringView, void*> Engine::ReportCrash;
+FatalErrorType Engine::FatalError = FatalErrorType::None;
+bool Engine::IsRequestingExit = false;
+int32 Engine::ExitCode = 0;
 Window* Engine::MainWindow = nullptr;
+double EngineIdleTime = 0;
 
 int32 Engine::Main(const Char* cmdLine)
 {
+#if COMPILE_WITH_PROFILER
+    extern void InitProfilerMemory(const Char* cmdLine, int32 stage);
+    InitProfilerMemory(cmdLine, 0);
+#endif
+    PROFILE_MEM_BEGIN(Engine);
     EngineImpl::CommandLine = cmdLine;
     Globals::MainThreadID = Platform::GetCurrentThreadID();
     StartupTime = DateTime::Now();
@@ -100,6 +110,9 @@ int32 Engine::Main(const Char* cmdLine)
         Platform::Fatal(TEXT("Cannot init platform."));
         return -1;
     }
+#if COMPILE_WITH_PROFILER
+    InitProfilerMemory(cmdLine, 1);
+#endif
 
     Platform::SetHighDpiAwarenessEnabled(!CommandLine::Options.LowDPI.IsTrue());
     Time::StartupTime = DateTime::Now();
@@ -138,7 +151,9 @@ int32 Engine::Main(const Char* cmdLine)
     {
         // End
         LOG(Warning, "Loading project cancelled. Closing...");
+#if LOG_ENABLE
         Log::Logger::Dispose();
+#endif
         return 0;
     }
 #endif
@@ -156,10 +171,11 @@ int32 Engine::Main(const Char* cmdLine)
 #if !USE_EDITOR && (PLATFORM_WINDOWS || PLATFORM_LINUX || PLATFORM_MAC)
     EngineImpl::RunInBackground = PlatformSettings::Get()->RunInBackground;
 #endif
-    Log::Logger::WriteFloor();
+    LOG_FLOOR();
     LOG_FLUSH();
     Time::Synchronize();
     EngineImpl::IsReady = true;
+    PROFILE_MEM_END();
 
     // Main engine loop
     const bool useSleep = true; // TODO: this should probably be a platform setting
@@ -175,7 +191,10 @@ int32 Engine::Main(const Char* cmdLine)
             if (timeToTick > 0.002)
             {
                 PROFILE_CPU_NAMED("Idle");
+                auto sleepStart = Platform::GetTimeSeconds();
                 Platform::Sleep(1);
+                auto sleepEnd = Platform::GetTimeSeconds();
+                EngineIdleTime += sleepEnd - sleepStart;
             }
         }
 
@@ -200,14 +219,19 @@ int32 Engine::Main(const Char* cmdLine)
         {
             PROFILE_CPU_NAMED("Platform.Tick");
             Platform::Tick();
+#if COMPILE_WITH_PROFILER
+            extern void TickProfilerMemory();
+            TickProfilerMemory();
+#endif
         }
-        
+
         // Update game logic
         if (Time::OnBeginUpdate(time))
         {
             OnUpdate();
             OnLateUpdate();
             Time::OnEndUpdate();
+            EngineIdleTime = 0;
         }
 
         // Start physics simulation
@@ -223,7 +247,6 @@ int32 Engine::Main(const Char* cmdLine)
         {
             OnDraw();
             Time::OnEndDraw();
-            FrameMark;
         }
     }
 
@@ -236,12 +259,13 @@ int32 Engine::Main(const Char* cmdLine)
         FileSystem::DeleteDirectory(Globals::TemporaryFolder);
     }
 
-    return Globals::ExitCode;
+    return ExitCode;
 }
 
-void Engine::Exit(int32 exitCode)
+void Engine::Exit(int32 exitCode, FatalErrorType error)
 {
     ASSERT(IsInMainThread());
+    FatalError = error;
 
     // Call on exit event
     OnExit();
@@ -250,24 +274,42 @@ void Engine::Exit(int32 exitCode)
     exit(exitCode);
 }
 
-void Engine::RequestExit(int32 exitCode)
+void Engine::RequestExit(int32 exitCode, FatalErrorType error)
 {
-    if (Globals::IsRequestingExit)
+    if (IsRequestingExit)
         return;
 #if USE_EDITOR
     // Send to editor (will leave play mode if need to)
-    if (Editor::Managed->OnAppExit())
-    {
-        Globals::IsRequestingExit = true;
-        Globals::ExitCode = exitCode;
-        RequestingExit();
-    }
-#else
+    if (!Editor::Managed->OnAppExit())
+        return;
+#endif
+    IsRequestingExit = true;
+    ExitCode = exitCode;
+    PRAGMA_DISABLE_DEPRECATION_WARNINGS;
     Globals::IsRequestingExit = true;
     Globals::ExitCode = exitCode;
+    PRAGMA_ENABLE_DEPRECATION_WARNINGS;
+    FatalError = error;
     RequestingExit();
-#endif
 }
+
+#if !BUILD_SHIPPING
+
+void Engine::Crash(FatalErrorType error)
+{
+    switch (error)
+    {
+    case FatalErrorType::None:
+    case FatalErrorType::Exception:
+        *((int32*)3) = 11;
+        break;
+    default:
+        Platform::Fatal(TEXT("Crash Test"), nullptr, error);
+        break;
+    }
+}
+
+#endif
 
 void Engine::OnFixedUpdate()
 {
@@ -354,6 +396,11 @@ void Engine::OnLateUpdate()
 
 void Engine::OnDraw()
 {
+#if COMPILE_WITH_PROFILER
+    // Auto-enable GPU events when Tracy got connected
+    if (!ProfilerGPU::EventsEnabled && TracyIsConnected)
+        ProfilerGPU::EventsEnabled = true;
+#endif
     PROFILE_CPU_NAMED("Draw");
 
     // Begin frame rendering
@@ -368,6 +415,7 @@ void Engine::OnDraw()
     device->Draw();
 
     // End frame rendering
+    FrameMark;
 #if COMPILE_WITH_PROFILER
     ProfilerGPU::EndFrame();
 #endif
@@ -407,7 +455,7 @@ bool Engine::IsReady()
 
 bool Engine::ShouldExit()
 {
-    return Globals::IsRequestingExit;
+    return IsRequestingExit;
 }
 
 bool Engine::IsEditor()
@@ -416,6 +464,15 @@ bool Engine::IsEditor()
     return true;
 #else
     return false;
+#endif
+}
+
+bool Engine::IsPlayMode()
+{
+#if USE_EDITOR
+    return Editor::IsPlayMode;
+#else
+    return true;
 #endif
 }
 
@@ -508,16 +565,20 @@ void Engine::OnExit()
 #if COMPILE_WITH_PROFILER
     ProfilerCPU::Dispose();
     ProfilerGPU::Dispose();
+    ProfilerMemory::Enabled = false;
 #endif
 
+#if LOG_ENABLE
     // Close logging service
     Log::Logger::Dispose();
+#endif
 
     Platform::Exit();
 }
 
 void EngineImpl::InitLog()
 {
+#if LOG_ENABLE
     // Initialize logger
     Log::Logger::Init();
 
@@ -534,7 +595,11 @@ void EngineImpl::InitLog()
 #if COMPILE_WITH_DEV_ENV
     LOG(Info, "Compiled for Dev Environment");
 #endif
+#if defined(FLAXENGINE_BRANCH) && defined(FLAXENGINE_COMMIT)
+    LOG(Info, "Version " FLAXENGINE_VERSION_TEXT ", {}, {}", StringAsUTF16<>(FLAXENGINE_BRANCH).Get(), StringAsUTF16<>(FLAXENGINE_COMMIT).Get());
+#else
     LOG(Info, "Version " FLAXENGINE_VERSION_TEXT);
+#endif
     const Char* cpp = TEXT("?");
     if (__cplusplus == 202101L) cpp = TEXT("C++23");
     else if (__cplusplus == 202002L) cpp = TEXT("C++20");
@@ -571,6 +636,7 @@ void EngineImpl::InitLog()
     Platform::LogInfo();
 
     LOG_FLUSH();
+#endif
 }
 
 void EngineImpl::InitPaths()
@@ -631,9 +697,9 @@ void EngineImpl::InitPaths()
         FileSystem::CreateDirectory(Globals::ProjectContentFolder);
     if (!FileSystem::DirectoryExists(Globals::ProjectSourceFolder))
         FileSystem::CreateDirectory(Globals::ProjectSourceFolder);
-    if (CommandLine::Options.ClearCache)
+    if (CommandLine::Options.ClearCache.IsTrue())
         FileSystem::DeleteDirectory(Globals::ProjectCacheFolder, true);
-    else if (CommandLine::Options.ClearCookerCache)
+    else if (CommandLine::Options.ClearCookerCache.IsTrue())
         FileSystem::DeleteDirectory(Globals::ProjectCacheFolder / TEXT("Cooker"), true);
     if (!FileSystem::DirectoryExists(Globals::ProjectCacheFolder))
         FileSystem::CreateDirectory(Globals::ProjectCacheFolder);

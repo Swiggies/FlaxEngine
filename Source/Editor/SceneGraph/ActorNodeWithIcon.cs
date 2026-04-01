@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -35,7 +35,8 @@ namespace FlaxEditor.SceneGraph
                 return false;
             }
 
-            BoundingSphere sphere = new BoundingSphere(Transform.Translation, 7.0f);
+            var center = _actor.Transform.Translation;
+            ViewportIconsRenderer.GetBounds(ref center, ref ray.Ray.Position, out var sphere);
             return CollisionsHelper.RayIntersectsSphere(ref ray.Ray, ref sphere, out distance);
         }
     }

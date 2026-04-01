@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -355,14 +355,14 @@ namespace FlaxEditor.GUI.ContextMenu
         }
 
         /// <inheritdoc />
-        public override void Show(Control parent, Float2 location)
+        public override void Show(Control parent, Float2 location, ContextMenuDirection? direction = null)
         {
             // Remove last separator to make context menu look better
             int lastIndex = _panel.Children.Count - 1;
             if (lastIndex >= 0 && _panel.Children[lastIndex] is ContextMenuSeparator separator)
                 separator.Dispose();
 
-            base.Show(parent, location);
+            base.Show(parent, location, direction);
         }
 
         /// <inheritdoc />
@@ -502,6 +502,7 @@ namespace FlaxEditor.GUI.ContextMenu
             if (base.OnKeyDown(key))
                 return true;
 
+            // Keyboard navigation around the menu
             switch (key)
             {
             case KeyboardKeys.ArrowDown:
@@ -525,6 +526,20 @@ namespace FlaxEditor.GUI.ContextMenu
                         return true;
                     }
                 }
+                break;
+            case KeyboardKeys.ArrowRight:
+                for (int i = 0; i < _panel.Children.Count; i++)
+                {
+                    if (_panel.Children[i] is ContextMenuChildMenu item && item.Visible && item.IsFocused && !item.ContextMenu.IsOpened)
+                    {
+                        item.ShowChild(this);
+                        item.ContextMenu._panel.Children.FirstOrDefault(x => x is ContextMenuButton && x.Visible)?.Focus();
+                        break;
+                    }
+                }
+                break;
+            case KeyboardKeys.ArrowLeft:
+                ParentCM?.RootWindow.Focus();
                 break;
             }
 

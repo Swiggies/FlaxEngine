@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "NetworkManager.h"
 #include "NetworkClient.h"
@@ -10,12 +10,13 @@
 #include "FlaxEngine.Gen.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Collections/Array.h"
+#include "Engine/Core/Collections/Dictionary.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Engine/Time.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Scripting/Scripting.h"
-
-#define NETWORK_PROTOCOL_VERSION 3
+#include "Engine/Threading/Threading.h"
 
 float NetworkManager::NetworkFPS = 60.0f;
 NetworkPeer* NetworkManager::Peer = nullptr;
@@ -30,11 +31,72 @@ Delegate<NetworkClientConnectionData&> NetworkManager::ClientConnecting;
 Delegate<NetworkClient*> NetworkManager::ClientConnected;
 Delegate<NetworkClient*> NetworkManager::ClientDisconnected;
 
+PACK_STRUCT(struct NetworkMessageKey
+    {
+    NetworkMessageIDs ID = NetworkMessageIDs::Key;
+    byte Type;
+    uint32 Index;
+    });
+
+struct NetworkKey
+{
+    enum Types
+    {
+        TypeNone = 0,
+        TypeId = 1,
+        TypeName = 2,
+    } Type;
+
+    union
+    {
+        Guid Id;
+        StringAnsiView Name;
+    };
+
+    POD_COPYABLE(NetworkKey);
+
+    NetworkKey()
+    {
+        Type = TypeNone;
+    }
+
+    NetworkKey(const Guid& id)
+    {
+        Type = TypeId;
+        Id = id;
+    }
+
+    NetworkKey(const StringAnsiView& name)
+    {
+        Type = TypeName;
+        Name = name;
+    }
+};
+
+struct NetworkKeys
+{
+    CriticalSection Lock;
+    Array<NetworkKey> Table;
+    Dictionary<Guid, uint32> LookupId;
+    Dictionary<StringAnsiView, uint32> LookupName;
+    Dictionary<Guid, NetworkKey> PendingIds;
+    Dictionary<StringAnsiView, NetworkKey> PendingNames;
+
+    void SendPending();
+    void SendAll(const NetworkConnection* target = nullptr);
+    void Clear();
+
+private:
+    static void Send(const NetworkKey& key, uint32 index, const NetworkConnection* target = nullptr);
+};
+
 namespace
 {
     uint32 GameProtocolVersion = 0;
     uint32 NextClientId = 0;
     double LastUpdateTime = 0;
+    Array<NetworkConnection> ActiveConnections;
+    NetworkKeys Keys;
 }
 
 PACK_STRUCT(struct NetworkMessageHandshake
@@ -54,6 +116,159 @@ PACK_STRUCT(struct NetworkMessageHandshakeReply
     uint32 ClientId;
     int32 Result;
     });
+
+FORCE_INLINE StringAnsiView CloneAllocName(const StringAnsiView& name)
+{
+    StringAnsiView result;
+    if (name.Get())
+    {
+        const int32 length = name.Length();
+        char* str = (char*)Allocator::Allocate(length + 1);
+        Platform::MemoryCopy(str, name.Get(), length);
+        str[length] = 0;
+        result = StringAnsiView(str, length);
+    }
+    return result;
+}
+
+FORCE_INLINE bool IsNetworkKeyValid(uint32 index)
+{
+    // TODO: use NetworkClientsMask to skip using network keys for clients that might not know it yet
+    // TODO: if key has been added within a last couple of frames then don't use it yet as it needs to be propagated across the peers
+    return true;
+}
+
+void NetworkMessage::WriteNetworkId(const Guid& id)
+{
+#if USE_NETWORK_KEYS
+    ScopeLock lock(Keys.Lock);
+    uint32 index = MAX_uint32;
+    bool hasIndex = Keys.LookupId.TryGet(id, index);
+    if (hasIndex)
+        hasIndex &= IsNetworkKeyValid(index);
+    WriteUInt32(index);
+    if (!hasIndex)
+    {
+        // No key cached locally so send the full data
+        WriteBytes((const uint8*)&id, sizeof(Guid));
+
+        // Add to the pending list (ignore on clients as server will automatically create a key once it gets full data)
+        if (NetworkManager::Mode != NetworkManagerMode::Client && 
+            !Keys.PendingIds.ContainsKey(id))
+        {
+            Keys.PendingIds.Add(id, NetworkKey(id));
+        }
+    }
+#else
+    WriteBytes((const uint8*)&id, sizeof(Guid));
+#endif
+}
+
+void NetworkMessage::ReadNetworkId(Guid& id)
+{
+#if USE_NETWORK_KEYS
+    ScopeLock lock(Keys.Lock);
+    uint32 index = ReadUInt32();
+    if (index != MAX_uint32)
+    {
+        if (index < (uint32)Keys.Table.Count())
+        {
+            // Use cached key data
+            const NetworkKey& k = Keys.Table.Get()[index];
+            ASSERT(k.Type == NetworkKey::TypeId);
+            id = k.Id;
+        }
+        else
+        {
+            // Incorrect data
+            // TODO: should we check if message comes before new key arrival? should sender assume that key needs confirmation of receive?
+            id = Guid::Empty;
+        }
+    }
+    else
+    {
+        // Read full data
+        ReadBytes((uint8*)&id, sizeof(Guid));
+
+        // When server receives unknown data then turn this into key so connected client will receive it
+        if (NetworkManager::Mode != NetworkManagerMode::Client && 
+            !Keys.PendingIds.ContainsKey(id) && 
+            !Keys.LookupId.ContainsKey(id))
+        {
+            Keys.PendingIds.Add(id, NetworkKey(id));
+        }
+    }
+#else
+    ReadBytes((uint8*)&id, sizeof(Guid));
+#endif
+}
+
+void NetworkMessage::WriteNetworkName(const StringAnsiView& name)
+{
+#if USE_NETWORK_KEYS
+    ScopeLock lock(Keys.Lock);
+    uint32 index = MAX_uint32;
+    bool hasIndex = Keys.LookupName.TryGet(name, index);
+    if (hasIndex)
+        hasIndex &= IsNetworkKeyValid(index);
+    WriteUInt32(index);
+    if (!hasIndex)
+    {
+        // No key cached locally so send the full data
+        WriteStringAnsi(name);
+
+        // Add to the pending list (ignore on clients as server will automatically create a key once it gets full data)
+        if (NetworkManager::Mode != NetworkManagerMode::Client && 
+            !Keys.PendingNames.ContainsKey(name))
+        {
+            StringAnsiView newName = CloneAllocName(name);
+            Keys.PendingNames.Add(newName, NetworkKey(newName));
+        }
+    }
+#else
+    WriteStringAnsi(name);
+#endif
+}
+
+void NetworkMessage::ReadNetworkName(StringAnsiView& name)
+{
+#if USE_NETWORK_KEYS
+    ScopeLock lock(Keys.Lock);
+    uint32 index = ReadUInt32();
+    if (index != MAX_uint32)
+    {
+        if (index < (uint32)Keys.Table.Count())
+        {
+            // Use cached key data
+            const NetworkKey& k = Keys.Table.Get()[index];
+            ASSERT(k.Type == NetworkKey::TypeName);
+            name = k.Name;
+        }
+        else
+        {
+            // Incorrect data
+            // TODO: should we check if message comes before new key arrival? should sender assume that key needs confirmation of receive?
+            name = StringAnsiView::Empty;
+        }
+    }
+    else
+    {
+        // Read full data
+        name = ReadStringAnsi();
+
+        // When server receives unknown data then turn this into key so connected client will receive it
+        if (NetworkManager::Mode != NetworkManagerMode::Client && 
+            !Keys.PendingNames.ContainsKey(name) && 
+            !Keys.LookupName.ContainsKey(name))
+        {
+            StringAnsiView newName = CloneAllocName(name);
+            Keys.PendingNames.Add(newName, NetworkKey(newName));
+        }
+    }
+#else
+    name = ReadStringAnsi();
+#endif
+}
 
 void OnNetworkMessageHandshake(NetworkEvent& event, NetworkClient* client, NetworkPeer* peer)
 {
@@ -94,6 +309,8 @@ void OnNetworkMessageHandshake(NetworkEvent& event, NetworkClient* client, Netwo
     {
         client->State = NetworkConnectionState::Connected;
         LOG(Info, "Client id={0} connected", event.Sender.ConnectionId);
+        ActiveConnections.Add(event.Sender);
+        Keys.SendAll(&event.Sender);
         NetworkManager::ClientConnected(client);
         NetworkInternal::NetworkReplicatorClientConnected(client);
     }
@@ -120,6 +337,44 @@ void OnNetworkMessageHandshakeReply(NetworkEvent& event, NetworkClient* client, 
     NetworkManager::StateChanged();
 }
 
+void OnNetworkMessageKey(NetworkEvent& event, NetworkClient* client, NetworkPeer* peer)
+{
+    // Read key data
+    NetworkMessageKey msgData;
+    event.Message.ReadStructure(msgData);
+    Guid id;
+    StringAnsiView name;
+    if (msgData.Type == NetworkKey::TypeId)
+        event.Message.ReadBytes((uint8*)&id, sizeof(Guid));
+    else
+        name = event.Message.ReadStringAnsi();
+
+    ScopeLock lock(Keys.Lock);
+    if (NetworkManager::IsClient())
+    {
+        // Add new key
+        if (msgData.Index >= (uint32)Keys.Table.Count())
+            Keys.Table.Resize(msgData.Index + 1);
+        NetworkKey& key = Keys.Table[msgData.Index];
+        ASSERT_LOW_LAYER(key.Type == NetworkKey::TypeNone);
+        key.Type = (NetworkKey::Types)msgData.Type;
+        if (key.Type == NetworkKey::TypeId)
+        {
+            key.Id = id;
+            Keys.LookupId.Add(id, msgData.Index);
+        }
+        else
+        {
+            key.Name = CloneAllocName(name);
+            Keys.LookupName.Add(key.Name, msgData.Index);
+        }
+    }
+    else
+    {
+        // TODO: make new pending key if client explicitly sends it
+    }
+}
+
 namespace
 {
     // Network message handlers table
@@ -128,6 +383,7 @@ namespace
         nullptr,
         OnNetworkMessageHandshake,
         OnNetworkMessageHandshakeReply,
+        OnNetworkMessageKey,
         NetworkInternal::OnNetworkMessageObjectReplicate,
         NetworkInternal::OnNetworkMessageObjectReplicatePart,
         NetworkInternal::OnNetworkMessageObjectSpawn,
@@ -135,6 +391,7 @@ namespace
         NetworkInternal::OnNetworkMessageObjectDespawn,
         NetworkInternal::OnNetworkMessageObjectRole,
         NetworkInternal::OnNetworkMessageObjectRpc,
+        NetworkInternal::OnNetworkMessageObjectRpcPart,
     };
 }
 
@@ -160,6 +417,7 @@ NetworkManagerService NetworkManagerServiceInstance;
 bool StartPeer()
 {
     PROFILE_CPU();
+    PROFILE_MEM(Networking);
     ASSERT_LOW_LAYER(!NetworkManager::Peer);
     NetworkManager::State = NetworkConnectionState::Connecting;
     NetworkManager::StateChanged();
@@ -250,6 +508,7 @@ NetworkClient* NetworkManager::GetClient(uint32 clientId)
 bool NetworkManager::StartServer()
 {
     PROFILE_CPU();
+    PROFILE_MEM(Networking);
     Stop();
 
     LOG(Info, "Starting network manager as server");
@@ -275,6 +534,7 @@ bool NetworkManager::StartServer()
 bool NetworkManager::StartClient()
 {
     PROFILE_CPU();
+    PROFILE_MEM(Networking);
     Stop();
 
     LOG(Info, "Starting network manager as client");
@@ -299,6 +559,7 @@ bool NetworkManager::StartClient()
 bool NetworkManager::StartHost()
 {
     PROFILE_CPU();
+    PROFILE_MEM(Networking);
     Stop();
 
     LOG(Info, "Starting network manager as host");
@@ -332,6 +593,7 @@ void NetworkManager::Stop()
     if (Mode == NetworkManagerMode::Offline && State == NetworkConnectionState::Offline)
         return;
     PROFILE_CPU();
+    PROFILE_MEM(Networking);
 
     LOG(Info, "Stopping network manager");
     State = NetworkConnectionState::Disconnecting;
@@ -362,11 +624,99 @@ void NetworkManager::Stop()
         LocalClient = nullptr;
     }
 
+    // Clear local state
+    NextClientId = 0;
+    LastUpdateTime = 0;
+    ActiveConnections.Clear();
+    Keys.Clear();
+
     State = NetworkConnectionState::Disconnected;
     Mode = NetworkManagerMode::Offline;
     LastUpdateTime = 0;
 
     StateChanged();
+}
+
+void NetworkKeys::SendPending()
+{
+    PROFILE_CPU();
+    PROFILE_MEM(Networking);
+    ScopeLock lock(Lock);
+
+    // Add new keys
+    int32 initialCount = Table.Count();
+    int32 sendIndex = initialCount;
+    for (auto& e : PendingIds)
+    {
+        const int32 key = sendIndex++;
+        LookupId.Add(e.Key, key);
+        Table.Add(e.Value);
+    }
+    for (auto& e : PendingNames)
+    {
+        const int32 key = sendIndex++;
+        LookupName.Add(e.Key, key);
+        Table.Add(e.Value);
+    }
+
+    // Send new entries
+    sendIndex = initialCount;
+    for (auto& e : PendingIds)
+        Send(e.Value, sendIndex++);
+    for (auto& e : PendingNames)
+        Send(e.Value, sendIndex++);
+
+    // Clear lists
+    PendingIds.Clear();
+    PendingNames.Clear();
+}
+
+void NetworkKeys::SendAll(const NetworkConnection* target)
+{
+    PROFILE_CPU();
+    ScopeLock lock(Lock);
+    int32 sendIndex = 0;
+    for (auto& e : Table)
+        Send(e, sendIndex++, target);
+}
+
+void NetworkKeys::Clear()
+{
+    ScopeLock lock(Lock);
+    LookupId.Clear();
+    LookupName.Clear();
+    PendingNames.GetValues(Table);
+    PendingNames.Clear();
+    for (auto& e : Table)
+    {
+        if (e.Type == NetworkKey::TypeName)
+        {
+            // Free allocated string
+            Allocator::Free((void*)e.Name.Get());
+        }
+    }
+    Table.Clear();
+}
+
+void NetworkKeys::Send(const NetworkKey& key, uint32 index, const NetworkConnection* target)
+{
+    // TODO: optimize with batching multiple keys into a single message
+    auto peer = NetworkManager::Peer;
+    NetworkMessage msg = peer->BeginSendMessage();
+    NetworkMessageKey msgData;
+    msgData.Type = key.Type;
+    msgData.Index = index;
+    msg.WriteStructure(msgData);
+    if (key.Type == NetworkKey::TypeId)
+        msg.WriteGuid(key.Id);
+    else
+        msg.WriteStringAnsi(key.Name);
+    if (NetworkManager::IsClient())
+        peer->EndSendMessage(NetworkChannelType::Reliable, msg);
+    else if (target)
+        peer->EndSendMessage(NetworkChannelType::Reliable, msg, *target);
+    else
+        peer->EndSendMessage(NetworkChannelType::Reliable, msg, ActiveConnections);
 }
 
 void NetworkManagerService::Update()
@@ -377,6 +727,7 @@ void NetworkManagerService::Update()
     if (NetworkManager::Mode == NetworkManagerMode::Offline || (float)(currentTime - LastUpdateTime) < minDeltaTime || !peer)
         return;
     PROFILE_CPU();
+    PROFILE_MEM(Networking);
     LastUpdateTime = currentTime;
     NetworkManager::Frame++;
     NetworkInternal::NetworkReplicatorPreUpdate();
@@ -452,27 +803,28 @@ void NetworkManagerService::Update()
                 NetworkManager::ClientDisconnected(client);
                 client->State = NetworkConnectionState::Disconnected;
                 Delete(client);
+                ActiveConnections.Remove(event.Sender);
             }
             break;
         case NetworkEventType::Message:
+        {
+            // Process network message
+            NetworkClient* client = NetworkManager::GetClient(event.Sender);
+            if (!client && NetworkManager::Mode != NetworkManagerMode::Client)
             {
-                // Process network message
-                NetworkClient* client = NetworkManager::GetClient(event.Sender);
-                if (!client && NetworkManager::Mode != NetworkManagerMode::Client)
-                {
-                    LOG(Error, "Unknown client");
-                    break;
-                }
-                uint8 id = *event.Message.Buffer;
-                if (id < (uint8)NetworkMessageIDs::MAX)
-                {
-                    MessageHandlers[id](event, client, peer);
-                }
-                else
-                {
-                    LOG(Warning, "Unknown message id={0} from connection {1}", id, event.Sender.ConnectionId);
-                }
+                LOG(Error, "Unknown client");
+                break;
             }
+            uint8 id = *event.Message.Buffer;
+            if (id < (uint8)NetworkMessageIDs::MAX)
+            {
+                MessageHandlers[id](event, client, peer);
+            }
+            else
+            {
+                LOG(Warning, "Unknown message id={0} from connection {1}", id, event.Sender.ConnectionId);
+            }
+        }
             peer->RecycleMessage(event.Message);
             break;
         default:
@@ -483,4 +835,7 @@ void NetworkManagerService::Update()
 
     // Update replication
     NetworkInternal::NetworkReplicatorUpdate();
+
+    // Flush pending network key updates
+    Keys.SendPending();
 }

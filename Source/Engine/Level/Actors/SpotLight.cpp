@@ -1,6 +1,8 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "SpotLight.h"
+
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Graphics/RenderView.h"
 #include "Engine/Renderer/RenderList.h"
 #include "Engine/Content/Assets/IESProfile.h"
@@ -57,7 +59,7 @@ float SpotLight::GetScaledRadius() const
 void SpotLight::SetRadius(float value)
 {
     value = Math::Max(0.0f, value);
-    if (Math::NearEqual(value, _radius))
+    if (value == _radius)
         return;
 
     _radius = value;
@@ -70,7 +72,7 @@ void SpotLight::SetOuterConeAngle(float value)
     value = Math::Clamp(value, 0.0f, 89.0f);
 
     // Check if value will change
-    if (!Math::NearEqual(value, _outerConeAngle))
+    if (value != _outerConeAngle)
     {
         // Change values
         _innerConeAngle = Math::Min(_innerConeAngle, value - ZeroTolerance);
@@ -86,7 +88,7 @@ void SpotLight::SetInnerConeAngle(float value)
     value = Math::Clamp(value, 0.0f, 89.0f);
 
     // Check if value will change
-    if (!Math::NearEqual(value, _innerConeAngle))
+    if (value != _innerConeAngle)
     {
         // Change values
         _innerConeAngle = value;
@@ -282,6 +284,14 @@ void SpotLight::Deserialize(DeserializeStream& stream, ISerializeModifier* modif
     DESERIALIZE(UseInverseSquaredFalloff);
     DESERIALIZE(UseIESBrightness);
     DESERIALIZE(IESBrightnessScale);
+
+    // [Deprecated on 12.03.2026, expires on 12.03.2028]
+    if (modifier->EngineBuild <= 6807 && SERIALIZE_FIND_MEMBER(stream, "UseInverseSquaredFalloff") != stream.MemberEnd() && UseInverseSquaredFalloff)
+    {
+        // Convert old non-physical brightness value that was used for Inverse Squared Falloff which wasn't based on proper cm/m units calculations
+        MARK_CONTENT_DEPRECATED();
+        Brightness = Math::Sqrt(Brightness * 0.01f);
+    }
 }
 
 bool SpotLight::IntersectsItself(const Ray& ray, Real& distance, Vector3& normal)

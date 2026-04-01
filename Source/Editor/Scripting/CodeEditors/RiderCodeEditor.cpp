@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "RiderCodeEditor.h"
 #include "Engine/Platform/FileSystem.h"
@@ -257,12 +257,17 @@ String RiderCodeEditor::GetName() const
     return TEXT("Rider");
 }
 
+String RiderCodeEditor::GetGenerateProjectCustomArgs() const
+{
+    return TEXT("-vs2022");
+}
+
 void RiderCodeEditor::OpenFile(const String& path, int32 line)
 {
     // Generate project files if solution is missing
     if (!FileSystem::FileExists(_solutionPath))
     {
-        ScriptsBuilder::GenerateProject(TEXT("-vs2022"));
+        ScriptsBuilder::GenerateProject(GetGenerateProjectCustomArgs());
     }
 
     // Open file
@@ -290,7 +295,7 @@ void RiderCodeEditor::OpenSolution()
     // Generate project files if solution is missing
     if (!FileSystem::FileExists(_solutionPath))
     {
-        ScriptsBuilder::GenerateProject(TEXT("-vs2022"));
+        ScriptsBuilder::GenerateProject(GetGenerateProjectCustomArgs());
     }
 
     // Open solution
@@ -312,5 +317,5 @@ void RiderCodeEditor::OpenSolution()
 
 void RiderCodeEditor::OnFileAdded(const String& path)
 {
-    ScriptsBuilder::GenerateProject();
+    ScriptsBuilder::GenerateProject(GetGenerateProjectCustomArgs());
 }

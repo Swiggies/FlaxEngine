@@ -1,25 +1,30 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ParticleEffect.h"
 #include "Particles.h"
 #include "Engine/Core/Types/CommonValue.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Serialization/JsonTools.h"
 #include "Engine/Serialization/Serialization.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Level/Scene/SceneRendering.h"
 #include "Engine/Level/Scene/Scene.h"
 #include "Engine/Engine/Time.h"
 #include "Engine/Engine/Engine.h"
+#if USE_EDITOR
+#include "Editor/Editor.h"
+#include "Editor/Managed/ManagedEditor.h"
+#endif
 
 ParticleEffect::ParticleEffect(const SpawnParams& params)
     : Actor(params)
     , _lastUpdateFrame(0)
     , _lastMinDstSqr(MAX_Real)
+    , ParticleSystem(this)
 {
     _box = BoundingBox(_transform.Translation);
     BoundingSphere::FromBox(_box, _sphere);
-
-    ParticleSystem.Changed.Bind<ParticleEffect, &ParticleEffect::OnParticleSystemModified>(this);
-    ParticleSystem.Loaded.Bind<ParticleEffect, &ParticleEffect::OnParticleSystemLoaded>(this);
+    _drawCategory = SceneRendering::SceneDrawAsync;
 }
 
 void ParticleEffectParameter::Init(ParticleEffect* effect, int32 emitterIndex, int32 paramIndex)
@@ -379,6 +384,7 @@ void ParticleEffect::Sync()
         Instance.ClearState();
         return;
     }
+    PROFILE_MEM(Particles);
 
     Instance.Sync(system);
 
@@ -463,7 +469,12 @@ void ParticleEffect::Update()
     if (UpdateMode == SimulationUpdateMode::FixedTimestep)
     {
         // Check if last simulation update was past enough to kick a new on
-        const float time = Time::Update.Time.GetTotalSeconds();
+        bool useTimeScale = UseTimeScale;
+#if USE_EDITOR
+        if (!Editor::IsPlayMode && IsDuringPlay())
+            useTimeScale = false;
+#endif
+        const float time = (useTimeScale ? Time::Update.Time : Time::Update.UnscaledTime).GetTotalSeconds();
         if (time - Instance.LastUpdateTime < FixedTimestep)
             return;
     }
@@ -472,9 +483,6 @@ void ParticleEffect::Update()
 }
 
 #if USE_EDITOR
-
-#include "Editor/Editor.h"
-#include "Editor/Managed/ManagedEditor.h"
 
 void ParticleEffect::UpdateExecuteInEditor()
 {
@@ -497,6 +505,7 @@ void ParticleEffect::CacheModifiedParameters()
 {
     if (_parameters.IsEmpty())
         return;
+    PROFILE_MEM(Particles);
     _parametersOverrides.Clear();
     auto& parameters = GetParameters();
     for (auto& param : parameters)
@@ -515,6 +524,7 @@ void ParticleEffect::ApplyModifiedParameters()
 {
     if (_parametersOverrides.IsEmpty())
         return;
+    PROFILE_MEM(Particles);
 
     // Parameters getter applies the parameters overrides
     if (_parameters.IsEmpty())
@@ -537,16 +547,47 @@ void ParticleEffect::ApplyModifiedParameters()
     }
 }
 
-void ParticleEffect::OnParticleSystemModified()
+void ParticleEffect::OnAssetChanged(Asset* asset, void* caller)
 {
+#if USE_EDITOR
+    OnParticleEmittersClear();
+#endif
     Instance.ClearState();
     _parameters.Resize(0);
     _parametersVersion = 0;
 }
 
-void ParticleEffect::OnParticleSystemLoaded()
+void ParticleEffect::OnAssetLoaded(Asset* asset, void* caller)
 {
     ApplyModifiedParameters();
+#if USE_EDITOR
+    // When one of the emitters gets edited, cached parameters need to be applied
+    OnParticleEmittersClear();
+    _cachedEmitters = ParticleSystem.Get()->Emitters;
+    for (auto& emitter : _cachedEmitters)
+        emitter.Loaded.Bind<ParticleEffect, &ParticleEffect::OnParticleEmitterLoaded>(this);
+
+#endif
+}
+
+#if USE_EDITOR
+
+void ParticleEffect::OnParticleEmittersClear()
+{
+    for (auto& emitter : _cachedEmitters)
+        emitter.Loaded.Unbind<ParticleEffect, &ParticleEffect::OnParticleEmitterLoaded>(this);
+    _cachedEmitters.Clear();
+}
+
+void ParticleEffect::OnParticleEmitterLoaded()
+{
+    ApplyModifiedParameters();
+}
+
+#endif
+
+void ParticleEffect::OnAssetUnloaded(Asset* asset, void* caller)
+{
 }
 
 bool ParticleEffect::HasContentLoaded() const
@@ -566,10 +607,27 @@ bool ParticleEffect::HasContentLoaded() const
 
 void ParticleEffect::Draw(RenderContext& renderContext)
 {
-    if (renderContext.View.Pass == DrawPass::GlobalSDF || renderContext.View.Pass == DrawPass::GlobalSurfaceAtlas)
+    if (renderContext.View.Pass == DrawPass::GlobalSDF || 
+        renderContext.View.Pass == DrawPass::GlobalSurfaceAtlas ||
+        EnumHasNoneFlags(renderContext.View.Flags, ViewFlags::Particles))
         return;
-    _lastMinDstSqr = Math::Min(_lastMinDstSqr, Vector3::DistanceSquared(GetPosition(), renderContext.View.Position));
-    Particles::DrawParticles(renderContext, this);
+    _lastMinDstSqr = Math::Min(_lastMinDstSqr, Vector3::DistanceSquared(GetPosition(), renderContext.View.WorldPosition));
+    RenderContextBatch renderContextBatch(renderContext);
+    Particles::DrawParticles(renderContextBatch, this);
+}
+
+void ParticleEffect::Draw(RenderContextBatch& renderContextBatch)
+{
+    const RenderView& mainView = renderContextBatch.GetMainContext().View;
+    if (EnumHasNoneFlags(mainView.Flags, ViewFlags::Particles))
+        return;
+    Particles::DrawParticles(renderContextBatch, this);
+
+    // Cull again against the main context (if using multiple ones) to skip caching draw distance from shadow projections
+    const BoundingSphere bounds(_sphere.Center - mainView.Origin, _sphere.Radius);
+    if (renderContextBatch.Contexts.Count() > 1 && !mainView.CullingFrustum.Intersects(bounds))
+        return;
+    _lastMinDstSqr = Math::Min(_lastMinDstSqr, Vector3::DistanceSquared(bounds.Center, mainView.Position));
 }
 
 #if USE_EDITOR
@@ -580,8 +638,17 @@ void ParticleEffect::OnDebugDrawSelected()
 {
     DEBUG_DRAW_WIRE_BOX(_box, Color::Violet * 0.7f, 0, true);
 
-    // Base
     Actor::OnDebugDrawSelected();
+}
+
+void ParticleEffect::OnDebugDraw()
+{
+    if (ShowDebugDraw)
+    {
+        Particles::DebugDraw(this);
+    }
+
+    Actor::OnDebugDraw();
 }
 
 #endif
@@ -657,12 +724,15 @@ void ParticleEffect::Deserialize(DeserializeStream& stream, ISerializeModifier* 
     // Base
     Actor::Deserialize(stream, modifier);
 
+    PROFILE_MEM(Particles);
     const auto overridesMember = stream.FindMember("Overrides");
     if (overridesMember != stream.MemberEnd())
     {
         // [Deprecated on 25.11.2018, expires on 25.11.2022]
         if (modifier->EngineBuild < 6197)
         {
+            PRAGMA_DISABLE_DEPRECATION_WARNINGS
+            MARK_CONTENT_DEPRECATED();
             const auto& overrides = overridesMember->value;
             ASSERT(overrides.IsArray());
             _parametersOverrides.EnsureCapacity(_parametersOverrides.Count() + overrides.Size());
@@ -700,6 +770,7 @@ void ParticleEffect::Deserialize(DeserializeStream& stream, ISerializeModifier* 
                         p.Value = Variant(JsonTools::GetCommonValue(mValue->value));
                 }
             }
+            PRAGMA_ENABLE_DEPRECATION_WARNINGS
         }
         else
         {
@@ -760,6 +831,9 @@ void ParticleEffect::Deserialize(DeserializeStream& stream, ISerializeModifier* 
 
 void ParticleEffect::EndPlay()
 {
+#if USE_EDITOR
+    OnParticleEmittersClear();
+#endif
     CacheModifiedParameters();
     Particles::OnEffectDestroy(this);
     Instance.ClearState();
@@ -809,6 +883,10 @@ void ParticleEffect::OnActiveInTreeChanged()
         // Invalidate the simulation
         CacheModifiedParameters();
         Instance.ClearState();
+    }
+    else
+    {
+        ApplyModifiedParameters();
     }
 }
 

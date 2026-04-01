@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,7 +6,9 @@
 #include "Engine/Core/Math/Transform.h"
 #include "Engine/Core/Math/Ray.h"
 #include "Engine/Core/Math/CollisionsHelper.h"
+#include "Engine/Core/Math/Half.h"
 #include "Engine/Core/Collections/Array.h"
+#include "Engine/Graphics/PixelFormat.h"
 
 /// <summary>
 /// Helper container used for detailed triangle mesh intersections tests.
@@ -31,23 +33,38 @@ public:
     }
 
     template<typename IndexType>
-    void Init(uint32 vertices, uint32 triangles, Float3* positions, IndexType* indices)
+    void Init(uint32 vertices, uint32 triangles, const Float3* positions, const IndexType* indices, uint32 positionsStride = sizeof(Float3), PixelFormat positionsFormat = PixelFormat::R32G32B32_Float)
     {
         Triangles.Clear();
         Triangles.EnsureCapacity(triangles, false);
-
-        IndexType* it = indices;
-        for (uint32 i = 0; i < triangles; i++)
+        const IndexType* it = indices;
+#define LOOP_BEGIN() \
+    for (uint32 i = 0; i < triangles; i++) \
+    { \
+        const IndexType i0 = *(it++); \
+        const IndexType i1 = *(it++); \
+        const IndexType i2 = *(it++); \
+        if (i0 < vertices && i1 < vertices && i2 < vertices) \
         {
-            auto i0 = *(it++);
-            auto i1 = *(it++);
-            auto i2 = *(it++);
-
-            if (i0 < vertices && i1 < vertices && i2 < vertices)
-            {
-                Triangles.Add({ positions[i0], positions[i1], positions[i2] });
-            }
+#define LOOP_END() } }
+        if (positionsFormat == PixelFormat::R32G32B32_Float)
+        {
+            LOOP_BEGIN()
+#define GET_POS(idx) *(const Float3*)((const byte*)positions + positionsStride * idx)
+                Triangles.Add({ GET_POS(i0), GET_POS(i1), GET_POS(i2) });
+#undef GET_POS
+            LOOP_END()
         }
+        else if (positionsFormat == PixelFormat::R16G16B16A16_Float)
+        {
+            LOOP_BEGIN()
+#define GET_POS(idx) ((const Half4*)((const byte*)positions + positionsStride * idx))->ToFloat3()
+                Triangles.Add({ GET_POS(i0), GET_POS(i1), GET_POS(i2) });
+#undef GET_POS
+            LOOP_END()
+        }
+#undef LOOP_BEGIN
+#undef LOOP_END
     }
 
     void Clear()

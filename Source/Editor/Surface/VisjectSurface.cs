@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -121,7 +121,7 @@ namespace FlaxEditor.Surface
         /// <summary>
         /// The connection start.
         /// </summary>
-        protected IConnectionInstigator _connectionInstigator;
+        protected List<IConnectionInstigator> _connectionInstigators = new List<IConnectionInstigator>();
 
         /// <summary>
         /// The last connection instigator under mouse.
@@ -234,17 +234,27 @@ namespace FlaxEditor.Surface
         /// <summary>
         /// Gets a value indicating whether user is selecting nodes.
         /// </summary>
-        public bool IsSelecting => _leftMouseDown && !_isMovingSelection && _connectionInstigator == null;
+        public bool IsSelecting => _leftMouseDown && !_isMovingSelection && _connectionInstigators.Count == 0;
+
+        /// <summary>
+        /// Gets a value indicating whether user was previously selecting nodes.
+        /// </summary>
+        public bool WasSelecting { get; private set; }
 
         /// <summary>
         /// Gets a value indicating whether user is moving selected nodes.
         /// </summary>
-        public bool IsMovingSelection => _leftMouseDown && _isMovingSelection && _connectionInstigator == null;
+        public bool IsMovingSelection => _leftMouseDown && _isMovingSelection && _connectionInstigators.Count == 0;
+
+        /// <summary>
+        /// Gets a value indicating whether user was previously moving selected nodes.
+        /// </summary>
+        public bool WasMovingSelection { get; private set; }
 
         /// <summary>
         /// Gets a value indicating whether user is connecting nodes.
         /// </summary>
-        public bool IsConnecting => _connectionInstigator != null;
+        public bool IsConnecting => _connectionInstigators.Count > 0;
 
         /// <summary>
         /// Gets a value indicating whether the left mouse button is down.
@@ -405,6 +415,17 @@ namespace FlaxEditor.Surface
                 new InputActionsContainer.Binding(options => options.Paste, Paste),
                 new InputActionsContainer.Binding(options => options.Cut, Cut),
                 new InputActionsContainer.Binding(options => options.Duplicate, Duplicate),
+                new InputActionsContainer.Binding(options => options.NodesAutoFormat, () => { FormatGraph(SelectedNodes); }),
+                new InputActionsContainer.Binding(options => options.NodesStraightenConnections, () => { StraightenGraphConnections(SelectedNodes); }),
+                new InputActionsContainer.Binding(options => options.NodesAlignTop, () => { AlignNodes(SelectedNodes, NodeAlignmentType.Top); }),
+                new InputActionsContainer.Binding(options => options.NodesAlignMiddle, () => { AlignNodes(SelectedNodes, NodeAlignmentType.Middle); }),
+                new InputActionsContainer.Binding(options => options.NodesAlignBottom, () => { AlignNodes(SelectedNodes, NodeAlignmentType.Bottom); }),
+                new InputActionsContainer.Binding(options => options.NodesAlignLeft, () => { AlignNodes(SelectedNodes, NodeAlignmentType.Left); }),
+                new InputActionsContainer.Binding(options => options.NodesAlignCenter, () => { AlignNodes(SelectedNodes, NodeAlignmentType.Center); }),
+                new InputActionsContainer.Binding(options => options.NodesAlignRight, () => { AlignNodes(SelectedNodes, NodeAlignmentType.Right); }),
+                new InputActionsContainer.Binding(options => options.NodesDistributeHorizontal, () => { DistributeNodes(SelectedNodes, false); }),
+                new InputActionsContainer.Binding(options => options.NodesDistributeVertical, () => { DistributeNodes(SelectedNodes, true); }),
+                new InputActionsContainer.Binding(options => options.FocusSelectedNodes, () => { FocusSelectionOrWholeGraph(); }),
             });
 
             Context.ControlSpawned += OnSurfaceControlSpawned;
@@ -415,6 +436,23 @@ namespace FlaxEditor.Surface
             // Init drag handlers
             DragHandlers.Add(_dragAssets = new DragAssets<DragDropEventArgs>(ValidateDragItem));
             DragHandlers.Add(_dragParameters = new DragNames<DragDropEventArgs>(SurfaceParameter.DragPrefix, ValidateDragParameter));
+
+            OnEditorOptionsChanged(Editor.Instance.Options.Options);
+
+            ScriptsBuilder.ScriptsReloadBegin += OnScriptsReloadBegin;
+            Editor.Instance.Options.OptionsChanged += OnEditorOptionsChanged;
+        }
+
+        private void OnScriptsReloadBegin()
+        {
+            _activeVisjectCM = null;
+            _cmPrimaryMenu?.Dispose();
+            _cmPrimaryMenu = null;
+        }
+
+        private void OnEditorOptionsChanged(EditorOptions options)
+        {
+            _focusSelectedNodeBinding = options.Input.FocusSelectedNodes;
         }
 
         /// <summary>
@@ -514,11 +552,12 @@ namespace FlaxEditor.Surface
                 nodes.Add(context);
                 context = context.Parent;
             }
+            float margin = 1;
             float x = NavigationBar.DefaultButtonsMargin;
-            float h = toolStrip.ItemsHeight - 2 * ToolStrip.DefaultMarginV;
+            float h = toolStrip.ItemsHeight - 2 * margin;
             for (int i = nodes.Count - 1; i >= 0; i--)
             {
-                var button = new VisjectContextNavigationButton(this, nodes[i].Context, x, ToolStrip.DefaultMarginV, h);
+                var button = new VisjectContextNavigationButton(this, nodes[i].Context, x, margin, h);
                 button.PerformLayout();
                 x += button.Width + NavigationBar.DefaultButtonsMargin;
                 navigationBar.AddChild(button);
@@ -552,6 +591,11 @@ namespace FlaxEditor.Surface
         /// Gets a value indicating whether surface parameters are not read-only and can be modified in a surface graph.
         /// </summary>
         public virtual bool CanSetParameters => false;
+
+        /// <summary>
+        /// Gets a value indicating whether surface private parameters can be used, otherwise they will remain hidden.
+        /// </summary>
+        public virtual bool CanShowPrivateParameters => false;
 
         /// <summary>
         /// True of the context menu should make use of a description panel drawn at the bottom of the menu
@@ -611,6 +655,37 @@ namespace FlaxEditor.Surface
         {
             ViewScale = (Size / areaRect.Size).MinValue * 0.95f;
             ViewCenterPosition = areaRect.Center;
+        }
+
+        /// <summary>
+        /// Adjusts the view to focus on the currently selected nodes, or the entire graph if no nodes are selected.
+        /// </summary>
+        public void FocusSelectionOrWholeGraph()
+        {
+            if (SelectedNodes.Count > 0)
+                ShowSelection();
+            else
+                ShowWholeGraph();
+        }
+
+        /// <summary>
+        /// Shows the selected controls by changing the view scale and the position.
+        /// </summary>
+        public void ShowSelection()
+        {
+            var selection = SelectedControls;
+            if (selection.Count == 0)
+                return;
+
+            // Calculate the bounds of all selected controls
+            Rectangle bounds = selection[0].Bounds;
+            for (int i = 1; i < selection.Count; i++)
+                bounds = Rectangle.Union(bounds, selection[i].Bounds);
+
+            // Add margin
+            bounds = bounds.MakeExpanded(250.0f);
+
+            ShowArea(bounds);
         }
 
         /// <summary>
@@ -698,6 +773,18 @@ namespace FlaxEditor.Surface
             if (control.IsSelected)
                 return;
             control.IsSelected = true;
+            SelectionChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// Removes the specified control from the selection.
+        /// </summary>
+        /// <param name="control">The control.</param>
+        public void RemoveFromSelection(SurfaceControl control)
+        {
+            if (!control.IsSelected)
+                return;
+            control.IsSelected = false;
             SelectionChanged?.Invoke();
         }
 
@@ -1022,6 +1109,9 @@ namespace FlaxEditor.Surface
             // Cleanup
             _activeVisjectCM = null;
             _cmPrimaryMenu?.Dispose();
+
+            ScriptsBuilder.ScriptsReloadBegin -= OnScriptsReloadBegin;
+            Editor.Instance.Options.OptionsChanged += OnEditorOptionsChanged;
 
             base.OnDestroy();
         }

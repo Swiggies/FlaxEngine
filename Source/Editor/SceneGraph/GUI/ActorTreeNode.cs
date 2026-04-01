@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -166,7 +166,7 @@ namespace FlaxEditor.SceneGraph.GUI
         /// <param name="filterText">The filter text.</param>
         public void UpdateFilter(string filterText)
         {
-            // SKip hidden actors
+            // Skip hidden actors
             var actor = Actor;
             if (actor != null && (actor.HideFlags & HideFlags.HideInHierarchy) != 0)
                 return;
@@ -238,12 +238,32 @@ namespace FlaxEditor.SceneGraph.GUI
                         }
                         else
                         {
-                            if (Actor !=null)
+                            if (Actor != null)
                             {
                                 var actorTypeText = trimmedFilter.Replace("a:", "", StringComparison.OrdinalIgnoreCase).Trim();
                                 var name = TypeUtils.GetTypeDisplayName(Actor.GetType());
                                 var nameNoSpaces = name.Replace(" ", "");
                                 if (name.Contains(actorTypeText, StringComparison.OrdinalIgnoreCase) || nameNoSpaces.Contains(actorTypeText, StringComparison.OrdinalIgnoreCase))
+                                    hasFilter = true;
+                            }
+                        }
+                    }
+                    // Check for control type
+                    else if (trimmedFilter.Contains("c:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (trimmedFilter.Equals("c:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (Actor != null)
+                                hasFilter = true;
+                        }
+                        else
+                        {
+                            if (Actor != null && Actor is UIControl uic && uic.Control != null)
+                            {
+                                var controlTypeText = trimmedFilter.Replace("c:", "", StringComparison.OrdinalIgnoreCase).Trim();
+                                var name = TypeUtils.GetTypeDisplayName(uic.Control.GetType());
+                                var nameNoSpaces = name.Replace(" ", "");
+                                if (name.Contains(controlTypeText, StringComparison.OrdinalIgnoreCase) || nameNoSpaces.Contains(controlTypeText, StringComparison.OrdinalIgnoreCase))
                                     hasFilter = true;
                             }
                         }
@@ -300,17 +320,16 @@ namespace FlaxEditor.SceneGraph.GUI
             if (noFilter && actor != null)
             {
                 // Pick the correct id when inside a prefab window.
-                var id = actor.HasPrefabLink && actor.Scene.Scene == null ? actor.PrefabObjectID : actor.ID;
+                var id = actor.HasPrefabLink && actor.Scene == null ? actor.PrefabObjectID : actor.ID;
                 isExpanded = Editor.Instance.ProjectCache.IsExpandedActor(ref id);
             }
 
-            if (isExpanded)
+            if (!noFilter)
             {
-                Expand(true);
-            }
-            else
-            {
-                Collapse(true);
+                if (isExpanded)
+                    Expand(true);
+                else
+                    Collapse(true);
             }
 
             Visible = isThisVisible | isAnyChildVisible;
@@ -670,9 +689,8 @@ namespace FlaxEditor.SceneGraph.GUI
                     if (_dragAssets.Objects[i] is not PrefabItem)
                         actor.Transform = Transform.Identity;
                     var previousTrans = actor.Transform;
-                    ActorNode.Root.Spawn(actor, spawnParent);
+                    ActorNode.Root.Spawn(actor, spawnParent, newOrder);
                     actor.LocalTransform = previousTrans;
-                    actor.OrderInParent = newOrder;
                 }
                 result = DragDropEffect.Move;
             }
@@ -690,8 +708,7 @@ namespace FlaxEditor.SceneGraph.GUI
                     }
                     actor.StaticFlags = newParent.StaticFlags;
                     actor.Name = item.Name;
-                    ActorNode.Root.Spawn(actor, newParent);
-                    actor.OrderInParent = newOrder;
+                    ActorNode.Root.Spawn(actor, newParent, newOrder);
                 }
                 result = DragDropEffect.Move;
             }
@@ -713,8 +730,7 @@ namespace FlaxEditor.SceneGraph.GUI
                         StaticFlags = newParent.StaticFlags,
                         Name = item.Name,
                     };
-                    ActorNode.Root.Spawn(uiControl, newParent);
-                    uiControl.OrderInParent = newOrder;
+                    ActorNode.Root.Spawn(uiControl, newParent, newOrder);
                 }
                 result = DragDropEffect.Move;
             }
@@ -741,8 +757,7 @@ namespace FlaxEditor.SceneGraph.GUI
                         actor.StaticFlags = spawnParent.StaticFlags;
                         actor.Name = actorType.Name;
                         actor.Transform = spawnParent.Transform;
-                        ActorNode.Root.Spawn(actor, spawnParent);
-                        actor.OrderInParent = newOrder;
+                        ActorNode.Root.Spawn(actor, spawnParent, newOrder);
                     }
                     else if (scriptType != ScriptType.Null)
                     {

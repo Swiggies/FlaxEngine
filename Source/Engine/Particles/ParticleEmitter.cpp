@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ParticleEmitter.h"
 #include "ParticleSystem.h"
@@ -9,10 +9,13 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Types/DataContainer.h"
 #include "Engine/Graphics/Shaders/Cache/ShaderCacheManager.h"
+#include "Engine/Graphics/Textures/GPUTexture.h"
 #include "Engine/Level/Level.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 #include "Engine/Serialization/MemoryReadStream.h"
 #include "Engine/Serialization/MemoryWriteStream.h"
 #include "Engine/Threading/Threading.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #if USE_EDITOR
 #include "ParticleEmitterFunction.h"
 #include "Engine/ShadersCompilation/Config.h"
@@ -41,6 +44,7 @@ ParticleEmitter::ParticleEmitter(const SpawnParams& params, const AssetInfo* inf
 
 ParticleEffect* ParticleEmitter::Spawn(Actor* parent, const Transform& transform, float duration, bool autoDestroy)
 {
+    PROFILE_MEM(Particles);
     CHECK_RETURN(!WaitForLoaded(), nullptr);
     auto system = Content::CreateVirtualAsset<ParticleSystem>();
     CHECK_RETURN(system, nullptr);
@@ -58,6 +62,35 @@ ParticleEffect* ParticleEmitter::Spawn(Actor* parent, const Transform& transform
     return effect;
 }
 
+void ParticleEmitter::WaitForAsset(Asset* asset)
+{
+    // TODO: make a tool for it?
+    if (auto* texture = Cast<TextureBase>(asset))
+    {
+        // Wait for asset to be loaded
+        if (!texture->WaitForLoaded() && !IsInMainThread() && texture->GetTexture())
+        {
+            PROFILE_CPU_NAMED("WaitForTexture");
+
+            // Mark as used by rendering and wait for streaming to load it in
+            double waitTimeSeconds = 10000;
+            double now = Platform::GetTimeSeconds();
+            double end = now + waitTimeSeconds;
+            const int32 mipLevels = texture->GetMipLevels();
+            constexpr float requestedResidency = 0.7f;
+            const int32 minMipLevels = Math::Max(Math::Min(mipLevels, 7), (int32)(requestedResidency * (float)mipLevels));
+            while (texture->GetResidentMipLevels() < minMipLevels &&
+                now < end &&
+                !texture->HasStreamingError())
+            {
+                texture->GetTexture()->LastRenderTime = now;
+                Platform::Sleep(1);
+                now = Platform::GetTimeSeconds();
+            }
+        }
+    }
+}
+
 #if COMPILE_WITH_PARTICLE_GPU_GRAPH && COMPILE_WITH_SHADER_COMPILER
 
 namespace
@@ -72,7 +105,7 @@ namespace
 
 Asset::LoadResult ParticleEmitter::load()
 {
-    ConcurrentSystemLocker::WriteScope systemScope(Particles::SystemLocker);
+    PROFILE_MEM(Particles);
 
     // Load the graph
     const auto surfaceChunk = GetChunk(SHADER_FILE_CHUNK_VISJECT_SURFACE);
@@ -156,6 +189,16 @@ Asset::LoadResult ParticleEmitter::load()
             LOG(Warning, "Cannot load Particle Emitter GPU graph '{0}'.", GetPath());
             return LoadResult::CannotLoadData;
         }
+        if (ContentDeprecated::Clear())
+        {
+            // If encountered any deprecated data when loading graph then serialize it
+            MemoryWriteStream writeStream(1024);
+            if (!Graph.Save(&writeStream, true))
+            {
+                surfaceChunk->Data.Copy(ToSpan(writeStream));
+                ContentDeprecated::Clear();
+            }
+        }
         generator.AddGraph(graph);
 
         // Get chunk with material parameters
@@ -201,7 +244,7 @@ Asset::LoadResult ParticleEmitter::load()
 
         // Save to file
 #if USE_EDITOR
-        if (Save())
+        if (SaveShaderAsset())
         {
             LOG(Error, "Cannot save \'{0}\'", ToString());
             return LoadResult::Failed;
@@ -284,12 +327,33 @@ Asset::LoadResult ParticleEmitter::load()
 	SimulationMode = ParticlesSimulationMode::CPU;
 #endif
 
+    // Wait for resources used by the emitter to be loaded
+    // eg. texture used to place particles on spawn needs to be available
+    for (const auto& node : Graph.Nodes)
+    {
+        if ((node.Type == GRAPH_NODE_MAKE_TYPE(5, 1) || node.Type == GRAPH_NODE_MAKE_TYPE(5, 2)) && node.Assets.Count() > 0)
+        {
+            const auto texture = node.Assets[0].As<TextureBase>();
+            if (texture)
+            {
+                WaitForAsset(texture);
+            }
+        }
+    }
+    for (const auto& parameter : Graph.Parameters)
+    {
+        if (parameter.Type.Type == VariantType::Asset)
+        {
+            WaitForAsset((Asset*)parameter.Value);
+        }
+    }
+
     return LoadResult::Ok;
 }
 
 void ParticleEmitter::unload(bool isReloading)
 {
-    ConcurrentSystemLocker::WriteScope systemScope(Particles::SystemLocker);
+    ScopeWriteLock systemScope(Particles::SystemLocker);
 #if COMPILE_WITH_SHADER_COMPILER
     UnregisterForShaderReloads(this);
 #endif
@@ -320,10 +384,6 @@ void ParticleEmitter::OnDependencyModified(BinaryAsset* asset)
 
     Reload();
 }
-
-#endif
-
-#if USE_EDITOR
 
 void ParticleEmitter::InitCompilationOptions(ShaderCompilationOptions& options)
 {
@@ -372,7 +432,7 @@ BytesContainer ParticleEmitter::LoadSurface(bool createDefaultIfMissing)
         graph.Save(&stream, false);
 
         // Set output data
-        result.Copy(stream.GetHandle(), stream.GetPosition());
+        result.Copy(ToSpan(stream));
     }
 
     return result;
@@ -380,19 +440,10 @@ BytesContainer ParticleEmitter::LoadSurface(bool createDefaultIfMissing)
 
 #if USE_EDITOR
 
-bool ParticleEmitter::SaveSurface(BytesContainer& data)
+bool ParticleEmitter::SaveSurface(const BytesContainer& data)
 {
-    // Wait for asset to be loaded or don't if last load failed (eg. by shader source compilation error)
-    if (LastLoadFailed())
-    {
-        LOG(Warning, "Saving asset that failed to load.");
-    }
-    else if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave())
         return true;
-    }
-    ConcurrentSystemLocker::WriteScope systemScope(Particles::SystemLocker);
     ScopeLock lock(Locker);
 
     // Release all chunks
@@ -409,7 +460,7 @@ bool ParticleEmitter::SaveSurface(BytesContainer& data)
     ASSERT(visjectSurfaceChunk != nullptr);
     visjectSurfaceChunk->Data.Copy(data);
 
-    if (Save())
+    if (SaveShaderAsset())
     {
         LOG(Error, "Cannot save \'{0}\'", ToString());
         return true;
@@ -421,6 +472,74 @@ bool ParticleEmitter::SaveSurface(BytesContainer& data)
 #endif
 
     return false;
+}
+
+void ParticleEmitter::GetReferences(Array<Guid>& assets, Array<String>& files) const
+{
+    BinaryAsset::GetReferences(assets, files);
+    Graph.GetReferences(assets);
+}
+
+bool ParticleEmitter::Save(const StringView& path)
+{
+    if (OnCheckSave(path))
+        return true;
+    ScopeLock lock(Locker);
+    MemoryWriteStream writeStream;
+    if (Graph.Save(&writeStream, true))
+        return true;
+    BytesContainer data;
+    data.Link(ToSpan(writeStream));
+    return SaveSurface(data);
+}
+
+bool ParticleEmitter::HasShaderCode() const
+{
+    if (SimulationMode != ParticlesSimulationMode::GPU)
+        return false;
+
+#if COMPILE_WITH_PARTICLE_GPU_GRAPH && COMPILE_WITH_SHADER_COMPILER
+    if (_shaderHeader.ParticleEmitter.GraphVersion == PARTICLE_GPU_GRAPH_VERSION
+        && HasChunk(SHADER_FILE_CHUNK_SOURCE)
+        && !HasDependenciesModified())
+        return true;
+#endif
+    return false;
+}
+
+Array<ParticleEmitter::Attribute> ParticleEmitter::GetLayout() const
+{
+    Array<Attribute> result;
+    ScopeLock lock(Locker);
+    result.Resize(Graph.Layout.Attributes.Count());
+    for (int32 i = 0; i < result.Count(); i++)
+    {
+        auto& dst = result[i];
+        const auto& src = Graph.Layout.Attributes[i];
+        dst.Name = src.Name;
+        switch (src.ValueType)
+        {
+        case ParticleAttribute::ValueTypes::Float:
+            dst.Format = PixelFormat::R32_Float;
+            break;
+        case ParticleAttribute::ValueTypes::Float2:
+            dst.Format = PixelFormat::R32G32_Float;
+            break;
+        case ParticleAttribute::ValueTypes::Float3:
+            dst.Format = PixelFormat::R32G32B32_Float;
+            break;
+        case ParticleAttribute::ValueTypes::Float4:
+            dst.Format = PixelFormat::R32G32B32A32_Float;
+            break;
+        case ParticleAttribute::ValueTypes::Int:
+            dst.Format = PixelFormat::R32_SInt;
+            break;
+        case ParticleAttribute::ValueTypes::Uint:
+            dst.Format = PixelFormat::R32_UInt;
+            break;
+        }
+    }
+    return result;
 }
 
 #endif

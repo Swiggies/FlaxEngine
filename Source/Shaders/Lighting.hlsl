@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __LIGHTING__
 #define __LIGHTING__
@@ -31,6 +31,7 @@ LightSample StandardShading(GBufferSample gBuffer, float energy, float3 L, float
     float3 F = F_Schlick(specularColor, VoH);
     float D = D_GGX(gBuffer.Roughness, NoH) * energy;
     float Vis = Vis_SmithJointApprox(gBuffer.Roughness, NoV, NoL);
+    // TODO: apply energy compensation to specular (1.0 + specularColor * (1.0 / PreIntegratedGF.y - 1.0))
     lighting.Specular = (D * Vis) * F;
 #endif
     lighting.Transmission = 0;
@@ -136,8 +137,8 @@ float4 GetLighting(float3 viewPos, LightData lightData, GBufferSample gBuffer, f
     }
 
 #if !LIGHTING_NO_DIRECTIONAL
-    // Reduce shadow mapping artifacts
-    shadow.SurfaceShadow *= saturate(NoL * 6.0f - 0.2f) * NoL;
+    // Directional shadowing
+    shadow.SurfaceShadow *= NoL;
 #endif
 
     BRANCH

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Engine/Scripting/Types.h"
 
@@ -715,9 +715,13 @@ void MCore::UnloadEngine()
 #endif
 }
 
+void MCore::CreateScriptingAssemblyLoadContext()
+{
+}
+
 #if USE_EDITOR
 
-void MCore::ReloadScriptingAssemblyLoadContext()
+void MCore::UnloadScriptingAssemblyLoadContext()
 {
 }
 
@@ -858,6 +862,11 @@ int32 MCore::GC::MaxGeneration()
 {
     PROFILE_CPU();
     return mono_gc_max_generation();
+}
+
+void MCore::GC::MemoryInfo(int64& totalCommitted, int64& heapSize)
+{
+    totalCommitted = heapSize = 0;
 }
 
 void MCore::GC::WaitForPendingFinalizers()
@@ -1535,7 +1544,7 @@ MObject* MClass::GetAttribute(const MClass* klass) const
     return attrInfo ? mono_custom_attrs_get_attr(attrInfo, klass->GetNative()) : nullptr;
 }
 
-const Array<MObject*>& MClass::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MClass::GetAttributes() const
 {
     if (_hasCachedAttributes)
         return _attributes;
@@ -1658,7 +1667,7 @@ MObject* MEvent::GetAttribute(const MClass* klass) const
     return foundAttr;
 }
 
-const Array<MObject*>& MEvent::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MEvent::GetAttributes() const
 {
     if (_hasCachedAttributes)
         return _attributes;
@@ -1811,7 +1820,7 @@ MObject* MField::GetAttribute(const MClass* klass) const
     return foundAttr;
 }
 
-const Array<MObject*>& MField::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MField::GetAttributes() const
 {
     if (_hasCachedAttributes)
         return _attributes;
@@ -1984,7 +1993,7 @@ MObject* MMethod::GetAttribute(const MClass* klass) const
     return foundAttr;
 }
 
-const Array<MObject*>& MMethod::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MMethod::GetAttributes() const
 {
     if (_hasCachedAttributes)
         return _attributes;
@@ -2114,7 +2123,7 @@ MObject* MProperty::GetAttribute(const MClass* klass) const
     return foundAttr;
 }
 
-const Array<MObject*>& MProperty::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MProperty::GetAttributes() const
 {
     if (_hasCachedAttributes)
         return _attributes;

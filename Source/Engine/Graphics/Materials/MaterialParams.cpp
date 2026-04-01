@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "MaterialParams.h"
 #include "MaterialInfo.h"
 #include "Engine/Core/Math/Vector4.h"
 #include "Engine/Core/Math/Matrix.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Graphics/GPUContext.h"
 #include "Engine/Engine/GameplayGlobals.h"
 #include "Engine/Serialization/MemoryWriteStream.h"
@@ -14,6 +15,7 @@
 #include "Engine/Renderer/GlobalSignDistanceFieldPass.h"
 #include "Engine/Scripting/Enums.h"
 #include "Engine/Streaming/Streaming.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 
 bool MaterialInfo8::operator==(const MaterialInfo8& other) const
 {
@@ -391,6 +393,10 @@ void MaterialParameter::Bind(BindMeta& meta) const
             case MaterialSceneTextures::Specular:
                 view = meta.CanSampleGBuffer ? meta.Buffers->GBuffer2->View() : nullptr;
                 break;
+            case MaterialSceneTextures::SceneStencil:
+            case MaterialSceneTextures::ObjectLayer:
+                view = meta.CanSampleDepth ? meta.Buffers->DepthBuffer->ViewStencil() : nullptr;
+                break;
             default: ;
             }
         }
@@ -603,10 +609,11 @@ int32 MaterialParams::GetVersionHash() const
 void MaterialParams::Bind(MaterialParamsLink* link, MaterialParameter::BindMeta& meta)
 {
     ASSERT(link && link->This);
-    for (int32 i = 0; i < link->This->Count(); i++)
+    const int32 count = link->This->Count();
+    for (int32 i = 0; i < count; i++)
     {
         MaterialParamsLink* l = link;
-        while (l->Down && !l->This->At(i).IsOverride())
+        while (l->Down && !l->This->At(i).IsOverride() && l->Down->This->Count() == count)
         {
             l = l->Down;
         }
@@ -637,6 +644,7 @@ void MaterialParams::Dispose()
 
 bool MaterialParams::Load(ReadStream* stream)
 {
+    PROFILE_MEM(GraphicsMaterials);
     bool result = false;
 
     // Release
@@ -652,6 +660,8 @@ bool MaterialParams::Load(ReadStream* stream)
         {
         case 1: // [Deprecated on 15.11.2019, expires on 15.11.2021]
         {
+            MARK_CONTENT_DEPRECATED();
+
             // Size of the collection
             uint16 paramsCount;
             stream->ReadUint16(&paramsCount);
@@ -668,7 +678,7 @@ bool MaterialParams::Load(ReadStream* stream)
                 param->_type = static_cast<MaterialParameterType>(stream->ReadByte());
                 param->_isPublic = stream->ReadBool();
                 param->_override = param->_isPublic;
-                stream->ReadString(&param->_name, 10421);
+                stream->Read(param->_name, 10421);
                 param->_registerIndex = stream->ReadByte();
                 stream->ReadUint16(&param->_offset);
 
@@ -727,6 +737,8 @@ bool MaterialParams::Load(ReadStream* stream)
         break;
         case 2: // [Deprecated on 15.11.2019, expires on 15.11.2021]
         {
+            MARK_CONTENT_DEPRECATED();
+
             // Size of the collection
             uint16 paramsCount;
             stream->ReadUint16(&paramsCount);
@@ -743,7 +755,7 @@ bool MaterialParams::Load(ReadStream* stream)
                 stream->Read(param->_paramId);
                 param->_isPublic = stream->ReadBool();
                 param->_override = param->_isPublic;
-                stream->ReadString(&param->_name, 10421);
+                stream->Read(param->_name, 10421);
                 param->_registerIndex = stream->ReadByte();
                 stream->ReadUint16(&param->_offset);
 
@@ -817,7 +829,7 @@ bool MaterialParams::Load(ReadStream* stream)
                 stream->Read(param->_paramId);
                 param->_isPublic = stream->ReadBool();
                 param->_override = stream->ReadBool();
-                stream->ReadString(&param->_name, 10421);
+                stream->Read(param->_name, 10421);
                 param->_registerIndex = stream->ReadByte();
                 stream->ReadUint16(&param->_offset);
 
@@ -831,7 +843,7 @@ bool MaterialParams::Load(ReadStream* stream)
                 case MaterialParameterType::SceneTexture:
                 case MaterialParameterType::ChannelMask:
                 case MaterialParameterType::TextureGroupSampler:
-                    stream->ReadInt32(&param->_asInteger);
+                    stream->Read(param->_asInteger);
                     break;
                 case MaterialParameterType::Float:
                     stream->ReadFloat(&param->_asFloat);
@@ -909,7 +921,7 @@ void MaterialParams::Save(WriteStream* stream)
         stream->Write(param->_paramId);
         stream->WriteBool(param->_isPublic);
         stream->WriteBool(param->_override);
-        stream->WriteString(param->_name, 10421);
+        stream->Write(param->_name, 10421);
         stream->WriteByte(param->_registerIndex);
         stream->WriteUint16(param->_offset);
 
@@ -985,7 +997,7 @@ void MaterialParams::Save(WriteStream* stream, const Array<SerializedMaterialPar
             stream->Write(param.ID);
             stream->WriteBool(param.IsPublic);
             stream->WriteBool(param.Override);
-            stream->WriteString(param.Name, 10421);
+            stream->Write(param.Name, 10421);
             stream->WriteByte(param.RegisterIndex);
             stream->WriteUint16(param.Offset);
 

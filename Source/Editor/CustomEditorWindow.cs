@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using FlaxEditor.CustomEditors;
 using FlaxEditor.GUI.Docking;
@@ -18,8 +18,8 @@ namespace FlaxEditor
             private readonly CustomEditorPresenter _presenter;
             private CustomEditorWindow _customEditor;
 
-            public Win(CustomEditorWindow customEditor)
-            : base(Editor.Instance, false, ScrollBars.Vertical)
+            public Win(CustomEditorWindow customEditor, bool hideOnClose, ScrollBars scrollBars)
+            : base(Editor.Instance, hideOnClose, scrollBars)
             {
                 Title = customEditor.GetType().Name;
                 _customEditor = customEditor;
@@ -33,8 +33,8 @@ namespace FlaxEditor
             private void Set(CustomEditorWindow value)
             {
                 _customEditor = value;
-                _presenter.Select(value);
                 _presenter.OverrideEditor = value;
+                _presenter.Select(value);
             }
 
             /// <inheritdoc />
@@ -64,9 +64,9 @@ namespace FlaxEditor
         /// <summary>
         /// Initializes a new instance of the <see cref="CustomEditorWindow"/> class.
         /// </summary>
-        protected CustomEditorWindow()
+        protected CustomEditorWindow(bool hideOnClose = false, ScrollBars scrollBars = ScrollBars.Vertical)
         {
-            _win = new Win(this);
+            _win = new Win(this, hideOnClose, scrollBars);
             ScriptsBuilder.ScriptsReloadBegin += OnScriptsReloadBegin;
         }
 

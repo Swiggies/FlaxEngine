@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "TerrainPatch.h"
 #include "Terrain.h"
@@ -6,6 +6,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Color32.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Physics/Physics.h"
 #include "Engine/Physics/PhysicsScene.h"
 #include "Engine/Physics/PhysicsBackend.h"
@@ -16,6 +17,7 @@
 #include "Engine/Threading/Threading.h"
 #if TERRAIN_EDITING
 #include "Engine/Core/Math/Packed.h"
+#include "Engine/Core/Collections/ArrayExtensions.h"
 #include "Engine/Graphics/PixelFormatExtensions.h"
 #include "Engine/Graphics/RenderTools.h"
 #include "Engine/Graphics/RenderView.h"
@@ -26,11 +28,6 @@
 #include "Editor/Editor.h"
 #include "Engine/ContentImporters/AssetsImportingManager.h"
 #endif
-#endif
-#if TERRAIN_EDITING || TERRAIN_UPDATING
-#include "Engine/Core/Collections/ArrayExtensions.h"
-#endif
-#if USE_EDITOR
 #include "Engine/Debug/DebugDraw.h"
 #endif
 #if TERRAIN_USE_PHYSICS_DEBUG
@@ -66,6 +63,7 @@ TerrainPatch::TerrainPatch(const SpawnParams& params)
 
 void TerrainPatch::Init(Terrain* terrain, int16 x, int16 z)
 {
+    PROFILE_MEM(LevelTerrain);
     ScopeLock lock(_collisionLocker);
 
     _terrain = terrain;
@@ -74,13 +72,13 @@ void TerrainPatch::Init(Terrain* terrain, int16 x, int16 z)
     _physicsHeightField = nullptr;
     _x = x;
     _z = z;
-    const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::Terrain::ChunksCountEdge;
+    const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::ChunksCountEdge;
     _offset = Float3(_x * size, 0.0f, _z * size);
     _yOffset = 0.0f;
     _yHeight = 1.0f;
     for (int32 i = 0; i < Terrain::ChunksCount; i++)
     {
-        Chunks[i].Init(this, i % Terrain::Terrain::ChunksCountEdge, i / Terrain::Terrain::ChunksCountEdge);
+        Chunks[i].Init(this, i % Terrain::ChunksCountEdge, i / Terrain::ChunksCountEdge);
     }
     Heightmap = nullptr;
     for (int32 i = 0; i < TERRAIN_MAX_SPLATMAPS_COUNT; i++)
@@ -88,7 +86,7 @@ void TerrainPatch::Init(Terrain* terrain, int16 x, int16 z)
         Splatmap[i] = nullptr;
     }
     _heightfield = nullptr;
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
     _cachedHeightMap.Resize(0);
     _cachedHolesMask.Resize(0);
     _wasHeightModified = false;
@@ -99,29 +97,44 @@ void TerrainPatch::Init(Terrain* terrain, int16 x, int16 z)
     }
 #endif
 #if TERRAIN_USE_PHYSICS_DEBUG
-    SAFE_DELETE(_debugLines);
+    SAFE_DELETE_GPU_RESOURCE(_debugLines);
     _debugLinesDirty = true;
 #endif
 #if USE_EDITOR
     _collisionTriangles.Resize(0);
+    SAFE_DELETE_GPU_RESOURCE(_collisionTrianglesBuffer);
+    _collisionTrianglesBufferDirty = true;
 #endif
     _collisionVertices.Resize(0);
 }
 
 TerrainPatch::~TerrainPatch()
 {
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
     SAFE_DELETE(_dataHeightmap);
     for (int32 i = 0; i < TERRAIN_MAX_SPLATMAPS_COUNT; i++)
     {
         SAFE_DELETE(_dataSplatmap[i]);
     }
 #endif
+#if TERRAIN_USE_PHYSICS_DEBUG
+    SAFE_DELETE_GPU_RESOURCE(_debugLines);
+#endif
+#if USE_EDITOR
+    SAFE_DELETE_GPU_RESOURCE(_collisionTrianglesBuffer);
+#endif
 }
 
 RawDataAsset* TerrainPatch::GetHeightfield() const
 {
     return _heightfield.Get();
+}
+
+void TerrainPatch::GetTextures(GPUTexture*& heightmap, GPUTexture*& splatmap0, GPUTexture*& splatmap1) const
+{
+    heightmap = Heightmap->GetTexture();
+    splatmap0 = Splatmap[0] ? Splatmap[0]->GetTexture() : nullptr;
+    splatmap1 = Splatmap[1] ? Splatmap[1]->GetTexture() : nullptr;
 }
 
 void TerrainPatch::RemoveLightmap()
@@ -168,7 +181,7 @@ void TerrainPatch::UpdateTransform()
     _collisionVertices.Resize(0);
 }
 
-#if TERRAIN_EDITING || TERRAIN_UPDATING
+#if TERRAIN_EDITING
 
 bool IsValidMaterial(const JsonAssetReference<PhysicalMaterial>& e)
 {
@@ -207,7 +220,7 @@ struct TerrainDataUpdateInfo
     // When using physical materials, then get splatmaps data required for per-triangle material indices
     void GetSplatMaps()
     {
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
         if (SplatMaps[0])
             return;
         if (UsePhysicalMaterials())
@@ -423,12 +436,10 @@ void UpdateNormalsAndHoles(const TerrainDataUpdateInfo& info, const float* heigh
             GET_VERTEX(1, 1);
 #undef GET_VERTEX
 
-            // TODO: use SIMD for those calculations
-
             // Calculate normals for quad two vertices
             Float3 n0 = Float3::Normalize((v00 - v01) ^ (v01 - v10));
             Float3 n1 = Float3::Normalize((v11 - v10) ^ (v10 - v01));
-            Float3 n2 = n0 + n1;
+            Float3 n2 = Float3::Normalize(n0 + n1);
 
             // Apply normal to each vertex using it
             normalsPerVertex[i00] += n1;
@@ -438,6 +449,7 @@ void UpdateNormalsAndHoles(const TerrainDataUpdateInfo& info, const float* heigh
         }
     }
 
+#if 0
     // Smooth normals
     for (int32 z = 1; z < normalsSize.Y - 1; z++)
     {
@@ -458,8 +470,6 @@ void UpdateNormalsAndHoles(const TerrainDataUpdateInfo& info, const float* heigh
             GET_NORMAL(2, 2);
 #undef GET_VERTEX
 
-            // TODO: use SIMD for those calculations
-
             /*
              * The current vertex is (11). Calculate average for the nearby vertices.
              * 00   01   02
@@ -473,6 +483,7 @@ void UpdateNormalsAndHoles(const TerrainDataUpdateInfo& info, const float* heigh
             normalsPerVertex[i11] = Float3::Lerp(n11, avg, 0.6f);
         }
     }
+#endif
 
     // Write back to the data container
     const auto ptr = (Color32*)data;
@@ -517,10 +528,9 @@ void UpdateNormalsAndHoles(const TerrainDataUpdateInfo& info, const float* heigh
                 const int32 textureIndex = tz + tx;
                 const int32 heightmapIndex = hz + hx;
                 const int32 normalIndex = sz + sx;
-#if BUILD_DEBUG
-                ASSERT(normalIndex >= 0 && normalIndex < normalsLength);
-#endif
-                Float3 normal = Float3::NormalizeFast(normalsPerVertex[normalIndex]) * 0.5f + 0.5f;
+                ASSERT_LOW_LAYER(normalIndex >= 0 && normalIndex < normalsLength);
+                Float3 normal = Float3::NormalizeFast(normalsPerVertex[normalIndex]);
+                normal = normal * 0.5f + 0.5f;
 
                 if (holesMask && !holesMask[heightmapIndex])
                     normal = Float3::One;
@@ -815,6 +825,7 @@ bool ModifyCollision(TerrainDataUpdateInfo& info, TextureBase::InitData* initDat
 bool TerrainPatch::SetupHeightMap(int32 heightMapLength, const float* heightMap, const byte* holesMask, bool forceUseVirtualStorage)
 {
     PROFILE_CPU_NAMED("Terrain.Setup");
+    PROFILE_MEM(LevelTerrain);
     if (heightMap == nullptr)
     {
         LOG(Warning, "Cannot create terrain without a heightmap specified.");
@@ -1013,7 +1024,7 @@ bool TerrainPatch::SetupHeightMap(int32 heightMapLength, const float* heightMap,
     _terrain->UpdateBounds();
     _terrain->UpdateLayerBits();
 
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
     // Invalidate cache
     _cachedHeightMap.Resize(0);
     _cachedHolesMask.Resize(0);
@@ -1026,6 +1037,7 @@ bool TerrainPatch::SetupHeightMap(int32 heightMapLength, const float* heightMap,
 bool TerrainPatch::SetupSplatMap(int32 index, int32 splatMapLength, const Color32* splatMap, bool forceUseVirtualStorage)
 {
     PROFILE_CPU_NAMED("Terrain.SetupSplatMap");
+    PROFILE_MEM(LevelTerrain);
     CHECK_RETURN(index >= 0 && index < TERRAIN_MAX_SPLATMAPS_COUNT, true);
     if (splatMap == nullptr)
     {
@@ -1160,7 +1172,7 @@ bool TerrainPatch::SetupSplatMap(int32 index, int32 splatMapLength, const Color3
     }
 #endif
 
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
     // Invalidate cache
     _cachedSplatMap[index].Resize(0);
     _wasSplatmapModified[index] = false;
@@ -1174,6 +1186,7 @@ bool TerrainPatch::SetupSplatMap(int32 index, int32 splatMapLength, const Color3
 bool TerrainPatch::InitializeHeightMap()
 {
     PROFILE_CPU_NAMED("Terrain.InitializeHeightMap");
+    PROFILE_MEM(LevelTerrain);
     const auto heightmapSize = _terrain->GetChunkSize() * Terrain::ChunksCountEdge + 1;
     Array<float> heightmap;
     heightmap.Resize(heightmapSize * heightmapSize);
@@ -1181,7 +1194,7 @@ bool TerrainPatch::InitializeHeightMap()
     return SetupHeightMap(heightmap.Count(), heightmap.Get());
 }
 
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
 
 float* TerrainPatch::GetHeightmapData()
 {
@@ -1239,7 +1252,13 @@ void TerrainPatch::ClearCache()
 
 void TerrainPatch::CacheHeightData()
 {
+    if (Heightmap == nullptr)
+    {
+        LOG(Error, "Missing heightmap.");
+        return;
+    }
     PROFILE_CPU_NAMED("Terrain.CacheHeightData");
+    PROFILE_MEM(LevelTerrain);
     const TerrainDataUpdateInfo info(this);
 
     // Ensure that heightmap data is all loaded
@@ -1305,6 +1324,7 @@ void TerrainPatch::CacheHeightData()
 void TerrainPatch::CacheSplatData()
 {
     PROFILE_CPU_NAMED("Terrain.CacheSplatData");
+    PROFILE_MEM(LevelTerrain);
     const TerrainDataUpdateInfo info(this);
 
     // Cache all the splatmaps
@@ -1388,6 +1408,7 @@ bool TerrainPatch::ModifyHeightMap(const float* samples, const Int2& modifiedOff
         return true;
     }
     PROFILE_CPU_NAMED("Terrain.ModifyHeightMap");
+    PROFILE_MEM(LevelTerrain);
 
     // Check if has no heightmap
     if (Heightmap == nullptr)
@@ -1482,6 +1503,7 @@ bool TerrainPatch::ModifyHolesMask(const byte* samples, const Int2& modifiedOffs
         return true;
     }
     PROFILE_CPU_NAMED("Terrain.ModifyHolesMask");
+    PROFILE_MEM(LevelTerrain);
 
     // Check if has no heightmap
     if (Heightmap == nullptr)
@@ -1559,6 +1581,7 @@ bool TerrainPatch::ModifySplatMap(int32 index, const Color32* samples, const Int
         return true;
     }
     PROFILE_CPU_NAMED("Terrain.ModifySplatMap");
+    PROFILE_MEM(LevelTerrain);
 
     // Get the current data to modify it
     Color32* splatMap = GetSplatMapData(index);
@@ -1730,6 +1753,7 @@ bool TerrainPatch::ModifySplatMap(int32 index, const Color32* samples, const Int
 bool TerrainPatch::UpdateHeightData(TerrainDataUpdateInfo& info, const Int2& modifiedOffset, const Int2& modifiedSize, bool wasHeightRangeChanged, bool wasHeightChanged)
 {
     PROFILE_CPU();
+    PROFILE_MEM(LevelTerrain);
     float* heightMap = GetHeightmapData();
     byte* holesMask = GetHolesMaskData();
     ASSERT(heightMap && holesMask);
@@ -1737,7 +1761,7 @@ bool TerrainPatch::UpdateHeightData(TerrainDataUpdateInfo& info, const Int2& mod
     // Prepare data for the uploading to GPU
     ASSERT(Heightmap);
     auto texture = Heightmap->GetTexture();
-    ASSERT(texture->ResidentMipLevels() > 0);
+    ASSERT(texture->IsAllocated());
     const int32 textureSize = texture->Width();
     const PixelFormat pixelFormat = texture->Format();
     const int32 pixelStride = PixelFormatExtensions::SizeInBytes(pixelFormat);
@@ -2118,6 +2142,7 @@ void TerrainPatch::UpdatePostManualDeserialization()
 void TerrainPatch::CreateCollision()
 {
     PROFILE_CPU();
+    PROFILE_MEM(LevelTerrain);
     ASSERT(!HasCollision());
     if (CreateHeightField())
         return;
@@ -2208,7 +2233,8 @@ void TerrainPatch::DestroyCollision()
 
     void* scene = _terrain->GetPhysicsScene()->GetPhysicsScene();
     PhysicsBackend::RemoveCollider(_terrain);
-    PhysicsBackend::RemoveSceneActor(scene, _physicsActor);
+    if (_terrain->IsDuringPlay() && _terrain->IsActiveInHierarchy())
+        PhysicsBackend::RemoveSceneActor(scene, _physicsActor);
     PhysicsBackend::DestroyActor(_physicsActor);
     PhysicsBackend::DestroyShape(_physicsShape);
     PhysicsBackend::DestroyObject(_physicsHeightField);
@@ -2218,10 +2244,12 @@ void TerrainPatch::DestroyCollision()
     _physicsHeightField = nullptr;
 #if TERRAIN_USE_PHYSICS_DEBUG
     _debugLinesDirty = true;
-    SAFE_DELETE(_debugLines);
+    SAFE_DELETE_GPU_RESOURCE(_debugLines);
 #endif
 #if USE_EDITOR
     _collisionTriangles.Resize(0);
+    SAFE_DELETE_GPU_RESOURCE(_collisionTrianglesBuffer);
+    _collisionTrianglesBufferDirty = true;
 #endif
     _collisionVertices.Resize(0);
 }
@@ -2231,6 +2259,7 @@ void TerrainPatch::DestroyCollision()
 void TerrainPatch::CacheDebugLines()
 {
     PROFILE_CPU();
+    PROFILE_MEM(LevelTerrain);
     ASSERT(_physicsHeightField);
     _debugLinesDirty = false;
     if (!_debugLines)
@@ -2242,7 +2271,7 @@ void TerrainPatch::CacheDebugLines()
     typedef DebugDraw::Vertex Vertex;
     if (_debugLines->GetElementsCount() != count)
     {
-        if (_debugLines->Init(GPUBufferDescription::Vertex(sizeof(Vertex), count)))
+        if (_debugLines->Init(GPUBufferDescription::Vertex(Vertex::GetLayout(), sizeof(Vertex), count)))
             return;
     }
     Array<Vertex> debugLines;
@@ -2312,9 +2341,35 @@ void TerrainPatch::DrawPhysicsDebug(RenderView& view)
     const BoundingBox bounds(_bounds.Minimum - view.Origin, _bounds.Maximum - view.Origin);
     if (!_physicsShape || !view.CullingFrustum.Intersects(bounds))
         return;
+    PROFILE_MEM(LevelTerrain);
     if (view.Mode == ViewMode::PhysicsColliders)
     {
-        DEBUG_DRAW_TRIANGLES(GetCollisionTriangles(), Color::DarkOliveGreen, 0, true);
+        const auto& triangles = GetCollisionTriangles();
+        typedef DebugDraw::Vertex Vertex;
+        if (!_collisionTrianglesBuffer)
+            _collisionTrianglesBuffer = GPUDevice::Instance->CreateBuffer(TEXT("Terrain.CollisionTriangles"));
+        const uint32 count = triangles.Count();
+        if (_collisionTrianglesBuffer->GetElementsCount() != count)
+        {
+            if (_collisionTrianglesBuffer->Init(GPUBufferDescription::Vertex(Vertex::GetLayout(), sizeof(Vertex), count)))
+                return;
+            _collisionTrianglesBufferDirty = true;
+        }
+        if (_collisionTrianglesBufferDirty)
+        {
+            const Color32 color(Color::DarkOliveGreen);
+            Array<Vertex> vertices;
+            vertices.Resize((int32)count);
+            const Vector3* src = triangles.Get();
+            Vertex* dst = vertices.Get();
+            for (uint32 i = 0; i < count; i++)
+            {
+                dst[i] = { (Float3)src[i], color };
+            }
+            _collisionTrianglesBuffer->SetData(vertices.Get(), _collisionTrianglesBuffer->GetSize());
+            _collisionTrianglesBufferDirty = false;
+        }
+        DebugDraw::DrawTriangles(_collisionTrianglesBuffer, Matrix::Identity, 0, true);
     }
     else
     {
@@ -2324,9 +2379,9 @@ void TerrainPatch::DrawPhysicsDebug(RenderView& view)
         {
             if (!_debugLines || _debugLinesDirty)
                 CacheDebugLines();
-            const Transform terrainTransform = _terrain->_transform;
-            const Transform localTransform(Vector3(0, _yOffset, 0), Quaternion::Identity, Vector3(_collisionScaleXZ, _yHeight, _collisionScaleXZ));
-            const Matrix world = localTransform.GetWorld() * terrainTransform.GetWorld();
+            const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::ChunksCountEdge;
+            const Transform localTransform(Vector3(_x * size, _yOffset, _z * size), Quaternion::Identity, Vector3(_collisionScaleXZ, _yHeight, _collisionScaleXZ));
+            const Matrix world = localTransform.GetWorld() * _terrain->_transform.GetWorld();
             DebugDraw::DrawLines(_debugLines, world);
         }
     }
@@ -2343,19 +2398,20 @@ const Array<Vector3>& TerrainPatch::GetCollisionTriangles()
     if (!_physicsShape || _collisionTriangles.HasItems())
         return _collisionTriangles;
     PROFILE_CPU();
+    PROFILE_MEM(LevelTerrain);
 
     int32 rows, cols;
     PhysicsBackend::GetHeightFieldSize(_physicsHeightField, rows, cols);
 
     _collisionTriangles.Resize((rows - 1) * (cols - 1) * 6);
+    _collisionTrianglesBufferDirty = true;
     Vector3* data = _collisionTriangles.Get();
 
 #define GET_VERTEX(x, y) Vector3 v##x##y((float)(row + (x)), PhysicsBackend::GetHeightFieldHeight(_physicsHeightField, row + (x), col + (y)) / TERRAIN_PATCH_COLLISION_QUANTIZATION, (float)(col + (y))); Vector3::Transform(v##x##y, world, v##x##y)
 
-    const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::Terrain::ChunksCountEdge;
-    const Transform terrainTransform = _terrain->_transform;
+    const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::ChunksCountEdge;
     Transform localTransform(Vector3(_x * size, _yOffset, _z * size), Quaternion::Identity, Vector3(_collisionScaleXZ, _yHeight, _collisionScaleXZ));
-    const Matrix world = localTransform.GetWorld() * terrainTransform.GetWorld();
+    const Matrix world = localTransform.GetWorld() * _terrain->_transform.GetWorld();
 
     for (int32 row = 0; row < rows - 1; row++)
     {
@@ -2393,6 +2449,7 @@ const Array<Vector3>& TerrainPatch::GetCollisionTriangles()
 void TerrainPatch::GetCollisionTriangles(const BoundingSphere& bounds, Array<Vector3>& result)
 {
     PROFILE_CPU();
+    PROFILE_MEM(LevelTerrain);
     result.Clear();
 
     // Skip if no intersection with patch
@@ -2401,7 +2458,7 @@ void TerrainPatch::GetCollisionTriangles(const BoundingSphere& bounds, Array<Vec
 
     // Prepare
     const auto& triangles = GetCollisionTriangles();
-    const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::Terrain::ChunksCountEdge;
+    const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::ChunksCountEdge;
     Transform transform;
     transform.Translation = _offset + Vector3(0, _yOffset, 0);
     transform.Orientation = Quaternion::Identity;
@@ -2490,6 +2547,7 @@ void TerrainPatch::GetCollisionTriangles(const BoundingSphere& bounds, Array<Vec
 void TerrainPatch::ExtractCollisionGeometry(Array<Float3>& vertexBuffer, Array<int32>& indexBuffer)
 {
     PROFILE_CPU();
+    PROFILE_MEM(LevelTerrain);
     vertexBuffer.Clear();
     indexBuffer.Clear();
 
@@ -2507,17 +2565,16 @@ void TerrainPatch::ExtractCollisionGeometry(Array<Float3>& vertexBuffer, Array<i
         ScopeLock sceneLock(Level::ScenesLock);
         if (_collisionVertices.IsEmpty())
         {
-            const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::Terrain::ChunksCountEdge;
-            const Transform terrainTransform = _terrain->_transform;
+            const float size = _terrain->_chunkSize * TERRAIN_UNITS_PER_VERTEX * Terrain::ChunksCountEdge;
             const Transform localTransform(Vector3(_x * size, _yOffset, _z * size), Quaternion::Identity, Float3(_collisionScaleXZ, _yHeight, _collisionScaleXZ));
-            const Matrix world = localTransform.GetWorld() * terrainTransform.GetWorld();
+            const Matrix world = localTransform.GetWorld() * _terrain->_transform.GetWorld();
 
             const int32 vertexCount = rows * cols;
             _collisionVertices.Resize(vertexCount);
             Float3* vb = _collisionVertices.Get();
-            for (int32 row = 0; row < rows; row++)
+            for (int32 col = 0; col < cols; col++)
             {
-                for (int32 col = 0; col < cols; col++)
+                for (int32 row = 0; row < rows; row++)
                 {
                     Float3 v((float)row, PhysicsBackend::GetHeightFieldHeight(_physicsHeightField, row, col) / TERRAIN_PATCH_COLLISION_QUANTIZATION, (float)col);
                     Float3::Transform(v, world, v);
@@ -2534,9 +2591,9 @@ void TerrainPatch::ExtractCollisionGeometry(Array<Float3>& vertexBuffer, Array<i
     const int32 indexCount = (rows - 1) * (cols - 1) * 6;
     indexBuffer.Resize(indexCount);
     int32* ib = indexBuffer.Get();
-    for (int32 row = 0; row < rows - 1; row++)
+    for (int32 col = 0; col < cols - 1; col++)
     {
-        for (int32 col = 0; col < cols - 1; col++)
+        for (int32 row = 0; row < rows - 1; row++)
         {
 #define GET_INDEX(x, y) *ib++ = (col + (y)) + (row + (x)) * cols
 
@@ -2569,7 +2626,7 @@ void TerrainPatch::Serialize(SerializeStream& stream, const void* otherObj)
 
     stream.JKEY("Chunks");
     stream.StartArray();
-    for (int32 i = 0; i < Terrain::Terrain::ChunksCount; i++)
+    for (int32 i = 0; i < Terrain::ChunksCount; i++)
     {
         stream.StartObject();
         Chunks[i].Serialize(stream, other ? &other->Chunks[i] : nullptr);
@@ -2577,7 +2634,7 @@ void TerrainPatch::Serialize(SerializeStream& stream, const void* otherObj)
     }
     stream.EndArray();
 
-#if TERRAIN_UPDATING
+#if TERRAIN_EDITING
     SaveHeightData();
     SaveSplatData();
 #endif

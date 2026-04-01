@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using FlaxEditor.GUI.ContextMenu;
 using FlaxEditor.Viewport.Cameras;
@@ -247,6 +247,14 @@ namespace FlaxEditor.Viewport.Previews
         }
 
         /// <inheritdoc />
+        protected override void OnDebugDraw(GPUContext context, ref RenderContext renderContext)
+        {
+            base.OnDebugDraw(context, ref renderContext);
+
+            _previewEffect.OnDebugDraw();
+        }
+
+        /// <inheritdoc />
         public override void Draw()
         {
             base.Draw();
@@ -295,7 +303,8 @@ namespace FlaxEditor.Viewport.Previews
         /// <inheritdoc />
         public override void OnDestroy()
         {
-            // Cleanup objects
+            if (IsDisposing)
+                return;
             _previewEffect.ParticleSystem = null;
             Object.Destroy(ref _previewEffect);
             Object.Destroy(ref _boundsModel);

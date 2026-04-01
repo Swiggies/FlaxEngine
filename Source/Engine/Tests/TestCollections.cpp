@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Engine/Core/RandomStream.h"
 #include "Engine/Core/Collections/Array.h"
@@ -27,6 +27,19 @@ void CheckBitArray(const BitArray<AllocationType>& array)
 
 TEST_CASE("Array")
 {
+    SECTION("Test Capacity")
+    {
+        // Ensure correct collections capacity growing to meet proper memory usage vs safe slack
+        CHECK(AllocationUtils::CalculateCapacityGrow(1, 0) == 8);
+        CHECK(AllocationUtils::CalculateCapacityGrow(7, 0) == 8);
+        CHECK(AllocationUtils::CalculateCapacityGrow(1, 16) == 16);
+        CHECK(AllocationUtils::CalculateCapacityGrow(31, 0) == 32);
+        CHECK(AllocationUtils::CalculateCapacityGrow(32, 0) == 32);
+        CHECK(AllocationUtils::CalculateCapacityGrow(1000, 0) == 1024);
+        CHECK(AllocationUtils::CalculateCapacityGrow(1024, 0) == 1024);
+        CHECK(AllocationUtils::CalculateCapacityGrow(1025, 0) == 2048);
+    }
+
     SECTION("Test Allocators")
     {
         Array<int32> a1;
@@ -78,6 +91,32 @@ TEST_CASE("Array")
 
 TEST_CASE("BitArray")
 {
+    SECTION("Test Access")
+    {
+        BitArray<> a1;
+        CHECK(a1.Count() == 0);
+        for (int32 i = 0; i < 310; i++)
+        {
+            a1.Add(false);
+        }
+        CHECK(a1.Count() == 310);
+        a1.Resize(300);
+        CHECK(a1.Count() == 300);
+        CHECK(a1.Capacity() >= 300);
+        a1.SetAll(true);
+        a1.SetAll(false);
+        for (int32 i = 0; i < 300; i++)
+        {
+            a1.Set(i, true);
+            for (int32 j = 0; j < 300; j++)
+            {
+                bool expected = j == i;
+                CHECK(a1.Get(j) == expected);
+            }
+            a1.Set(i, false);
+        }
+    }
+
     SECTION("Test Allocators")
     {
         BitArray<> a1;
@@ -142,7 +181,7 @@ TEST_CASE("BitArray")
 
     // Generate some random data for testing
     BitArray<> testData;
-    testData.Resize(32);
+    testData.Resize(128);
     RandomStream rand(101);
     for (int32 i = 0; i < testData.Count(); i++)
         testData.Set(i, rand.GetBool());
@@ -151,8 +190,8 @@ TEST_CASE("BitArray")
     {
         const BitArray<> a1(testData);
         const BitArray<InlinedAllocation<8>> a2(testData);
-        const BitArray<InlinedAllocation<64>> a3(testData);
-        const BitArray<FixedAllocation<64>> a4(testData);
+        const BitArray<InlinedAllocation<256>> a3(testData);
+        const BitArray<FixedAllocation<256>> a4(testData);
         CHECK(a1 == testData);
         CHECK(a2 == testData);
         CHECK(a3 == testData);
@@ -185,8 +224,8 @@ TEST_CASE("HashSet")
     SECTION("Test Allocators")
     {
         HashSet<int32> a1;
-        HashSet<int32, InlinedAllocation<DICTIONARY_DEFAULT_CAPACITY>> a2;
-        HashSet<int32, FixedAllocation<DICTIONARY_DEFAULT_CAPACITY>> a3;
+        HashSet<int32, InlinedAllocation<HASH_SET_DEFAULT_CAPACITY>> a2;
+        HashSet<int32, FixedAllocation<HASH_SET_DEFAULT_CAPACITY>> a3;
         for (int32 i = 0; i < 7; i++)
         {
             a1.Add(i);
@@ -236,7 +275,7 @@ TEST_CASE("HashSet")
     {
         HashSet<int32> a1;
         a1.Add(1);
-        CHECK(a1.Capacity() <= DICTIONARY_DEFAULT_CAPACITY);
+        CHECK(a1.Capacity() <= HASH_SET_DEFAULT_CAPACITY);
     }
 
     SECTION("Test Add/Remove")
@@ -248,7 +287,7 @@ TEST_CASE("HashSet")
             a1.Remove(i);
         }
         CHECK(a1.Count() == 0);
-        CHECK(a1.Capacity() <= DICTIONARY_DEFAULT_CAPACITY);
+        CHECK(a1.Capacity() <= HASH_SET_DEFAULT_CAPACITY);
         a1.Clear();
         for (int32 i = 1; i <= 10; i++)
             a1.Add(-i);
@@ -258,7 +297,7 @@ TEST_CASE("HashSet")
             a1.Remove(i);
         }
         CHECK(a1.Count() == 10);
-        CHECK(a1.Capacity() <= DICTIONARY_DEFAULT_CAPACITY);
+        CHECK(a1.Capacity() <= HASH_SET_DEFAULT_CAPACITY);
     }
 }
 
@@ -267,8 +306,8 @@ TEST_CASE("Dictionary")
     SECTION("Test Allocators")
     {
         Dictionary<int32, int32> a1;
-        Dictionary<int32, int32, InlinedAllocation<DICTIONARY_DEFAULT_CAPACITY>> a2;
-        Dictionary<int32, int32, FixedAllocation<DICTIONARY_DEFAULT_CAPACITY>> a3;
+        Dictionary<int32, int32, InlinedAllocation<HASH_SET_DEFAULT_CAPACITY>> a2;
+        Dictionary<int32, int32, FixedAllocation<HASH_SET_DEFAULT_CAPACITY>> a3;
         for (int32 i = 0; i < 7; i++)
         {
             a1.Add(i, i);
@@ -322,7 +361,7 @@ TEST_CASE("Dictionary")
     {
         Dictionary<int32, int32> a1;
         a1.Add(1, 1);
-        CHECK(a1.Capacity() <= DICTIONARY_DEFAULT_CAPACITY);
+        CHECK(a1.Capacity() <= HASH_SET_DEFAULT_CAPACITY);
     }
 
     SECTION("Test Add/Remove")
@@ -334,7 +373,7 @@ TEST_CASE("Dictionary")
             a1.Remove(i);
         }
         CHECK(a1.Count() == 0);
-        CHECK(a1.Capacity() <= DICTIONARY_DEFAULT_CAPACITY);
+        CHECK(a1.Capacity() <= HASH_SET_DEFAULT_CAPACITY);
         a1.Clear();
         for (int32 i = 1; i <= 10; i++)
             a1.Add(-i, -i);
@@ -344,6 +383,6 @@ TEST_CASE("Dictionary")
             a1.Remove(i);
         }
         CHECK(a1.Count() == 10);
-        CHECK(a1.Capacity() <= DICTIONARY_DEFAULT_CAPACITY);
+        CHECK(a1.Capacity() <= HASH_SET_DEFAULT_CAPACITY);
     }
 }

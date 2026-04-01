@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -66,6 +66,22 @@ API_ENUM(Attributes="Flags") enum class FontFlags : byte
     Italic = 4,
 };
 
+/// <summary>
+/// The font rasterization mode.
+/// </summary>
+API_ENUM() enum class FontRasterMode : byte
+{
+    /// <summary>
+    /// Use the default FreeType rasterizer to render font atlases.
+    /// </summary>
+    Bitmap,
+
+    /// <summary>
+    /// Use the Multi-channel Signed Distance Field (MSDF) generator to render font atlases. Need to be rendered with a compatible material.
+    /// </summary>
+    MSDF,
+};
+
 DECLARE_ENUM_OPERATORS(FontFlags);
 
 /// <summary>
@@ -76,7 +92,7 @@ API_STRUCT() struct FontOptions
     DECLARE_SCRIPTING_TYPE_MINIMAL(FontOptions);
 
     /// <summary>
-    /// The hinting.
+    /// The font hinting used when rendering characters.
     /// </summary>
     API_FIELD() FontHinting Hinting;
 
@@ -84,6 +100,11 @@ API_STRUCT() struct FontOptions
     /// The flags.
     /// </summary>
     API_FIELD() FontFlags Flags;
+
+    /// <summary>
+    /// The font rasterization mode.
+    /// </summary>
+    API_FIELD() FontRasterMode RasterMode;
 };
 
 /// <summary>
@@ -91,7 +112,7 @@ API_STRUCT() struct FontOptions
 /// </summary>
 API_CLASS(NoSpawn) class FLAXENGINE_API FontAsset : public BinaryAsset
 {
-    DECLARE_BINARY_ASSET_HEADER(FontAsset, 3);
+    DECLARE_BINARY_ASSET_HEADER(FontAsset, 4);
     friend Font;
 
 private:
@@ -166,15 +187,6 @@ public:
     /// <returns>True if cannot init, otherwise false.</returns>
     API_FUNCTION() bool Init(const BytesContainer& fontFile);
 
-#if USE_EDITOR
-    /// <summary>
-    /// Saves this asset to the file. Supported only in Editor.
-    /// </summary>
-    /// <param name="path">The custom asset path to use for the saving. Use empty value to save this asset to its own storage location. Can be used to duplicate asset. Must be specified when saving virtual asset.</param>
-    /// <returns>True if cannot save data, otherwise false.</returns>
-    API_FUNCTION() bool Save(const StringView& path = StringView::Empty);
-#endif
-
     /// <summary>
     /// Check if the font contains the glyph of a char.
     /// </summary>
@@ -190,6 +202,9 @@ public:
 public:
     // [BinaryAsset]
     uint64 GetMemoryUsage() const override;
+#if USE_EDITOR
+    bool Save(const StringView& path = StringView::Empty) override;
+#endif
 
 protected:
     // [BinaryAsset]

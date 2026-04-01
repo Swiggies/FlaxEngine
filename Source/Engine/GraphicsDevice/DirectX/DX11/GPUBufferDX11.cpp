@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_DIRECTX11
 
@@ -29,11 +29,11 @@ void* GPUBufferDX11::Map(GPUResourceMapMode mode)
     map.pData = nullptr;
     D3D11_MAP mapType;
     UINT mapFlags = 0;
-    switch (mode)
+    switch (mode & GPUResourceMapMode::ReadWrite)
     {
     case GPUResourceMapMode::Read:
         mapType = D3D11_MAP_READ;
-        if (_desc.Usage == GPUResourceUsage::StagingReadback && isMainThread)
+        if (EnumHasAnyFlags(mode, GPUResourceMapMode::NoWait))
             mapFlags = D3D11_MAP_FLAG_DO_NOT_WAIT;
         break;
     case GPUResourceMapMode::Write:

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.ComponentModel;
 using FlaxEngine;
@@ -150,5 +150,61 @@ namespace FlaxEditor.Options
         [DefaultValue(typeof(Color), "0.5,0.5,0.5,1.0")]
         [EditorDisplay("Grid"), EditorOrder(310), Tooltip("The color for the viewport grid.")]
         public Color ViewportGridColor { get; set; } = new Color(0.5f, 0.5f, 0.5f, 1.0f);
+
+        /// <summary>
+        /// Gets or sets the minimum size used for viewport icons.
+        /// </summary>
+        [DefaultValue(7.0f), Limit(1.0f, 1000.0f, 5.0f)]
+        [EditorDisplay("Viewport Icons"), EditorOrder(400)]
+        public float IconsMinimumSize { get; set; } = 7.0f;
+
+        /// <summary>
+        /// Gets or sets the maximum size used for viewport icons.
+        /// </summary>
+        [DefaultValue(30.0f), Limit(1.0f, 1000.0f, 5.0f)]
+        [EditorDisplay("Viewport Icons"), EditorOrder(410)]
+        public float IconsMaximumSize { get; set; } = 30.0f;
+
+        /// <summary>
+        /// Gets or sets the distance towards the camera at which the max icon scale will be applied. Set to 0 to disable scaling the icons based on the distance to the camera.
+        /// </summary>
+        [DefaultValue(1000.0f), Limit(0.0f, 20000.0f, 5.0f)]
+        [EditorDisplay("Viewport Icons"), EditorOrder(410)]
+        public float MaxSizeDistance { get; set; } = 1000.0f;
+
+        /// <summary>
+        /// Gets or sets a value that indicates whether the main viewports <see cref="Gizmo.DirectionGizmo"/> is visible.
+        /// </summary>
+        [DefaultValue(true)]
+        [EditorDisplay("Direction Gizmo"), EditorOrder(500), Tooltip("Sets the visibility of the direction gizmo in the main editor viewport.")]
+        public bool ShowDirectionGizmo { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets a value by which the main viewports <see cref="Gizmo.DirectionGizmo"/> size is multiplied with.
+        /// </summary>
+        [DefaultValue(1f), Limit(0.0f, 2.0f)]
+        [EditorDisplay("Direction Gizmo"), EditorOrder(501), Tooltip("The scale of the direction gizmo in the main viewport.")]
+        public float DirectionGizmoScale { get; set; } = 1f;
+
+        /// <summary>
+        /// Gets or sets a value for the opacity of the main viewports <see cref="Gizmo.DirectionGizmo"/> background.
+        /// </summary>
+        [DefaultValue(0.1f), Limit(0.0f, 1.0f)]
+        [EditorDisplay("Direction Gizmo"), EditorOrder(502), Tooltip("The background opacity of the of the direction gizmo in the main viewport.")]
+        public float DirectionGizmoBackgroundOpacity { get; set; } = 0.1f;
+
+        /// <summary>
+        /// Gets or sets a value for the opacity of the main viewports <see cref="Gizmo.DirectionGizmo"/>.
+        /// </summary>
+        [DefaultValue(0.6f), Limit(0.0f, 1.0f)]
+        [EditorDisplay("Direction Gizmo"), EditorOrder(503), Tooltip("The opacity of the of the direction gizmo in the main viewport.")]
+        public float DirectionGizmoOpacity { get; set; } = 0.6f;
+
+        /// <summary>
+        /// Gets or sets a value for the opacity of the main viewports <see cref="Gizmo.DirectionGizmo"/>.
+        /// </summary>
+        [DefaultValue(1f), Limit(0.0f, 2.0f)]
+        [EditorDisplay("Direction Gizmo"), EditorOrder(504), Tooltip("The brightness of the of the direction gizmo in the main viewport.")]
+        public float DirectionGizmoBrightness{ get; set; } = 1f;
     }
 }

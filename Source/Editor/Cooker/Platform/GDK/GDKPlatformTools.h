@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -26,6 +26,7 @@ public:
 public:
 
     // [PlatformTools]
+    int32 GetDotnetVersion() const override;
     DotNetAOTModes UseAOT() const override;
     bool OnDeployBinaries(CookingData& data) override;
 };

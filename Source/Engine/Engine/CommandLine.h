@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -132,6 +132,11 @@ public:
         /// -project !path! (Startup project path)
         /// </summary>
         String Project;
+
+        /// <summary>
+        /// -lastproject (Opens the last project)
+        /// </summary>
+        Nullable<bool> LastProject;
 
         /// <summary>
         /// -new (generates the project files inside the specified project folder or uses current workspace folder)

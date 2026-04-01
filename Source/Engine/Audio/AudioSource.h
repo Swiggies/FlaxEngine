@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -13,7 +13,7 @@
 /// Whether or not an audio source is spatial is controlled by the assigned AudioClip.The volume and the pitch of a spatial audio source is controlled by its position and the AudioListener's position/direction/velocity.
 /// </remarks>
 API_CLASS(Attributes="ActorContextMenu(\"New/Audio/Audio Source\"), ActorToolbox(\"Other\")")
-class FLAXENGINE_API AudioSource : public Actor
+class FLAXENGINE_API AudioSource : public Actor, IAssetReference
 {
     DECLARE_SCENE_OBJECT(AudioSource);
     friend class AudioStreamingHandler;
@@ -75,6 +75,16 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorOrder(10), DefaultValue(null), EditorDisplay(\"Audio Source\")")
     AssetReference<AudioClip> Clip;
+
+    /// <summary>
+    /// Event fired when the audio clip starts.
+    /// </summary>
+    API_EVENT() Action ClipStarted;
+
+    /// <summary>
+    /// Event fired when the audio clip finishes.
+    /// </summary>
+    API_EVENT() Action ClipFinished;
 
     /// <summary>
     /// Gets the velocity of the source. Determines pitch in relation to AudioListener's position. Only relevant for spatial (3D) sources.
@@ -152,7 +162,7 @@ public:
     /// <summary>
     /// Determines the time (in seconds) at which the audio clip starts playing if Play On Start is enabled.
     /// </summary>
-    API_PROPERTY(Attributes = "EditorOrder(51), DefaultValue(0.0f), Limit(0, float.MaxValue, 0.01f), EditorDisplay(\"Audio Source\", \"Start Time\"), VisibleIf(nameof(PlayOnStart))")
+    API_PROPERTY(Attributes="EditorOrder(51), DefaultValue(0.0f), Limit(0, float.MaxValue, 0.01f), EditorDisplay(\"Audio Source\", \"Start Time\"), VisibleIf(nameof(PlayOnStart))")
     FORCE_INLINE float GetStartTime() const
     {
         return _startTime;
@@ -197,16 +207,16 @@ public:
     API_PROPERTY() void SetAttenuation(float value);
 
     /// <summary>
-    /// Gets the doppler effect factor. Scale for source velocity. Default is 1.
+    /// Gets the doppler effect factor. Scale for source velocity. Default is 1. Used by spatial sources only. Cannot scale the effect up (only dim it).
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(75), DefaultValue(1.0f), Limit(0, float.MaxValue, 0.1f), EditorDisplay(\"Audio Source\")")
+    API_PROPERTY(Attributes="EditorOrder(75), DefaultValue(1.0f), Limit(0, 1.0f, 0.1f), EditorDisplay(\"Audio Source\")")
     FORCE_INLINE float GetDopplerFactor() const
     {
         return _dopplerFactor;
     }
 
     /// <summary>
-    /// Sets the doppler effect factor. Scale for source velocity. Default is 1.
+    /// Sets the doppler effect factor. Scale for source velocity. Default is 1. Used by spatial sources only. Cannot scale the effect up (only dim it).
     /// </summary>
     API_PROPERTY() void SetDopplerFactor(float value);
 
@@ -293,8 +303,10 @@ public:
     void RequestStreamingBuffersUpdate();
 
 private:
-    void OnClipChanged();
-    void OnClipLoaded();
+    // [IAssetReference]
+    void OnAssetChanged(Asset* asset, void* caller) override;
+    void OnAssetLoaded(Asset* asset, void* caller) override;
+    void OnAssetUnloaded(Asset* asset, void* caller) override;
 
     /// <summary>
     /// Plays the audio source. Should have buffer(s) binded before.

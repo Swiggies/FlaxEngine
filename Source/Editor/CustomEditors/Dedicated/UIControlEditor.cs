@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Linq;
@@ -682,7 +682,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
 
         private CustomElementsContainer<UniformGridPanel> UniformGridTwoByOne(LayoutElementsContainer cont)
         {
-            var grid = cont.CustomContainer<UniformGridPanel>();
+            var grid = cont.UniformGrid();
             grid.CustomControl.SlotsHorizontally = 2;
             grid.CustomControl.SlotsVertically = 1;
             grid.CustomControl.SlotPadding = Margin.Zero;
@@ -690,7 +690,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
             return grid;
         }
 
-        private CustomElementsContainer<UniformGridPanel> UniformPanelCapsuleForObjectWithText(LayoutElementsContainer el, string text, ValueContainer values, Color borderColor, out FloatValueBox valueBox)
+        private CustomElementsContainer<UniformGridPanel> UniformPanelCapsuleForObjectWithText(LayoutElementsContainer el, string text, ValueContainer values, Color highlightColor, out FloatValueBox valueBox)
         {
             valueBox = null;
             var grid = UniformGridTwoByOne(el);
@@ -701,8 +701,8 @@ namespace FlaxEditor.CustomEditors.Dedicated
             {
                 valueBox = floatEditorElement.ValueBox;
                 var back = FlaxEngine.GUI.Style.Current.TextBoxBackground;
-                valueBox.BorderColor = Color.Lerp(borderColor, back, ActorTransformEditor.AxisGreyOutFactor);
-                valueBox.BorderSelectedColor = borderColor;
+                valueBox.HighlightColor = highlightColor;
+                valueBox.BorderSelectedColor = highlightColor;
             }
             return grid;
         }

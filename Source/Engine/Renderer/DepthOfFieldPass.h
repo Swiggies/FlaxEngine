@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -52,9 +52,12 @@ private:
     void OnShaderReloading(Asset* obj)
     {
         _psDofDepthBlurGeneration->ReleaseGPU();
-        _psBokehGeneration->ReleaseGPU();
-        _psBokeh->ReleaseGPU();
-        _psBokehComposite->ReleaseGPU();
+        if (_psBokehGeneration)
+            _psBokehGeneration->ReleaseGPU();
+        if (_psBokeh)
+            _psBokeh->ReleaseGPU();
+        if (_psBokehComposite)
+            _psBokehComposite->ReleaseGPU();
         invalidateResources();
     }
 #endif

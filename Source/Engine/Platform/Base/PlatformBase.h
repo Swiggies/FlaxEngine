@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -7,6 +7,7 @@
 #include <string.h>
 
 struct Guid;
+struct Version;
 struct CPUInfo;
 struct MemoryStats;
 struct ProcessMemoryStats;
@@ -125,6 +126,29 @@ enum class ThreadPriority
 
 extern FLAXENGINE_API const Char* ToString(ThreadPriority value);
 
+/// <summary>
+/// Possible fatal error types that cause engine exit.
+/// </summary>
+API_ENUM() enum class FatalErrorType
+{
+    // No fatal error set.
+    None,
+    // Not defined or custom error.
+    Unknown,
+    // Runtime exception caught by the handler (eg. stack overflow, invalid memory address access).
+    Exception,
+    // Data assertion failed (eg. invalid value or code usage).
+    Assertion,
+    // Program run out of memory to allocate.
+    OutOfMemory,
+    // The graphics device crashed, has been removed or restarted.
+    GPUCrash,
+    // The graphics device stopped responding (eg. incorrect rendering code or bug in driver).
+    GPUHang,
+    // The graphics device run out of video memory to allocate.
+    GPUOutOfMemory,
+};
+
 API_INJECT_CODE(cpp, "#include \"Engine/Platform/Platform.h\"");
 
 /// <summary>
@@ -162,7 +186,7 @@ DECLARE_SCRIPTING_TYPE_MINIMAL(PlatformBase);
     static void BeforeExit();
 
     /// <summary>
-    /// Called after engine exit to shutdown platform service.
+    /// Called after engine exit to shut down platform service.
     /// </summary>
     static void Exit();
 
@@ -216,6 +240,12 @@ public:
     static void MemoryBarrier() = delete;
 
     /// <summary>
+    /// Indicates to the processor that a cache line will be needed in the near future.
+    /// </summary>
+    /// <param name="ptr">The address of the cache line to be loaded. This address is not required to be on a cache line boundary.</param>
+    static void MemoryPrefetch(void const* ptr) = delete;
+
+    /// <summary>
     /// Sets a 64-bit variable to the specified value as an atomic operation. The function prevents more than one thread from using the same variable simultaneously.
     /// </summary>
     /// <param name="dst">A pointer to the first operand. This value will be replaced with the result of the operation.</param>
@@ -226,7 +256,7 @@ public:
     /// <summary>
     /// Performs an atomic compare-and-exchange operation on the specified values. The function compares two specified 32-bit values and exchanges with another 32-bit value based on the outcome of the comparison.
     /// </summary>
-    /// <remarks>The function compares the dst value with the comperand value. If the dst value is equal to the comperand value, the value value is stored in the address specified by dst. Otherwise, no operation is performed.</remarks>
+    /// <remarks>The function compares the dst value with the comperand value. If the dst value is equal to the comperand value, the value is stored in the address specified by dst. Otherwise, no operation is performed.</remarks>
     /// <param name="dst">A pointer to the first operand. This value will be replaced with the result of the operation.</param>
     /// <param name="exchange">The value to exchange.</param>
     /// <param name="comperand">The value to compare to destination.</param>
@@ -236,7 +266,7 @@ public:
     /// <summary>
     /// Performs an atomic compare-and-exchange operation on the specified values. The function compares two specified 64-bit values and exchanges with another 64-bit value based on the outcome of the comparison.
     /// </summary>
-    /// <remarks>The function compares the dst value with the comperand value. If the dst value is equal to the comperand value, the value value is stored in the address specified by dst. Otherwise, no operation is performed.</remarks>
+    /// <remarks>The function compares the dst value with the comperand value. If the dst value is equal to the comperand value, the value is stored in the address specified by dst. Otherwise, no operation is performed.</remarks>
     /// <param name="dst">A pointer to the first operand. This value will be replaced with the result of the operation.</param>
     /// <param name="exchange">The value to exchange.</param>
     /// <param name="comperand">The value to compare to destination.</param>
@@ -262,7 +292,7 @@ public:
     /// </summary>
     /// <param name="dst">A pointer to the first operand. This value will be replaced with the result of the operation.</param>
     /// <param name="value">The second operand.</param>
-    /// <returns>The result value of the operation.</returns>
+    /// <returns>The original value of the dst parameter.</returns>
     static int64 InterlockedAdd(int64 volatile* dst, int64 value) = delete;
 
     /// <summary>
@@ -292,12 +322,6 @@ public:
     /// <param name="dst">A pointer to the value to be exchanged.</param>
     /// <param name="value">The value to be set.</param>
     static void AtomicStore(int64 volatile* dst, int64 value) = delete;
-
-    /// <summary>
-    /// Indicates to the processor that a cache line will be needed in the near future.
-    /// </summary>
-    /// <param name="ptr">The address of the cache line to be loaded. This address is not required to be on a cache line boundary.</param>
-    static void Prefetch(void const* ptr) = delete;
 
 #if COMPILE_WITH_PROFILER
     static void OnMemoryAlloc(void* ptr, uint64 size);
@@ -350,6 +374,16 @@ public:
     API_PROPERTY() static bool Is64BitPlatform() = delete;
 
     /// <summary>
+    /// Gets the name of the operating system.
+    /// </summary>
+    API_PROPERTY() static String GetSystemName() = delete;
+
+    /// <summary>
+    /// Gets the version of the operating system version.
+    /// </summary>
+    API_PROPERTY() static Version GetSystemVersion() = delete;
+
+    /// <summary>
     /// Gets the CPU information.
     /// </summary>
     /// <returns>The CPU info.</returns>
@@ -357,9 +391,10 @@ public:
 
     /// <summary>
     /// Gets the CPU cache line size.
+    /// [Deprecated in v1.10]
     /// </summary>
     /// <returns>The cache line size.</returns>
-    API_PROPERTY() static int32 GetCacheLineSize() = delete;
+    API_PROPERTY() DEPRECATED("Use CacheLineSize field from CPUInfo.") static int32 GetCacheLineSize();
 
     /// <summary>
     /// Gets the current memory stats.
@@ -401,10 +436,15 @@ public:
     static void SetThreadAffinityMask(uint64 affinityMask) = delete;
 
     /// <summary>
-    /// Suspends the execution of the current thread until the time-out interval elapses
+    /// Suspends the execution of the current thread until the time-out interval elapses.
     /// </summary>
     /// <param name="milliseconds">The time interval for which execution is to be suspended, in milliseconds.</param>
     static void Sleep(int32 milliseconds) = delete;
+
+    /// <summary>
+    /// Yields the execution of the current thread to another thread that is ready to run on the current processor.
+    /// </summary>
+    static void Yield() = delete;
 
 public:
     /// <summary>
@@ -457,32 +497,15 @@ public:
     /// </summary>
     /// <param name="msg">The message content.</param>
     /// <param name="context">The platform-dependent context for the stack trace collecting (eg. platform exception info).</param>
-    static void Fatal(const Char* msg, void* context = nullptr);
+    /// <param name="error">The fatal error type.</param>
+    API_FUNCTION() static void Fatal(const StringView& msg, void* context, FatalErrorType error = FatalErrorType::Unknown);
 
-    /// <summary>
-    /// Shows the error message to the user.
-    /// </summary>
-    /// <param name="msg">The message content.</param>
-    static void Error(const Char* msg);
-
-    /// <summary>
-    /// Shows the warning message to the user.
-    /// </summary>
-    /// <param name="msg">The message content.</param>
-    static void Warning(const Char* msg);
-
-    /// <summary>
-    /// Shows the information message to the user.
-    /// </summary>
-    /// <param name="msg">The message content.</param>
-    static void Info(const Char* msg);
-
-public:
     /// <summary>
     /// Shows the fatal error message to the user.
     /// </summary>
     /// <param name="msg">The message content.</param>
-    API_FUNCTION() static void Fatal(const StringView& msg);
+    /// <param name="error">The fatal error type.</param>
+    API_FUNCTION() static void Fatal(const StringView& msg, FatalErrorType error = FatalErrorType::Unknown);
 
     /// <summary>
     /// Shows the error message to the user.
@@ -527,7 +550,7 @@ public:
     /// </summary>
     /// <param name="line">The source line.</param>
     /// <param name="file">The source file.</param>
-    NO_RETURN static void OutOfMemory(int32 line, const char* file);
+    NO_RETURN static void OutOfMemory(int32 line = -1, const char* file = nullptr);
 
     /// <summary>
     /// Performs a fatal crash due to code not being implemented.

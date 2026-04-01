@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_VULKAN
 
 #include "RenderToolsVulkan.h"
 #include "Engine/Core/Types/StringBuilder.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Graphics/GPUResourceAccess.h"
 
 // @formatter:off
 
@@ -180,7 +181,7 @@ void RenderToolsVulkan::SetObjectName(VkDevice device, uint64 objectHandle, VkOb
 
 String RenderToolsVulkan::GetVkErrorString(VkResult result)
 {
-    StringBuilder sb(256);
+    StringBuilder sb(64);
 
     // Switch error code
     switch (result)
@@ -228,33 +229,108 @@ String RenderToolsVulkan::GetVkErrorString(VkResult result)
     return sb.ToString();
 }
 
-void RenderToolsVulkan::ValidateVkResult(VkResult result, const char* file, uint32 line)
+void RenderToolsVulkan::LogVkResult(VkResult result, const char* file, uint32 line, bool fatal)
 {
-    // Ensure result if invalid
     ASSERT(result != VK_SUCCESS);
 
-    // Get error string
-    const String& errorString = GetVkErrorString(result);
+    // Process error and format message
+    StringBuilder sb;
+    sb.Append(TEXT("Vulkan error: "));
+    sb.Append(GetVkErrorString(result));
+    if (file)
+        sb.Append(TEXT(" at ")).Append(file).Append(':').Append(line);
+    const StringView msg(sb.ToStringView());
 
-    // Send error
-    LOG(Fatal, "Vulkan error: {0} at {1}:{2}", errorString, String(file), line);
+    // Handle error
+    FatalErrorType errorType = FatalErrorType::None;
+    if (result == VK_ERROR_OUT_OF_HOST_MEMORY || result == VK_ERROR_OUT_OF_DEVICE_MEMORY || result == VK_ERROR_OUT_OF_POOL_MEMORY)
+        errorType = FatalErrorType::GPUOutOfMemory;
+    else if (result == VK_TIMEOUT)
+        errorType = FatalErrorType::GPUHang;
+    else if (result == VK_ERROR_DEVICE_LOST || result == VK_ERROR_SURFACE_LOST_KHR || result == VK_ERROR_MEMORY_MAP_FAILED)
+        errorType = FatalErrorType::GPUCrash;
+    else if (fatal)
+        errorType = FatalErrorType::Unknown;
+    if (errorType != FatalErrorType::None)
+        Platform::Fatal(msg, nullptr, errorType);
+#if LOG_ENABLE
+    else
+        Log::Logger::Write(LogType::Error, msg);
+#endif
 }
 
-void RenderToolsVulkan::LogVkResult(VkResult result, const char* file, uint32 line)
+VkAccessFlags RenderToolsVulkan::GetAccess(GPUResourceAccess access)
 {
-    // Ensure result if invalid
-    ASSERT(result != VK_SUCCESS);
-
-    // Get error string
-    const String& errorString = GetVkErrorString(result);
-
-    // Send error
-    LOG(Error, "Vulkan error: {0} at {1}:{2}", errorString, String(file), line);
+    switch (access)
+    {
+    case GPUResourceAccess::None:
+        return VK_ACCESS_NONE;
+    case GPUResourceAccess::CopyRead:
+        return VK_ACCESS_TRANSFER_READ_BIT;
+    case GPUResourceAccess::CopyWrite:
+        return VK_ACCESS_TRANSFER_WRITE_BIT;
+    case GPUResourceAccess::CpuRead:
+        return VK_ACCESS_HOST_READ_BIT;
+    case GPUResourceAccess::CpuWrite:
+        return VK_ACCESS_HOST_WRITE_BIT;
+    case GPUResourceAccess::DepthRead:
+        return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    case GPUResourceAccess::DepthWrite:
+        return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    case GPUResourceAccess::DepthBuffer:
+        return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    case GPUResourceAccess::RenderTarget:
+        return VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    case GPUResourceAccess::UnorderedAccess:
+        return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    case GPUResourceAccess::IndirectArgs:
+        return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    case GPUResourceAccess::ShaderReadCompute:
+    case GPUResourceAccess::ShaderReadPixel:
+    case GPUResourceAccess::ShaderReadNonPixel:
+    case GPUResourceAccess::ShaderReadGraphics:
+        return VK_ACCESS_SHADER_READ_BIT;
+#if !BUILD_RELEASE
+    default:
+        LOG(Error, "Unsupported GPU Resource Access: {}", (uint32)access);
+#endif
+    }
+    return VK_ACCESS_NONE;
 }
 
-void RenderToolsVulkan::LogVkResult(VkResult result)
+VkImageLayout RenderToolsVulkan::GetImageLayout(GPUResourceAccess access)
 {
-    LogVkResult(result, "", 0);
+    switch (access)
+    {
+    case GPUResourceAccess::None:
+        return VK_IMAGE_LAYOUT_UNDEFINED;
+    case GPUResourceAccess::CopyRead:
+        return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    case GPUResourceAccess::CopyWrite:
+        return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    case GPUResourceAccess::CpuRead:
+    case GPUResourceAccess::CpuWrite:
+        return VK_IMAGE_LAYOUT_GENERAL;
+    case GPUResourceAccess::DepthRead:
+        return VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    case GPUResourceAccess::DepthWrite:
+    case GPUResourceAccess::DepthBuffer:
+        return VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        return VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    case GPUResourceAccess::RenderTarget:
+        return VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+    case GPUResourceAccess::UnorderedAccess:
+    case GPUResourceAccess::ShaderReadCompute:
+    case GPUResourceAccess::ShaderReadPixel:
+    case GPUResourceAccess::ShaderReadNonPixel:
+    case GPUResourceAccess::ShaderReadGraphics:
+        return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+#if !BUILD_RELEASE
+    default:
+        LOG(Error, "Unsupported GPU Resource Access: {}", (uint32)access);
+#endif
+    }
+    return VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
 bool RenderToolsVulkan::HasExtension(const Array<const char*>& extensions, const char* name)

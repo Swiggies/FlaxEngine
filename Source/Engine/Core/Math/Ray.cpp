@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Ray.h"
 #include "Matrix.h"
@@ -10,11 +10,6 @@ Ray Ray::Identity(Vector3(0, 0, 0), Vector3(0, 0, 1.0f));
 String Ray::ToString() const
 {
     return String::Format(TEXT("{}"), *this);
-}
-
-Vector3 Ray::GetPoint(Real distance) const
-{
-    return Position + Direction * distance;
 }
 
 Ray Ray::GetPickRay(float x, float y, const Viewport& viewport, const Matrix& vp)

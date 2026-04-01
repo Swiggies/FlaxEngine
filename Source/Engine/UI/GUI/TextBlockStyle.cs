@@ -1,4 +1,6 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
+
+using System;
 
 namespace FlaxEngine.GUI
 {
@@ -10,6 +12,7 @@ namespace FlaxEngine.GUI
         /// <summary>
         /// Text block alignments modes.
         /// </summary>
+        [Flags]
         public enum Alignments
         {
             /// <summary>
@@ -79,7 +82,7 @@ namespace FlaxEngine.GUI
         public Color Color;
 
         /// <summary>
-        /// The text shadow color (tint and opacity). Set to transparent to disable shadow drawing.
+        /// The text shadow color (tint and opacity). Transparent color disables shadow drawing.
         /// </summary>
         [EditorOrder(30)]
         public Color ShadowColor;

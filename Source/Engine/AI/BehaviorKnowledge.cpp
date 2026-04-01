@@ -1,9 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "BehaviorKnowledge.h"
 #include "BehaviorTree.h"
 #include "BehaviorTreeNodes.h"
 #include "BehaviorKnowledgeSelector.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Scripting/Scripting.h"
 #include "Engine/Scripting/BinaryModule.h"
 #include "Engine/Scripting/ManagedCLR/MProperty.h"
@@ -144,6 +145,7 @@ BehaviorKnowledge::~BehaviorKnowledge()
 
 void BehaviorKnowledge::InitMemory(BehaviorTree* tree)
 {
+    PROFILE_MEM(AI);
     if (Tree)
         FreeMemory();
     if (!tree)

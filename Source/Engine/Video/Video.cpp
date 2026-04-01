@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Video.h"
 #include "VideoBackend.h"
@@ -7,6 +7,7 @@
 #include "Engine/Core/Math/Quaternion.h"
 #include "Engine/Core/Math/Transform.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Engine/Engine.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Graphics/GPUDevice.h"
@@ -70,6 +71,7 @@ protected:
         if (!frame->IsAllocated())
             return Result::MissingResources;
         PROFILE_CPU();
+        PROFILE_MEM(Video);
         ZoneText(_player->DebugUrl, _player->DebugUrlLen);
 
         if (PixelFormatExtensions::IsVideo(_player->Format))
@@ -159,6 +161,7 @@ public:
 
     void InitBackend(int32 index, VideoBackend* backend)
     {
+        PROFILE_MEM(Video);
         LOG(Info, "Video initialization... (backend: {0})", backend->Base_Name());
         if (backend->Base_Init())
         {
@@ -177,6 +180,7 @@ TaskGraphSystem* Video::System = nullptr;
 void VideoSystem::Execute(TaskGraph* graph)
 {
     PROFILE_CPU_NAMED("Video.Update");
+    PROFILE_MEM(Video);
 
     // Update backends
     for (VideoBackend*& backend : VideoServiceInstance.Backends)
@@ -309,6 +313,7 @@ void VideoBackendPlayer::InitVideoFrame()
 void VideoBackendPlayer::UpdateVideoFrame(Span<byte> data, TimeSpan time, TimeSpan duration)
 {
     PROFILE_CPU();
+    PROFILE_MEM(Video);
     ZoneText(DebugUrl, DebugUrlLen);
     VideoFrameTime = time;
     VideoFrameDuration = duration;
@@ -328,11 +333,6 @@ void VideoBackendPlayer::UpdateVideoFrame(Span<byte> data, TimeSpan time, TimeSp
     if (VideoFrameMemory.Length() < (int32)slicePitch)
     {
         VideoFrameMemory.Allocate(slicePitch);
-        if (VideoFrameMemory.IsInvalid())
-        {
-            OUT_OF_MEMORY;
-            return;
-        }
     }
     Platform::MemoryCopy(VideoFrameMemory.Get(), data.Get(), slicePitch);
 
@@ -361,6 +361,7 @@ void VideoBackendPlayer::UpdateVideoFrame(Span<byte> data, TimeSpan time, TimeSp
 void VideoBackendPlayer::UpdateAudioBuffer(Span<byte> data, TimeSpan time, TimeSpan duration)
 {
     PROFILE_CPU();
+    PROFILE_MEM(Video);
     ZoneText(DebugUrl, DebugUrlLen);
     AudioBufferTime = time;
     AudioBufferDuration = duration;

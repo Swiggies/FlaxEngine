@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -90,6 +90,11 @@ namespace FlaxEditor.GUI.Input
         public bool IsSliding => _isSliding;
 
         /// <summary>
+        /// The color of the highlight to the left of the value box.
+        /// </summary>
+        public Color HighlightColor;
+
+        /// <summary>
         /// Occurs when sliding starts.
         /// </summary>
         public event Action SlidingStart;
@@ -98,6 +103,11 @@ namespace FlaxEditor.GUI.Input
         /// Occurs when sliding ends.
         /// </summary>
         public event Action SlidingEnd;
+
+        /// <summary>
+        /// If enabled, pressing the arrow up or down key increments/ decrements the value.
+        /// </summary>
+        public bool ArrowKeysIncrement = true;
 
         /// <summary>
         /// Gets or sets the slider speed. Use value 0 to disable and hide slider UI.
@@ -206,6 +216,12 @@ namespace FlaxEditor.GUI.Input
                     Render2D.DrawRectangle(bounds, style.SelectionBorder);
                 }
             }
+
+            if (HighlightColor != Color.Transparent)
+            {
+                var highlightRect = new Rectangle(-3.0f, 0.0f, 3.0f, Height);
+                Render2D.FillRectangle(highlightRect, HighlightColor);
+            }
         }
 
         /// <inheritdoc />
@@ -237,6 +253,27 @@ namespace FlaxEditor.GUI.Input
             Cursor = CursorType.Default;
 
             ResetViewOffset();
+        }
+
+        /// <inheritdoc />
+        public override bool OnKeyDown(KeyboardKeys key)
+        {
+            if (ArrowKeysIncrement && (key == KeyboardKeys.ArrowUp || key == KeyboardKeys.ArrowDown))
+            {
+                bool altDown = Root.GetKey(KeyboardKeys.Alt);
+                bool shiftDown = Root.GetKey(KeyboardKeys.Shift);
+                bool controlDown = Root.GetKey(KeyboardKeys.Control);
+                float deltaValue = altDown ? 0.1f : (shiftDown ? 10f : (controlDown ? 100f : 1f));
+                float slideDelta = key == KeyboardKeys.ArrowUp ? deltaValue : -deltaValue;
+
+                _startSlideValue = Value;
+                ApplySliding(slideDelta);
+                EndSliding();
+                Focus();
+                return true;
+            }
+
+            return base.OnKeyDown(key);
         }
 
         /// <inheritdoc />

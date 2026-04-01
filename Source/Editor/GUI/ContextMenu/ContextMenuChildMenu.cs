@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -29,7 +29,7 @@ namespace FlaxEditor.GUI.ContextMenu
             CloseMenuOnClick = false;
         }
 
-        private void ShowChild(ContextMenu parentContextMenu)
+        internal void ShowChild(ContextMenu parentContextMenu)
         {
             // Hide parent CM popups and set itself as child
             var vAlign = parentContextMenu.ItemsAreaMargin.Top;

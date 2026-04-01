@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "AnimatedModel.h"
 #include "BoneSocket.h"
@@ -11,13 +11,86 @@
 #include "Engine/Core/Math/Matrix3x3.h"
 #include "Editor/Editor.h"
 #endif
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Graphics/GPUContext.h"
 #include "Engine/Graphics/GPUDevice.h"
+#include "Engine/Graphics/GPUPass.h"
 #include "Engine/Graphics/RenderTask.h"
+#include "Engine/Graphics/Models/MeshAccessor.h"
 #include "Engine/Graphics/Models/MeshDeformation.h"
+#include "Engine/Renderer/RenderList.h"
 #include "Engine/Level/Scene/Scene.h"
 #include "Engine/Level/SceneObjectsFactory.h"
+#include "Engine/Profiler/Profiler.h"
 #include "Engine/Serialization/Serialization.h"
+
+// Implements efficient skinning data update within a shared GPUMemoryPass with manual resource transitions batched for all animated models.
+class AnimatedModelRenderListExtension : public RenderList::IExtension
+{
+public:
+    struct Item
+    {
+        GPUBuffer* BoneMatrices;
+        void* Data;
+        int32 Size;
+    };
+
+    RenderListBuffer<Item> Items;
+
+    void PreDraw(GPUContext* context, RenderContextBatch& renderContextBatch) override
+    {
+        Items.Clear();
+    }
+
+    void PostDraw(GPUContext* context, RenderContextBatch& renderContextBatch) override
+    {
+        const int32 count = Items.Count();
+        if (count == 0)
+            return;
+        PROFILE_GPU_CPU_NAMED("Update Bones");
+        GPUMemoryPass pass(context);
+        Item* items = Items.Get();
+
+        // Special case for D3D11 backend that doesn't need transitions
+        if (context->GetDevice()->GetRendererType() <= RendererType::DirectX11)
+        {
+            for (int32 i = 0; i < count; i++)
+            {
+                Item& item = items[i];
+                context->UpdateBuffer(item.BoneMatrices, item.Data, item.Size);
+            }
+        }
+        else
+        {
+            // Batch resource barriers for buffer update
+            for (int32 i = 0; i < count; i++)
+                pass.Transition(items[i].BoneMatrices, GPUResourceAccess::CopyWrite);
+
+            // Update all buffers within Memory Pass (no barriers between)
+            for (int32 i = 0; i < count; i++)
+            {
+                Item& item = items[i];
+                context->UpdateBuffer(item.BoneMatrices, item.Data, item.Size);
+            }
+
+            // Batch resource barriers for reading in Vertex Shader
+            for (int32 i = 0; i < count; i++)
+                pass.Transition(items[i].BoneMatrices, GPUResourceAccess::ShaderReadGraphics);
+        }
+
+#if COMPILE_WITH_PROFILER
+        // Insert amount of kilobytes of data updated into profiler trace
+        uint32 dataSize = 0;
+        for (int32 i = 0; i < count; i++)
+            dataSize += items[i].Size;
+        ZoneValue(dataSize / 1024);
+#endif
+
+        Items.Clear();
+    }
+};
+
+AnimatedModelRenderListExtension RenderListExtension;
 
 AnimatedModel::AnimatedModel(const SpawnParams& params)
     : ModelInstanceActor(params)
@@ -25,16 +98,13 @@ AnimatedModel::AnimatedModel(const SpawnParams& params)
     , _counter(0)
     , _lastMinDstSqr(MAX_Real)
     , _lastUpdateFrame(0)
+    , SkinnedModel(this)
+    , AnimationGraph(this)
 {
     _drawCategory = SceneRendering::SceneDrawAsync;
     GraphInstance.Object = this;
     _box = BoundingBox(Vector3::Zero);
     _sphere = BoundingSphere(Vector3::Zero, 0.0f);
-
-    SkinnedModel.Changed.Bind<AnimatedModel, &AnimatedModel::OnSkinnedModelChanged>(this);
-    SkinnedModel.Loaded.Bind<AnimatedModel, &AnimatedModel::OnSkinnedModelLoaded>(this);
-    AnimationGraph.Changed.Bind<AnimatedModel, &AnimatedModel::OnGraphChanged>(this);
-    AnimationGraph.Loaded.Bind<AnimatedModel, &AnimatedModel::OnGraphLoaded>(this);
 }
 
 AnimatedModel::~AnimatedModel()
@@ -84,7 +154,8 @@ void AnimatedModel::PreInitSkinningData()
 {
     if (!SkinnedModel || !SkinnedModel->IsLoaded())
         return;
-
+    PROFILE_CPU();
+    PROFILE_MEM(Animations);
     ScopeLock lock(SkinnedModel->Locker);
 
     SetupSkinningData();
@@ -94,28 +165,30 @@ void AnimatedModel::PreInitSkinningData()
 
     // Get nodes global transformations for the initial pose
     GraphInstance.NodesPose.Resize(nodesCount, false);
+    auto nodesPose = GraphInstance.NodesPose.Get();
     for (int32 nodeIndex = 0; nodeIndex < nodesCount; nodeIndex++)
     {
         Matrix localTransform;
         skeleton.Nodes[nodeIndex].LocalTransform.GetWorld(localTransform);
         const int32 parentIndex = skeleton.Nodes[nodeIndex].ParentIndex;
         if (parentIndex != -1)
-            GraphInstance.NodesPose[nodeIndex] = localTransform * GraphInstance.NodesPose[parentIndex];
+            nodesPose[nodeIndex] = localTransform * nodesPose[parentIndex];
         else
-            GraphInstance.NodesPose[nodeIndex] = localTransform;
+            nodesPose[nodeIndex] = localTransform;
     }
     GraphInstance.Invalidate();
-    GraphInstance.RootTransform = skeleton.Nodes[0].LocalTransform;
+    GraphInstance.RootTransform = nodesCount > 0 ? skeleton.Nodes[0].LocalTransform : Transform::Identity;
 
     // Setup bones transformations including bone offset matrix
-    Array<Matrix> identityMatrices; // TODO: use shared memory?
-    identityMatrices.Resize(bonesCount, false);
+    Matrix3x4* output = (Matrix3x4*)_skinningData.Data.Get();
+    const SkeletonBone* bones = skeleton.Bones.Get();
     for (int32 boneIndex = 0; boneIndex < bonesCount; boneIndex++)
     {
-        auto& bone = skeleton.Bones[boneIndex];
-        identityMatrices.Get()[boneIndex] = bone.OffsetMatrix * GraphInstance.NodesPose[bone.NodeIndex];
+        auto& bone = bones[boneIndex];
+        Matrix identityMatrix = bone.OffsetMatrix * nodesPose[bone.NodeIndex];
+        output[boneIndex].SetMatrixTranspose(identityMatrix);
     }
-    _skinningData.SetData(identityMatrices.Get(), true);
+    _skinningData.OnDataChanged(true);
 
     UpdateBounds();
     UpdateSockets();
@@ -133,6 +206,13 @@ void AnimatedModel::GetCurrentPose(Array<Matrix>& nodesTransformation, bool worl
         for (auto& m : nodesTransformation)
             m = m * world;
     }
+}
+
+void AnimatedModel::GetCurrentPose(Span<Matrix>& nodesTransformation) const
+{
+    if (GraphInstance.NodesPose.IsEmpty())
+        const_cast<AnimatedModel*>(this)->PreInitSkinningData(); // Ensure to have valid nodes pose to return
+    nodesTransformation = ToSpan(GraphInstance.NodesPose);
 }
 
 void AnimatedModel::SetCurrentPose(const Array<Matrix>& nodesTransformation, bool worldSpace)
@@ -174,9 +254,9 @@ void AnimatedModel::GetNodeTransformation(const StringView& nodeName, Matrix& no
     GetNodeTransformation(SkinnedModel ? SkinnedModel->FindNode(nodeName) : -1, nodeTransformation, worldSpace);
 }
 
-void AnimatedModel::GetNodeTransformation(Array<ModelBoneNode>& modelBoneNodes, bool worldSpace) const
+void AnimatedModel::GetNodeTransformation(Array<NodeTransformation>& nodeTransformations, bool worldSpace) const
 {
-    for (ModelBoneNode& item : modelBoneNodes)
+    for (NodeTransformation& item : nodeTransformations)
     {
         GetNodeTransformation(item.NodeIndex, item.NodeMatrix, worldSpace);
     }
@@ -199,7 +279,7 @@ void AnimatedModel::SetNodeTransformation(int32 nodeIndex, const Matrix& nodeTra
     OnAnimationUpdated();
 }
 
-void AnimatedModel::SetNodeTransformation(Array<ModelBoneNode>& modelBoneNodes, bool worldSpace)
+void AnimatedModel::SetNodeTransformation(const Array<NodeTransformation>& nodeTransformations, bool worldSpace)
 {
     if (GraphInstance.NodesPose.IsEmpty())
         const_cast<AnimatedModel*>(this)->PreInitSkinningData(); // Ensure to have valid nodes pose to return
@@ -213,11 +293,11 @@ void AnimatedModel::SetNodeTransformation(Array<ModelBoneNode>& modelBoneNodes, 
         Matrix::Invert(world, invWorld);
     }
 
-    for (int i = 0; i < modelBoneNodes.Count(); i++)
+    for (int i = 0; i < nodeTransformations.Count(); i++)
     {
-        int nodeIndex = modelBoneNodes[i].NodeIndex;
+        int nodeIndex = nodeTransformations[i].NodeIndex;
         CHECK(nodeIndex >= 0 && nodeIndex < GraphInstance.NodesPose.Count());
-        GraphInstance.NodesPose[nodeIndex] = modelBoneNodes[i].NodeMatrix;
+        GraphInstance.NodesPose[nodeIndex] = nodeTransformations[i].NodeMatrix;
         if (worldSpace)
         {
             GraphInstance.NodesPose[nodeIndex] = GraphInstance.NodesPose[nodeIndex] * invWorld;
@@ -544,10 +624,11 @@ void AnimatedModel::StopSlotAnimation(const StringView& slotName, Animation* ani
 {
     for (auto& slot : GraphInstance.Slots)
     {
-        if (slot.Animation == anim && slot.Name == slotName)
+        if ((slot.Animation == anim || anim == nullptr) && slot.Name == slotName)
         {
             //slot.Animation = nullptr; // TODO: make an immediate version of this method and set the animation to nullptr.
-            slot.Reset = true;
+            if (slot.Animation != nullptr)
+                slot.Reset = true;
             break;
         }
     }
@@ -563,7 +644,7 @@ void AnimatedModel::PauseSlotAnimation(const StringView& slotName, Animation* an
 {
     for (auto& slot : GraphInstance.Slots)
     {
-        if (slot.Animation == anim && slot.Name == slotName)
+        if ((slot.Animation == anim || anim == nullptr) && slot.Name == slotName)
         {
             slot.Pause = true;
             break;
@@ -585,7 +666,7 @@ bool AnimatedModel::IsPlayingSlotAnimation(const StringView& slotName, Animation
 {
     for (auto& slot : GraphInstance.Slots)
     {
-        if (slot.Animation == anim && slot.Name == slotName && !slot.Pause)
+        if ((slot.Animation == anim || anim == nullptr) && slot.Name == slotName && !slot.Pause)
             return true;
     }
     return false;
@@ -619,6 +700,7 @@ void AnimatedModel::SyncParameters()
         }
         else
         {
+            PROFILE_MEM(Animations);
             ScopeLock lock(AnimationGraph->Locker);
 
             // Clone the parameters
@@ -656,7 +738,11 @@ void AnimatedModel::RunBlendShapeDeformer(const MeshBase* mesh, MeshDeformationD
         {
             if (q.First == blendShape.Name)
             {
-                const float weight = q.Second * blendShape.Weight;
+                float weight = q.Second;
+                if (!Math::IsZero(blendShape.Weight))
+                    weight *= blendShape.Weight;
+                if (Math::IsZero(weight))
+                    break;
                 blendShapes.Add(Pair<const BlendShape&, const float>(blendShape, weight));
                 minVertexIndex = Math::Min(minVertexIndex, blendShape.MinVertexIndex);
                 maxVertexIndex = Math::Max(maxVertexIndex, blendShape.MaxVertexIndex);
@@ -668,30 +754,35 @@ void AnimatedModel::RunBlendShapeDeformer(const MeshBase* mesh, MeshDeformationD
 
     // Blend all blend shapes
     auto vertexCount = (uint32)mesh->GetVertexCount();
-    auto data = (VB0SkinnedElementType*)deformation.VertexBuffer.Data.Get();
+    MeshAccessor accessor;
+    if (deformation.LoadMeshAccessor(accessor))
+        return;
+    auto positionStream = accessor.Position();
+    auto normalStream = accessor.Normal();
+    CHECK(positionStream.IsValid());
+    useNormals &= normalStream.IsValid();
     for (const auto& q : blendShapes)
     {
-        // TODO: use SIMD
+        for (int32 i = 0; i < q.First.Vertices.Count(); i++)
+        {
+            const BlendShapeVertex& blendShapeVertex = q.First.Vertices[i];
+            ASSERT_LOW_LAYER(blendShapeVertex.VertexIndex < vertexCount);
+
+            Float3 position = positionStream.GetFloat3(blendShapeVertex.VertexIndex);
+            position = position + blendShapeVertex.PositionDelta * q.Second;
+            positionStream.SetFloat3(blendShapeVertex.VertexIndex, position);
+        }
         if (useNormals)
         {
             for (int32 i = 0; i < q.First.Vertices.Count(); i++)
             {
                 const BlendShapeVertex& blendShapeVertex = q.First.Vertices[i];
-                ASSERT_LOW_LAYER(blendShapeVertex.VertexIndex < vertexCount);
-                VB0SkinnedElementType& vertex = *(data + blendShapeVertex.VertexIndex);
-                vertex.Position = vertex.Position + blendShapeVertex.PositionDelta * q.Second;
-                Float3 normal = (vertex.Normal.ToFloat3() * 2.0f - 1.0f) + blendShapeVertex.NormalDelta * q.Second;
-                vertex.Normal = normal * 0.5f + 0.5f;
-            }
-        }
-        else
-        {
-            for (int32 i = 0; i < q.First.Vertices.Count(); i++)
-            {
-                const BlendShapeVertex& blendShapeVertex = q.First.Vertices[i];
-                ASSERT_LOW_LAYER(blendShapeVertex.VertexIndex < vertexCount);
-                VB0SkinnedElementType& vertex = *(data + blendShapeVertex.VertexIndex);
-                vertex.Position = vertex.Position + blendShapeVertex.PositionDelta * q.Second;
+
+                Float3 normal = normalStream.GetFloat3(blendShapeVertex.VertexIndex);
+                MeshAccessor::UnpackNormal(normal);
+                normal = normal + blendShapeVertex.NormalDelta * q.Second;
+                MeshAccessor::PackNormal(normal); // TODO: optimize unpacking and packing to just apply it to the normal delta
+                normalStream.SetFloat3(blendShapeVertex.VertexIndex, normal);
             }
         }
     }
@@ -699,21 +790,26 @@ void AnimatedModel::RunBlendShapeDeformer(const MeshBase* mesh, MeshDeformationD
     if (useNormals)
     {
         // Normalize normal vectors and rebuild tangent frames (tangent frame is in range [-1;1] but packed to [0;1] range)
-        // TODO: use SIMD
+        auto tangentStream = accessor.Tangent();
         for (uint32 vertexIndex = minVertexIndex; vertexIndex <= maxVertexIndex; vertexIndex++)
         {
-            VB0SkinnedElementType& vertex = *(data + vertexIndex);
-
-            Float3 normal = vertex.Normal.ToFloat3() * 2.0f - 1.0f;
+            Float3 normal = normalStream.GetFloat3(vertexIndex);
+            MeshAccessor::UnpackNormal(normal);
             normal.Normalize();
-            vertex.Normal = normal * 0.5f + 0.5f;
+            MeshAccessor::PackNormal(normal);
+            normalStream.SetFloat3(vertexIndex, normal);
 
-            Float3 tangent = vertex.Tangent.ToFloat3() * 2.0f - 1.0f;
-            tangent = tangent - ((tangent | normal) * normal);
-            tangent.Normalize();
-            const auto tangentSign = vertex.Tangent.W;
-            vertex.Tangent = tangent * 0.5f + 0.5f;
-            vertex.Tangent.W = tangentSign;
+            if (tangentStream.IsValid())
+            {
+                Float4 tangentRaw = normalStream.GetFloat4(vertexIndex);
+                Float3 tangent = Float3(tangentRaw);
+                MeshAccessor::UnpackNormal(tangent);
+                tangent = tangent - ((tangent | normal) * normal);
+                tangent.Normalize();
+                MeshAccessor::PackNormal(tangent);
+                tangentRaw = Float4(tangent, tangentRaw.W);
+                tangentStream.SetFloat4(vertexIndex, tangentRaw);
+            }
         }
     }
 
@@ -789,7 +885,7 @@ void AnimatedModel::UpdateBounds()
         // Apply margin based on model dimensions
         const Vector3 modelBoxSize = modelBox.GetSize();
         const Vector3 center = box.GetCenter();
-        const Vector3 sizeHalf = Vector3::Max(box.GetSize() + modelBoxSize * 0.2f, modelBoxSize) * 0.5f;
+        const Vector3 sizeHalf = Vector3::Max(box.GetSize() + modelBoxSize * 0.2f, modelBoxSize) * (0.5f * BoundsScale);
         _box = BoundingBox(center - sizeHalf, center + sizeHalf);
     }
     else
@@ -904,6 +1000,26 @@ void AnimatedModel::OnGraphLoaded()
     SyncParameters();
 }
 
+void AnimatedModel::OnAssetChanged(Asset* asset, void* caller)
+{
+    if (caller == &SkinnedModel)
+        OnSkinnedModelChanged();
+    else if (caller == &AnimationGraph)
+        OnGraphChanged();
+}
+
+void AnimatedModel::OnAssetLoaded(Asset* asset, void* caller)
+{
+    if (caller == &SkinnedModel)
+        OnSkinnedModelLoaded();
+    else if (caller == &AnimationGraph)
+        OnGraphLoaded();
+}
+
+void AnimatedModel::OnAssetUnloaded(Asset* asset, void* caller)
+{
+}
+
 bool AnimatedModel::HasContentLoaded() const
 {
     return (SkinnedModel == nullptr || SkinnedModel->IsLoaded()) && Entries.HasContentLoaded();
@@ -956,7 +1072,7 @@ void AnimatedModel::Draw(RenderContext& renderContext)
     if (renderContext.View.Pass == DrawPass::GlobalSDF)
         return;
     if (renderContext.View.Pass == DrawPass::GlobalSurfaceAtlas)
-        return; // No supported
+        return; // Not supported
     ACTOR_GET_WORLD_MATRIX(this, view, world);
     GEOMETRY_DRAW_STATE_EVENT_BEGIN(_drawState, world);
 
@@ -966,9 +1082,8 @@ void AnimatedModel::Draw(RenderContext& renderContext)
         // Flush skinning data with GPU
         if (_skinningData.IsDirty())
         {
-            RenderContext::GPULocker.Lock();
-            GPUDevice::Instance->GetMainContext()->UpdateBuffer(_skinningData.BoneMatrices, _skinningData.Data.Get(), _skinningData.Data.Count());
-            RenderContext::GPULocker.Unlock();
+            RenderListExtension.Items.Add({ _skinningData.BoneMatrices, _skinningData.Data.Get(), _skinningData.Data.Count() });
+            _skinningData.OnFlush();
         }
 
         SkinnedMesh::DrawInfo draw;
@@ -986,6 +1101,7 @@ void AnimatedModel::Draw(RenderContext& renderContext)
         draw.LODBias = LODBias;
         draw.ForcedLOD = ForcedLOD;
         draw.SortOrder = SortOrder;
+        draw.SetStencilValue(_layer);
 
         SkinnedModel->Draw(renderContext, draw);
     }
@@ -1009,9 +1125,8 @@ void AnimatedModel::Draw(RenderContextBatch& renderContextBatch)
         // Flush skinning data with GPU
         if (_skinningData.IsDirty())
         {
-            RenderContext::GPULocker.Lock();
-            GPUDevice::Instance->GetMainContext()->UpdateBuffer(_skinningData.BoneMatrices, _skinningData.Data.Get(), _skinningData.Data.Count());
-            RenderContext::GPULocker.Unlock();
+            RenderListExtension.Items.Add({ _skinningData.BoneMatrices, _skinningData.Data.Get(), _skinningData.Data.Count() });
+            _skinningData.OnFlush();
         }
 
         SkinnedMesh::DrawInfo draw;
@@ -1027,6 +1142,7 @@ void AnimatedModel::Draw(RenderContextBatch& renderContextBatch)
         draw.LODBias = LODBias;
         draw.ForcedLOD = ForcedLOD;
         draw.SortOrder = SortOrder;
+        draw.SetStencilValue(_layer);
 
         PRAGMA_DISABLE_DEPRECATION_WARNINGS
         if (ShadowsMode != ShadowsCastingMode::All)
@@ -1178,10 +1294,16 @@ void AnimatedModel::Deserialize(DeserializeStream& stream, ISerializeModifier* m
 
     // [Deprecated on 07.02.2022, expires on 07.02.2024]
     if (modifier->EngineBuild <= 6330)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSDF;
+    }
     // [Deprecated on 27.04.2022, expires on 27.04.2024]
     if (modifier->EngineBuild <= 6331)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSurfaceAtlas;
+    }
 }
 
 const Span<MaterialSlot> AnimatedModel::GetMaterialSlots() const
@@ -1262,16 +1384,27 @@ bool AnimatedModel::IntersectsEntry(const Ray& ray, Real& distance, Vector3& nor
     return result;
 }
 
-bool AnimatedModel::GetMeshData(const MeshReference& mesh, MeshBufferType type, BytesContainer& result, int32& count) const
+bool AnimatedModel::GetMeshData(const MeshReference& ref, MeshBufferType type, BytesContainer& result, int32& count, GPUVertexLayout** layout) const
 {
     count = 0;
-    if (mesh.LODIndex < 0 || mesh.MeshIndex < 0)
+    if (ref.LODIndex < 0 || ref.MeshIndex < 0)
         return true;
     const auto model = SkinnedModel.Get();
     if (!model || model->WaitForLoaded())
         return true;
-    auto& lod = model->LODs[Math::Min(mesh.LODIndex, model->LODs.Count() - 1)];
-    return lod.Meshes[Math::Min(mesh.MeshIndex, lod.Meshes.Count() - 1)].DownloadDataCPU(type, result, count);
+    auto& lod = model->LODs[Math::Min(ref.LODIndex, model->LODs.Count() - 1)];
+    auto& mesh = lod.Meshes[Math::Min(ref.MeshIndex, lod.Meshes.Count() - 1)];
+    return mesh.DownloadDataCPU(type, result, count, layout);
+}
+
+MeshBase* AnimatedModel::GetMesh(const MeshReference& ref) const
+{
+    const auto model = SkinnedModel.Get();
+    if (!model || model->WaitForLoaded())
+        return nullptr;
+    auto& lod = model->LODs[Math::Min(ref.LODIndex, model->LODs.Count() - 1)];
+    auto& mesh = lod.Meshes[Math::Min(ref.MeshIndex, lod.Meshes.Count() - 1)];
+    return &mesh;
 }
 
 MeshDeformation* AnimatedModel::GetMeshDeformation() const

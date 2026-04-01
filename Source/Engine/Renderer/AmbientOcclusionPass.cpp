@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "AmbientOcclusionPass.h"
 #include "RenderList.h"
@@ -91,17 +91,9 @@ bool AmbientOcclusionPass::setupResources()
 {
     // Check shader
     if (!_shader->IsLoaded())
-    {
         return true;
-    }
     const auto shader = _shader->GetShader();
-
-    // Validate shader constant buffer size
-    if (shader->GetCB(0)->GetSize() != sizeof(ASSAOConstants))
-    {
-        REPORT_INVALID_SHADER_PASS_CB_SIZE(shader, 0, ASSAOConstants);
-        return true;
-    }
+    CHECK_INVALID_SHADER_PASS_CB_SIZE(shader, 0, ASSAOConstants);
 
     // Create pipeline states
     GPUPipelineState::Description psDesc = GPUPipelineState::Description::DefaultFullscreenTriangle;

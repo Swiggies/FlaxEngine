@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -22,6 +22,7 @@ namespace FlaxEditor.Windows
         private IEnumerable<object> undoRecordObjects;
 
         private readonly Dictionary<Guid, float> _actorScrollValues = new Dictionary<Guid, float>();
+        private bool _lockObjects = false;
 
         /// <inheritdoc />
         public override bool UseLayoutData => true;
@@ -44,7 +45,21 @@ namespace FlaxEditor.Windows
         /// <summary>
         /// Indication of if the properties window is locked on specific objects.
         /// </summary>
-        public bool LockObjects = false;
+        public bool LockSelection
+        {
+            get => _lockObjects;
+            set
+            {
+                if (value == _lockObjects)
+                    return;
+                _lockObjects = value;
+                if (!value)
+                    OnSelectionChanged();
+            }
+        }
+
+        /// <inheritdoc />
+        public ISceneEditingContext SceneContext => Editor.Windows.EditWin;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="PropertiesWindow"/> class.
@@ -54,6 +69,7 @@ namespace FlaxEditor.Windows
         : base(editor, true, ScrollBars.Vertical)
         {
             Title = "Properties";
+            Icon = editor.Icons.Build64;
             AutoFocus = true;
 
             Presenter = new CustomEditorPresenter(editor.Undo, null, this);
@@ -74,6 +90,11 @@ namespace FlaxEditor.Windows
             if (Level.ScenesCount > 1)
                 return;
             _actorScrollValues.Clear();
+            if (LockSelection)
+            {
+                LockSelection = false;
+                Presenter.Deselect();
+            }
         }
 
         private void OnScrollValueChanged()
@@ -104,7 +125,7 @@ namespace FlaxEditor.Windows
 
         private void OnSelectionChanged()
         {
-            if (LockObjects)
+            if (LockSelection)
                 return;
 
             // Update selected objects

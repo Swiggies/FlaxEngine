@@ -1,12 +1,12 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
-using System.IO;
 using System.Xml;
 using FlaxEditor.Content;
 using FlaxEditor.Content.Import;
 using FlaxEditor.CustomEditors;
 using FlaxEditor.CustomEditors.Editors;
 using FlaxEditor.GUI;
+using FlaxEditor.Scripting;
 using FlaxEditor.Viewport.Previews;
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -77,7 +77,8 @@ namespace FlaxEditor.Windows.Assets
             {
                 public override void Initialize(LayoutElementsContainer layout)
                 {
-                    var window = ((PropertiesProxy)Values[0])._window;
+                    var proxy = ((PropertiesProxy)Values[0]);
+                    var window = proxy._window;
                     if (window == null)
                     {
                         layout.Label("Loading...", TextAlignment.Center);
@@ -102,7 +103,8 @@ namespace FlaxEditor.Windows.Assets
                     base.Initialize(layout);
 
                     // Creates the import path UI
-                    Utilities.Utils.CreateImportPathUI(layout, window.Item as BinaryAssetItem);
+                    var pathGroup = layout.Group("Import Path");
+                    Utilities.Utils.CreateImportPathUI(pathGroup, window.Item as BinaryAssetItem);
 
                     layout.Space(5);
                     var reimportButton = layout.Button("Reimport");
@@ -289,6 +291,10 @@ namespace FlaxEditor.Windows.Assets
         /// <inheritdoc />
         public override void OnDestroy()
         {
+            if (IsDisposing)
+                return;
+            base.OnDestroy();
+
             if (_previewSource)
             {
                 _preview.Source = null;
@@ -297,8 +303,6 @@ namespace FlaxEditor.Windows.Assets
                 _previewSource = null;
             }
             FlaxEngine.Object.Destroy(ref _previewScene);
-
-            base.OnDestroy();
         }
 
         /// <inheritdoc />

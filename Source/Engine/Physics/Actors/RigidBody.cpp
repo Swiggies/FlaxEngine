@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "RigidBody.h"
 #include "Engine/Core/Log.h"
@@ -44,7 +44,7 @@ void RigidBody::SetIsKinematic(const bool value)
 
 void RigidBody::SetLinearDamping(float value)
 {
-    if (Math::NearEqual(value, _linearDamping))
+    if (value == _linearDamping)
         return;
     _linearDamping = value;
     if (_actor)
@@ -53,7 +53,7 @@ void RigidBody::SetLinearDamping(float value)
 
 void RigidBody::SetAngularDamping(float value)
 {
-    if (Math::NearEqual(value, _angularDamping))
+    if (value == _angularDamping)
         return;
     _angularDamping = value;
     if (_actor)
@@ -108,7 +108,7 @@ void RigidBody::SetUpdateMassWhenScaleChanges(bool value)
 
 void RigidBody::SetMaxAngularVelocity(float value)
 {
-    if (Math::NearEqual(value, _maxAngularVelocity))
+    if (value == _maxAngularVelocity)
         return;
     _maxAngularVelocity = value;
     if (_actor)
@@ -135,7 +135,7 @@ float RigidBody::GetMass() const
 
 void RigidBody::SetMass(float value)
 {
-    if (Math::NearEqual(value, _mass))
+    if (value == _mass)
         return;
     _mass = value;
     _overrideMass = true;
@@ -149,7 +149,7 @@ float RigidBody::GetMassScale() const
 
 void RigidBody::SetMassScale(float value)
 {
-    if (Math::NearEqual(value, _massScale))
+    if (value == _massScale)
         return;
     _massScale = value;
     UpdateMass();
@@ -157,11 +157,12 @@ void RigidBody::SetMassScale(float value)
 
 void RigidBody::SetCenterOfMassOffset(const Float3& value)
 {
-    if (Float3::NearEqual(value, _centerOfMassOffset))
+    if (value == _centerOfMassOffset)
         return;
+    Float3 delta = value - _centerOfMassOffset;
     _centerOfMassOffset = value;
     if (_actor)
-        PhysicsBackend::SetRigidDynamicActorCenterOfMassOffset(_actor, _centerOfMassOffset);
+        PhysicsBackend::AddRigidDynamicActorCenterOfMassOffset(_actor, delta);
 }
 
 void RigidBody::SetConstraints(const RigidbodyConstraints value)
@@ -338,6 +339,32 @@ void RigidBody::AddMovement(const Vector3& translation, const Quaternion& rotati
     SetTransform(t);
 }
 
+#if USE_EDITOR
+
+#include "Engine/Debug/DebugDraw.h"
+
+void RigidBody::OnDebugDrawSelected()
+{
+    // Draw center of mass
+    if (!_centerOfMassOffset.IsZero())
+    {
+        DEBUG_DRAW_WIRE_SPHERE(BoundingSphere(GetPosition() + (GetOrientation() * (GetCenterOfMass() - GetCenterOfMassOffset())), 5.0f), Color::Red, 0, false);
+    }
+    DEBUG_DRAW_WIRE_SPHERE(BoundingSphere(GetPosition() + (GetOrientation() * GetCenterOfMass()), 2.5f), Color::Aqua, 0, false);
+
+    // Draw all attached colliders
+    for (Actor* child : Children)
+    {
+        const auto collider = Cast<Collider>(child);
+        if (collider && collider->GetAttachedRigidBody() == this)
+            collider->OnDebugDrawSelf();
+    }
+
+    Actor::OnDebugDrawSelected();
+}
+
+#endif
+
 void RigidBody::OnCollisionEnter(const Collision& c)
 {
     CollisionEnter(c);
@@ -380,7 +407,7 @@ void RigidBody::UpdateBounds()
 void RigidBody::UpdateScale()
 {
     const Float3 scale = GetScale();
-    if (Float3::NearEqual(_cachedScale, scale))
+    if (_cachedScale == scale)
         return;
     _cachedScale = scale;
 
@@ -468,6 +495,14 @@ void RigidBody::OnActiveTransformChanged()
 
 void RigidBody::BeginPlay(SceneBeginData* data)
 {
+#if USE_EDITOR || !BUILD_RELEASE
+    // FlushActiveTransforms runs in async for each separate actor thus we don't support two rigidbodies that transformations depend on each other
+    if (Cast<RigidBody>(GetParent()))
+    {
+        LOG(Warning, "Rigid Body '{0}' is attached to other Rigid Body which is not unsupported and might cause physical simulation instability.", GetNamePath());
+    }
+#endif
+
     // Create rigid body
     ASSERT(_actor == nullptr);
     void* scene = GetPhysicsScene()->GetPhysicsScene();
@@ -506,7 +541,7 @@ void RigidBody::BeginPlay(SceneBeginData* data)
 
     // Apply the Center Of Mass offset
     if (!_centerOfMassOffset.IsZero())
-        PhysicsBackend::SetRigidDynamicActorCenterOfMassOffset(_actor, _centerOfMassOffset);
+        PhysicsBackend::AddRigidDynamicActorCenterOfMassOffset(_actor, _centerOfMassOffset);
 
     // Register actor
     PhysicsBackend::AddSceneActor(scene, _actor);

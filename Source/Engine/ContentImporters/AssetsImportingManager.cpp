@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_ASSETS_IMPORTER
 
@@ -13,6 +13,7 @@
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Platform/FileSystem.h"
 #include "Engine/Platform/Platform.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Engine/Globals.h"
 #include "ImportTexture.h"
 #include "ImportModel.h"
@@ -35,6 +36,30 @@
 #include "CreateAnimation.h"
 #include "CreateBehaviorTree.h"
 #include "CreateJson.h"
+#include "Engine/Content/Assets/Model.h"
+
+namespace
+{
+    bool IsAssetTypeNameTextureFile(const String& typeName)
+    {
+        return typeName == Texture::TypeName || typeName == SpriteAtlas::TypeName;
+    }
+
+    bool IsAssetTypeNameModelFile(const String& typeName)
+    {
+        return typeName == Model::TypeName || typeName == SkinnedModel::TypeName || typeName == Animation::TypeName;
+    }
+
+    bool IsAssetTypeNameMatch(const String& a, const String& b)
+    {
+        // Special case when reimporting model/texture but different type
+        if (IsAssetTypeNameTextureFile(a) && IsAssetTypeNameTextureFile(b))
+            return true;
+        if (IsAssetTypeNameModelFile(a) && IsAssetTypeNameModelFile(b))
+            return true;
+        return a == b;
+    }
+}
 
 // Tags used to detect asset creation mode
 const String AssetsImportingManager::CreateTextureTag(TEXT("Texture"));
@@ -83,8 +108,6 @@ CreateAssetContext::CreateAssetContext(const StringView& inputPath, const String
     CustomArg = arg;
     Data.Header.ID = id;
     SkipMetadata = false;
-
-    // TODO: we should use ASNI only chars path (Assimp can use only that kind)
     OutputPath = Content::CreateTemporaryAssetPath();
 }
 
@@ -121,6 +144,24 @@ CreateAssetResult CreateAssetContext::Run(const CreateAssetFunction& callback)
         Data.Metadata.Copy((const byte*)buffer.GetString(), (uint32)buffer.GetSize());
     }
 
+    // Check if target asset already exists but has different type
+    AssetInfo targetAssetInfo;
+    if (Content::GetAssetInfo(TargetAssetPath, targetAssetInfo) && !IsAssetTypeNameMatch(targetAssetInfo.TypeName, Data.Header.TypeName))
+    {
+        // Change path
+        int32 index = 0;
+        String newTargetAssetPath;
+        do
+        {
+            newTargetAssetPath = StringUtils::GetDirectoryName(TargetAssetPath);
+            newTargetAssetPath /= StringUtils::GetFileNameWithoutExtension(TargetAssetPath) + String::Format(TEXT(" ({})."), index++) + FileSystem::GetExtension(TargetAssetPath);
+        } while (index < 100 && FileSystem::FileExists(newTargetAssetPath));
+        TargetAssetPath = newTargetAssetPath;
+
+        // Change id
+        Data.Header.ID = Guid::New();
+    }
+
     // Save file
     result = FlaxStorage::Create(OutputPath, Data) ? CreateAssetResult::CannotSaveFile : CreateAssetResult::Ok;
     if (result == CreateAssetResult::Ok)
@@ -151,14 +192,8 @@ bool CreateAssetContext::AllocateChunk(int32 index)
     }
 
     // Create new chunk
-    const auto chunk = New<FlaxChunk>();
-    Data.Header.Chunks[index] = chunk;
-
-    if (chunk == nullptr)
-    {
-        OUT_OF_MEMORY;
-    }
-
+    PROFILE_MEM(ContentFiles);
+    Data.Header.Chunks[index] = New<FlaxChunk>();
     return false;
 }
 

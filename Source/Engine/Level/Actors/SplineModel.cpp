@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "SplineModel.h"
 #include "Spline.h"
@@ -6,6 +6,7 @@
 #include "Engine/Core/Math/Matrix3x4.h"
 #include "Engine/Engine/Engine.h"
 #include "Engine/Serialization/Serialization.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Graphics/GPUBufferDescription.h"
 #include "Engine/Graphics/GPUDevice.h"
 #include "Engine/Graphics/GPUBuffer.h"
@@ -58,7 +59,7 @@ float SplineModel::GetQuality() const
 void SplineModel::SetQuality(float value)
 {
     value = Math::Clamp(value, 0.0f, 100.0f);
-    if (Math::NearEqual(value, _quality))
+    if (value == _quality)
         return;
     _quality = value;
     OnSplineUpdated();
@@ -71,7 +72,7 @@ float SplineModel::GetBoundsScale() const
 
 void SplineModel::SetBoundsScale(float value)
 {
-    if (Math::NearEqual(_boundsScale, value))
+    if (_boundsScale == value)
         return;
     _boundsScale = value;
     OnSplineUpdated();
@@ -406,12 +407,12 @@ void SplineModel::Draw(RenderContext& renderContext)
     drawCall.Deformable.MeshMaxZ = _meshMaxZ;
     drawCall.Deformable.GeometrySize = _box.GetSize();
     drawCall.PerInstanceRandom = GetPerInstanceRandom();
+    drawCall.SetStencilValue(_layer);
     _preTransform.GetWorld(drawCall.Deformable.LocalMatrix);
     const Transform splineTransform = GetTransform();
     renderContext.View.GetWorldMatrix(splineTransform, drawCall.World);
     drawCall.ObjectPosition = drawCall.World.GetTranslation() + drawCall.Deformable.LocalMatrix.GetTranslation();
     drawCall.ObjectRadius = (float)_sphere.Radius; // TODO: use radius for the spline chunk rather than whole spline
-    const float worldDeterminantSign = drawCall.World.RotDeterminant() * drawCall.Deformable.LocalMatrix.RotDeterminant();
     for (int32 segment = 0; segment < _instances.Count(); segment++)
     {
         auto& instance = _instances[segment];
@@ -467,7 +468,6 @@ void SplineModel::Draw(RenderContext& renderContext)
             // Submit draw call
             mesh->GetDrawCallGeometry(drawCall);
             drawCall.Material = material;
-            drawCall.WorldDeterminantSign = Math::FloatSelect(worldDeterminantSign * instance.RotDeterminant, 1, -1);
             renderContext.List->AddDrawCall(renderContext, drawModes, _staticFlags, drawCall, entry.ReceiveDecals);
         }
     }
@@ -514,10 +514,16 @@ void SplineModel::Deserialize(DeserializeStream& stream, ISerializeModifier* mod
 
     // [Deprecated on 07.02.2022, expires on 07.02.2024]
     if (modifier->EngineBuild <= 6330)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSDF;
+    }
     // [Deprecated on 27.04.2022, expires on 27.04.2024]
     if (modifier->EngineBuild <= 6331)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSurfaceAtlas;
+    }
 }
 
 void SplineModel::OnActiveInTreeChanged()

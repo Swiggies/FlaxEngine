@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Builder.h"
 #include "Engine/Engine/Engine.h"
@@ -148,7 +148,6 @@ void ShadowsOfMordor::Builder::Dispose()
 #include "Engine/Serialization/FileWriteStream.h"
 #include "Engine/Engine/CommandLine.h"
 #include "Engine/Scripting/Scripting.h"
-#include "FlaxEngine.Gen.h"
 
 namespace ShadowsOfMordor
 {

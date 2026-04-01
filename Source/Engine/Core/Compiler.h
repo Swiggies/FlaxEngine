@@ -1,11 +1,12 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #if defined(__clang__)
 
-#define DLLEXPORT __attribute__ ((__visibility__ ("default")))
+#define DLLEXPORT __attribute__((__visibility__("default")))
 #define DLLIMPORT
+#define USED __attribute__((used))
 #define THREADLOCAL __thread
 #define STDCALL __attribute__((stdcall))
 #define CDECL __attribute__((cdecl))
@@ -19,13 +20,15 @@
 #define PACK_BEGIN()
 #define PACK_END() __attribute__((__packed__))
 #define ALIGN_BEGIN(_align)
-#define ALIGN_END(_align) __attribute__( (aligned(_align) ) )
+#define ALIGN_END(_align) __attribute__((aligned(_align)))
 #define OFFSET_OF(X, Y) __builtin_offsetof(X, Y)
 #define PRAGMA_DISABLE_DEPRECATION_WARNINGS \
     _Pragma("clang diagnostic push") \
     _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
 #define PRAGMA_ENABLE_DEPRECATION_WARNINGS \
     _Pragma("clang diagnostic pop")
+#define PRAGMA_DISABLE_OPTIMIZATION
+#define PRAGMA_ENABLE_OPTIMIZATION
 
 #pragma clang diagnostic ignored "-Wswitch"
 #pragma clang diagnostic ignored "-Wmacro-redefined"
@@ -35,8 +38,9 @@
 
 #elif defined(__GNUC__)
 
-#define DLLEXPORT __attribute__ ((__visibility__ ("default")))
+#define DLLEXPORT __attribute__((__visibility__("default")))
 #define DLLIMPORT
+#define USED __attribute__((used))
 #define THREADLOCAL __thread
 #define STDCALL __attribute__((stdcall))
 #define CDECL __attribute__((cdecl))
@@ -50,10 +54,12 @@
 #define PACK_BEGIN()
 #define PACK_END() __attribute__((__packed__))
 #define ALIGN_BEGIN(_align)
-#define ALIGN_END(_align) __attribute__( (aligned(_align) ) )
+#define ALIGN_END(_align) __attribute__((aligned(_align)))
 #define OFFSET_OF(X, Y) __builtin_offsetof(X, Y)
 #define PRAGMA_DISABLE_DEPRECATION_WARNINGS
 #define PRAGMA_ENABLE_DEPRECATION_WARNINGS
+#define PRAGMA_DISABLE_OPTIMIZATION
+#define PRAGMA_ENABLE_OPTIMIZATION
 
 #elif defined(_MSC_VER)
 
@@ -63,6 +69,7 @@
 
 #define DLLEXPORT __declspec(dllexport)
 #define DLLIMPORT __declspec(dllimport)
+#define USED
 #define THREADLOCAL __declspec(thread)
 #define STDCALL __stdcall
 #define CDECL __cdecl
@@ -86,6 +93,8 @@
 			__pragma(warning(disable: 4996))
 #define PRAGMA_ENABLE_DEPRECATION_WARNINGS \
 			__pragma (warning(pop))
+#define PRAGMA_DISABLE_OPTIMIZATION __pragma(optimize("", off))
+#define PRAGMA_ENABLE_OPTIMIZATION __pragma(optimize("", on))
 
 #pragma warning(disable: 4251)
 

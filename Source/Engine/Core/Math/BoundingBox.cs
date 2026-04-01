@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -357,16 +357,28 @@ namespace FlaxEngine
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="points" /> is <c>null</c>.</exception>
         public static BoundingBox FromPoints(Vector3[] points)
         {
+            FromPoints(points, out var result);
+            return result;
+        }
+
+        /// <summary>
+        /// Constructs a <see cref="BoundingBox" /> that fully contains the given points.
+        /// </summary>
+        /// <param name="points">The points that will be contained by the box.</param>
+        /// <param name="result">When the method completes, contains the newly constructed bounding box.</param>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="points" /> is <c>null</c>.</exception>
+        public static void FromPoints(Span<Float3> points, out BoundingBox result)
+        {
             if (points == null)
                 throw new ArgumentNullException(nameof(points));
-            var min = Vector3.Maximum;
-            var max = Vector3.Minimum;
+            var min = Float3.Maximum;
+            var max = Float3.Minimum;
             for (var i = 0; i < points.Length; ++i)
             {
-                Vector3.Min(ref min, ref points[i], out min);
-                Vector3.Max(ref max, ref points[i], out max);
+                Float3.Min(ref min, ref points[i], out min);
+                Float3.Max(ref max, ref points[i], out max);
             }
-            return new BoundingBox(min, max);
+            result = new BoundingBox(min, max);
         }
 
         /// <summary>
@@ -661,23 +673,23 @@ namespace FlaxEngine
         /// <summary>
         /// Determines whether the specified <see cref="Vector4" /> is equal to this instance.
         /// </summary>
-        /// <param name="value">The <see cref="Vector4" /> to compare with this instance.</param>
+        /// <param name="other">The <see cref="Vector4" /> to compare with this instance.</param>
         /// <returns><c>true</c> if the specified <see cref="Vector4" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Equals(ref BoundingBox value)
+        public bool Equals(ref BoundingBox other)
         {
-            return Minimum == value.Minimum && Maximum == value.Maximum;
+            return Minimum == other.Minimum && Maximum == other.Maximum;
         }
 
         /// <summary>
         /// Determines whether the specified <see cref="Vector4" /> is equal to this instance.
         /// </summary>
-        /// <param name="value">The <see cref="Vector4" /> to compare with this instance.</param>
+        /// <param name="other">The <see cref="Vector4" /> to compare with this instance.</param>
         /// <returns><c>true</c> if the specified <see cref="Vector4" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Equals(BoundingBox value)
+        public bool Equals(BoundingBox other)
         {
-            return Equals(ref value);
+            return Equals(ref other);
         }
 
         /// <summary>

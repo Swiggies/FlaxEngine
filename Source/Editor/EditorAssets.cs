@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using FlaxEngine;
 
@@ -68,6 +68,11 @@ namespace FlaxEditor
         /// The window icon.
         /// </summary>
         public static string WindowIcon = "Editor/EditorIcon";
+
+        /// <summary>
+        /// The material used for the HS color wheel.
+        /// </summary>
+        public static string HSWheelMaterial = "Editor/HSWheel";
 
         /// <summary>
         /// The window icons font.

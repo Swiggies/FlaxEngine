@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "StringView.h"
 #include "String.h"
@@ -9,7 +9,7 @@ StringView StringBuilder::ToStringView() const
     return StringView(_data.Get(), _data.Count());
 }
 
-StringView StringView::Empty;
+const StringView StringView::Empty;
 
 StringView::StringView(const String& str)
     : StringViewBase<Char>(str.Get(), str.Length())

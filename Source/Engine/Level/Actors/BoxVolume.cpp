@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "BoxVolume.h"
 #include "Engine/Core/Math/Matrix.h"
@@ -12,7 +12,7 @@ BoxVolume::BoxVolume(const SpawnParams& params)
 
 void BoxVolume::SetSize(const Vector3& value)
 {
-    if (!Vector3::NearEqual(value, _size))
+    if (value != _size)
     {
         const auto prevBounds = _box;
         _size = value;

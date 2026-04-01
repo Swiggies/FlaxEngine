@@ -1,5 +1,6 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
+using System.Collections.Generic;
 using FlaxEditor.Surface.Elements;
 using FlaxEngine;
 
@@ -126,40 +127,45 @@ namespace FlaxEditor.Surface
         /// <remarks>Called only when user is connecting nodes.</remarks>
         protected virtual void DrawConnectingLine()
         {
-            // Get start position
-            var startPos = _connectionInstigator.ConnectionOrigin;
-
-            // Check if mouse is over any of box
             var cmVisible = _activeVisjectCM != null && _activeVisjectCM.Visible;
             var endPos = cmVisible ? _rootControl.PointFromParent(ref _cmStartPos) : _rootControl.PointFromParent(ref _mousePos);
             Color lineColor = Style.Colors.Connecting;
-            if (_lastInstigatorUnderMouse != null && !cmVisible)
-            {
-                // Check if can connect objects
-                bool canConnect = _connectionInstigator.CanConnectWith(_lastInstigatorUnderMouse);
-                lineColor = canConnect ? Style.Colors.ConnectingValid : Style.Colors.ConnectingInvalid;
-                endPos = _lastInstigatorUnderMouse.ConnectionOrigin;
-            }
 
-            Float2 actualStartPos = startPos;
-            Float2 actualEndPos = endPos;
-
-            if (_connectionInstigator is Archetypes.Tools.RerouteNode)
+            List<IConnectionInstigator> instigators = new List<IConnectionInstigator>(_connectionInstigators);
+            for (int i = 0; i < instigators.Count; i++)
             {
-                if (endPos.X < startPos.X && _lastInstigatorUnderMouse is null or Box { IsOutput: true })
+                IConnectionInstigator currentInstigator = instigators[i];
+                Float2 currentStartPosition = currentInstigator.ConnectionOrigin;
+
+                // Check if mouse is over any box
+                if (_lastInstigatorUnderMouse != null && !cmVisible)
+                {
+                    // Check if can connect objects
+                    bool canConnect = currentInstigator.CanConnectWith(_lastInstigatorUnderMouse);
+                    lineColor = canConnect ? Style.Colors.ConnectingValid : Style.Colors.ConnectingInvalid;
+                    endPos = _lastInstigatorUnderMouse.ConnectionOrigin;
+                }
+
+                Float2 actualStartPos = currentStartPosition;
+                Float2 actualEndPos = endPos;
+
+                if (currentInstigator is Archetypes.Tools.RerouteNode)
+                {
+                    if (endPos.X < currentStartPosition.X && _lastInstigatorUnderMouse is null or Box { IsOutput: true })
+                    {
+                        actualStartPos = endPos;
+                        actualEndPos = currentStartPosition;
+                    }
+                }
+                else if (currentInstigator is Box { IsOutput: false })
                 {
                     actualStartPos = endPos;
-                    actualEndPos = startPos;
+                    actualEndPos = currentStartPosition;
                 }
-            }
-            else if (_connectionInstigator is Box { IsOutput: false })
-            {
-                actualStartPos = endPos;
-                actualEndPos = startPos;
-            }
 
-            // Draw connection
-            _connectionInstigator.DrawConnectingLine(ref actualStartPos, ref actualEndPos, ref lineColor);
+                // Draw connection
+                currentInstigator.DrawConnectingLine(ref actualStartPos, ref actualEndPos, ref lineColor);
+            }
         }
 
         /// <summary>
@@ -208,6 +214,44 @@ namespace FlaxEditor.Surface
         }
 
         /// <summary>
+        /// Draw connection hints for lazy connect feature.
+        /// </summary>
+        protected virtual void DrawLazyConnect()
+        {
+            var style = FlaxEngine.GUI.Style.Current;
+
+            if (_lazyConnectStartNode != null)
+            {
+                Float2 upperLeft = _rootControl.PointToParent(_lazyConnectStartNode.UpperLeft);
+                Rectangle startNodeOutline = new Rectangle(upperLeft + 1f, _lazyConnectStartNode.Size - 1f);
+                startNodeOutline.Size *= ViewScale;
+                Render2D.DrawRectangle(startNodeOutline.MakeExpanded(4f), style.BackgroundSelected, 4f);
+            }
+
+            if (_lazyConnectEndNode != null)
+            {
+                Float2 upperLeft = _rootControl.PointToParent(_lazyConnectEndNode.UpperLeft);
+                Rectangle startNodeOutline = new Rectangle(upperLeft + 1f, _lazyConnectEndNode.Size - 1f);
+                startNodeOutline.Size *= ViewScale;
+                Render2D.DrawRectangle(startNodeOutline.MakeExpanded(4f), style.BackgroundSelected, 4f);
+            }
+
+            Rectangle startRect = new Rectangle(_rightMouseDownPos - 6f, new Float2(12f));
+            Rectangle endRect = new Rectangle(_mousePos - 6f, new Float2(12f));
+
+            // Start and end shadows/ outlines
+            Render2D.FillRectangle(startRect.MakeExpanded(2.5f), Color.Black);
+            Render2D.FillRectangle(endRect.MakeExpanded(2.5f), Color.Black);
+
+            Render2D.DrawLine(_rightMouseDownPos, _mousePos, Color.Black, 7.5f);
+            Render2D.DrawLine(_rightMouseDownPos, _mousePos, style.ForegroundGrey, 5f);
+
+            // Draw start and end boxes over the lines to hide ugly artifacts at the ends
+            Render2D.FillRectangle(startRect, style.ForegroundGrey);
+            Render2D.FillRectangle(endRect, style.ForegroundGrey);
+        }
+
+        /// <summary>
         /// Draws the contents of the surface (nodes, connections, comments, etc.).
         /// </summary>
         protected virtual void DrawContents()
@@ -224,6 +268,10 @@ namespace FlaxEditor.Surface
             DrawBackground();
 
             _rootControl.DrawComments();
+
+            // Reset input flags here because this is the closest to Update we have
+            WasSelecting = IsSelecting;
+            WasMovingSelection = IsMovingSelection;
 
             if (IsSelecting)
             {
@@ -249,6 +297,9 @@ namespace FlaxEditor.Surface
             DrawInputBrackets();
 
             DrawContents();
+
+            if (_isLazyConnecting)
+                DrawLazyConnect();
 
             //Render2D.DrawText(style.FontTitle, string.Format("Scale: {0}", _rootControl.Scale), rect, Enabled ? Color.Red : Color.Black);
 

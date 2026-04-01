@@ -1,12 +1,20 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_MAC || PLATFORM_IOS
+
+#if PLATFORM_MAC
+#define PLATFORM_MAC_CACHED 1
+#endif
+#if PLATFORM_IOS
+#define PLATFORM_IOS_CACHED 1
+#endif
 
 #include "ApplePlatform.h"
 #include "AppleUtils.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Types/Guid.h"
 #include "Engine/Core/Types/String.h"
+#include "Engine/Core/Types/Version.h"
 #include "Engine/Core/Collections/HashFunctions.h"
 #include "Engine/Core/Collections/Array.h"
 #include "Engine/Core/Collections/Dictionary.h"
@@ -26,15 +34,18 @@
 #include "Engine/Threading/Threading.h"
 #include "Engine/Engine/Engine.h"
 #include "Engine/Engine/CommandLine.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 #include <unistd.h>
 #include <cstdint>
 #include <stdlib.h>
 #include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/utsname.h>
 #include <mach/mach_time.h>
 #include <mach-o/dyld.h>
 #include <uuid/uuid.h>
+#include <os/proc.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <Foundation/Foundation.h>
 #include <CoreGraphics/CoreGraphics.h>
@@ -46,6 +57,25 @@
 #include <cxxabi.h>
 #endif
 
+// System includes break those defines
+#undef PLATFORM_MAC
+#if PLATFORM_MAC_CACHED
+#define PLATFORM_MAC 1
+#else
+#define PLATFORM_MAC 0
+#endif
+#undef PLATFORM_IOS
+#if PLATFORM_IOS_CACHED
+#define PLATFORM_IOS 1
+#else
+#define PLATFORM_IOS 0
+#endif
+
+#if PLATFORM_IOS
+#include <sys/resource.h>
+extern "C" int proc_pid_rusage(int pid, int flavor, rusage_info_t *buffer) __OSX_AVAILABLE_STARTING(__MAC_10_9, __IPHONE_7_0);
+#endif
+
 CPUInfo Cpu;
 String UserLocale;
 double SecondsPerCycle;
@@ -53,6 +83,43 @@ NSAutoreleasePool* AutoreleasePool = nullptr;
 int32 AutoreleasePoolInterval = 0;
 
 float ApplePlatform::ScreenScale = 1.0f;
+
+static void CrashHandler(int32 signal, siginfo_t* info, void* context)
+{
+    // Skip if engine already crashed
+    if (Engine::FatalError != FatalErrorType::None)
+        return;
+
+    // Get exception info
+    String errorMsg(TEXT("Unhandled exception: "));
+    switch (signal)
+    {
+#define CASE(x) case x: errorMsg += TEXT(#x); break
+    CASE(SIGABRT);
+    CASE(SIGILL);
+    CASE(SIGSEGV);
+    CASE(SIGQUIT);
+    CASE(SIGEMT);
+    CASE(SIGFPE);
+    CASE(SIGBUS);
+    CASE(SIGSYS);
+#undef CASE
+    default:
+        errorMsg += StringUtils::ToString(signal);
+    }
+
+    // Log exception and return to the crash location when using debugger
+    if (Platform::IsDebuggerPresent())
+    {
+        LOG_STR(Error, errorMsg);
+        const String stackTrace = Platform::GetStackTrace(3, 60, nullptr);
+        LOG_STR(Error, stackTrace);
+        return;
+    }
+
+    // Crash engine
+    Platform::Fatal(errorMsg.Get(), nullptr, FatalErrorType::Exception);
+}
 
 String AppleUtils::ToString(CFStringRef str)
 {
@@ -86,40 +153,49 @@ NSString* AppleUtils::ToNSString(const char* string)
     return ret ? ret : @"";
 }
 
-
-NSArray* AppleUtils::ParseArguments(NSString* argsString) {
-    NSMutableArray *argsArray = [NSMutableArray array];
-    NSMutableString *currentArg = [NSMutableString string];
+NSArray* AppleUtils::ParseArguments(NSString* argsString)
+{
+    NSMutableArray* argsArray = [NSMutableArray array];
+    NSMutableString* currentArg = [NSMutableString string];
     BOOL insideQuotes = NO;
-    
-    for (NSInteger i = 0; i < argsString.length; ++i) {
+
+    for (NSInteger i = 0; i < argsString.length; i++)
+    {
         unichar c = [argsString characterAtIndex:i];
-        
-        if (c == '\"') {
-            if (insideQuotes) {
+        if (c == '\"')
+        {
+            if (insideQuotes)
+            {
                 [argsArray addObject:[currentArg copy]];
                 [currentArg setString:@""];
                 insideQuotes = NO;
-            } else {
+            }
+            else
+            {
                 insideQuotes = YES;
             }
-        } else if (c == ' ' && !insideQuotes) {
-            if (currentArg.length > 0) {
+        }
+        else if (c == ' ' && !insideQuotes)
+        {
+            if (currentArg.length > 0)
+            {
                 [argsArray addObject:[currentArg copy]];
                 [currentArg setString:@""];
             }
-        } else {
+        }
+        else
+        {
             [currentArg appendFormat:@"%C", c];
         }
     }
     
-    if (currentArg.length > 0) {
+    if (currentArg.length > 0)
+    {
         [argsArray addObject:[currentArg copy]];
     }
-    
+
     return [argsArray copy];
 }
-
 
 typedef uint16_t offset_t;
 #define align_mem_up(num, align) (((num) + ((align) - 1)) & ~((align) - 1))
@@ -129,14 +205,22 @@ bool ApplePlatform::Is64BitPlatform()
     return PLATFORM_64BITS;
 }
 
+String ApplePlatform::GetSystemName()
+{
+	struct utsname systemInfo;
+	uname(&systemInfo);
+    return String(systemInfo.machine);
+}
+
+Version ApplePlatform::GetSystemVersion()
+{
+    NSOperatingSystemVersion version = [[NSProcessInfo processInfo] operatingSystemVersion];
+    return Version(version.majorVersion, version.minorVersion, version.patchVersion);
+}
+
 CPUInfo ApplePlatform::GetCPUInfo()
 {
     return Cpu;
-}
-
-int32 ApplePlatform::GetCacheLineSize()
-{
-    return Cpu.CacheLineSize;
 }
 
 MemoryStats ApplePlatform::GetMemoryStats()
@@ -166,8 +250,17 @@ MemoryStats ApplePlatform::GetMemoryStats()
 ProcessMemoryStats ApplePlatform::GetProcessMemoryStats()
 {
     ProcessMemoryStats result;
-    result.UsedPhysicalMemory = 1024;
-    result.UsedVirtualMemory = 1024;
+#if PLATFORM_IOS
+    rusage_info_current rusage_payload;
+    proc_pid_rusage(getpid(), RUSAGE_INFO_CURRENT, (rusage_info_t*)&rusage_payload);
+    result.UsedPhysicalMemory = rusage_payload.ri_phys_footprint;
+#else
+	mach_task_basic_info_data_t taskInfo;
+	mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+	task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&taskInfo, &count);
+    result.UsedPhysicalMemory = taskInfo.resident_size;
+#endif
+    result.UsedVirtualMemory = result.UsedPhysicalMemory;
     return result;
 }
 
@@ -198,6 +291,15 @@ void ApplePlatform::SetThreadAffinityMask(uint64 affinityMask)
 void ApplePlatform::Sleep(int32 milliseconds)
 {
     usleep(milliseconds * 1000);
+}
+
+void ApplePlatform::Yield()
+{
+#if PLATFORM_ARCH_ARM64
+    __builtin_arm_yield();
+#else
+    _mm_pause();
+#endif
 }
 
 double ApplePlatform::GetTimeSeconds()
@@ -364,6 +466,21 @@ bool ApplePlatform::Init()
         setrlimit(RLIMIT_NOFILE, &limit);
     }
 
+    // Register crash handler
+    struct sigaction action;
+    Platform::MemoryClear(&action, sizeof(action));
+    action.sa_sigaction = CrashHandler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigaction(SIGABRT, &action, nullptr);
+    sigaction(SIGILL, &action, nullptr);
+    sigaction(SIGSEGV, &action, nullptr);
+    sigaction(SIGQUIT, &action, nullptr);
+    sigaction(SIGEMT, &action, nullptr);
+    sigaction(SIGFPE, &action, nullptr);
+    sigaction(SIGBUS, &action, nullptr);
+    sigaction(SIGSYS, &action, nullptr);
+
     AutoreleasePool = [[NSAutoreleasePool alloc] init];
 
     return false;
@@ -471,6 +588,8 @@ bool ApplePlatform::SetEnvironmentVariable(const String& name, const String& val
 
 void* ApplePlatform::LoadLibrary(const Char* filename)
 {
+    PROFILE_CPU();
+    ZoneText(filename, StringUtils::Length(filename));
     const StringAsANSI<> filenameANSI(filename);
     void* result = dlopen(filenameANSI.Get(), RTLD_LAZY | RTLD_LOCAL);
     if (!result)

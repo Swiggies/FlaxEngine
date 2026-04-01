@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using Flax.Build;
 using Flax.Build.NativeCpp;
@@ -32,7 +32,7 @@ public class Scripting : EngineModule
                 options.ScriptingAPI.Defines.Add("NET");
                 AddFrameworkDefines("NET{0}_{1}", dotnetSdk.Version.Major, 0); // "NET7_0"
                 for (int i = 5; i <= dotnetSdk.Version.Major; i++)
-                    AddFrameworkDefines("NET{0}_{1}_OR_GREATER", dotnetSdk.Version.Major, 0); // "NET7_0_OR_GREATER"
+                    AddFrameworkDefines("NET{0}_{1}_OR_GREATER", i, 0); // "NET7_0_OR_GREATER"
                 options.ScriptingAPI.Defines.Add("NETCOREAPP");
                 AddFrameworkDefines("NETCOREAPP{0}_{1}_OR_GREATER", 3, 1); // "NETCOREAPP3_1_OR_GREATER"
                 AddFrameworkDefines("NETCOREAPP{0}_{1}_OR_GREATER", 2, 2);

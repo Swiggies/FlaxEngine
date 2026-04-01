@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Packed.h"
 #include "Vector2.h"
@@ -39,16 +39,6 @@ FloatR10G10B10A2::FloatR10G10B10A2(const Float4& v)
 FloatR10G10B10A2::FloatR10G10B10A2(const float* values)
     : FloatR10G10B10A2(values[0], values[1], values[2], values[3])
 {
-}
-
-FloatR10G10B10A2::operator Float3() const
-{
-    return ToFloat3();
-}
-
-FloatR10G10B10A2::operator Float4() const
-{
-    return ToFloat4();
 }
 
 Float3 FloatR10G10B10A2::ToFloat3() const

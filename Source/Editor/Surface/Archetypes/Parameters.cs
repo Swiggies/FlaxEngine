@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -23,14 +23,96 @@ namespace FlaxEditor.Surface.Archetypes
     public static class Parameters
     {
         /// <summary>
+        /// Surface node type for parameters group Get/Set nodes.
+        /// </summary>
+        /// <seealso cref="FlaxEditor.Surface.SurfaceNode" />
+        public abstract class SurfaceNodeParamsBase : SurfaceNode
+        {
+            /// <summary>
+            /// The combobox for picking parameter.
+            /// </summary>
+            protected ComboBoxElement _combobox;
+
+            /// <summary>
+            /// Fag used to block layout updated when updating node.
+            /// </summary>
+            protected bool _isUpdateLocked;
+
+            /// <inheritdoc />
+            protected SurfaceNodeParamsBase(uint id, VisjectSurfaceContext context, NodeArchetype nodeArch, GroupArchetype groupArch)
+            : base(id, context, nodeArch, groupArch)
+            {
+            }
+
+            /// <summary>
+            /// Gets the selected parameter.
+            /// </summary>
+            /// <returns>Surface parameter object or null if nothing selected or cannot find it.</returns>
+            protected SurfaceParameter GetSelected()
+            {
+                if (Surface != null)
+                    return Surface.GetParameter(_combobox.SelectedItem);
+                return Context.GetParameter((Guid)Values[0]);
+            }
+
+            /// <summary>
+            /// Updates the combo box.
+            /// </summary>
+            protected void UpdateCombo()
+            {
+                if (_isUpdateLocked)
+                    return;
+                _isUpdateLocked = true;
+                if (_combobox == null)
+                {
+                    _combobox = GetChild<ComboBoxElement>();
+                    _combobox.SelectedIndexChanged += OnSelectedChanged;
+                }
+                string toSelect = null;
+                Guid loadedSelected = (Guid)Values[0];
+                _combobox.ClearItems();
+                var parameters = Surface.Parameters;
+                for (int i = 0; i < parameters.Count; i++)
+                {
+                    var param = parameters[i];
+                    if (!param.IsPublic && !Surface.CanShowPrivateParameters)
+                        continue;
+                    _combobox.AddItem(param.Name);
+                    if (param.ID == loadedSelected)
+                        toSelect = param.Name;
+                }
+                _combobox.SelectedItem = toSelect;
+                _isUpdateLocked = false;
+            }
+
+            private void OnSelectedChanged(ComboBox cb)
+            {
+                if (_isUpdateLocked)
+                    return;
+                var selected = GetSelected();
+                var selectedID = selected?.ID ?? Guid.Empty;
+                if (selectedID != (Guid)Values[0])
+                    Set(selected, ref selectedID);
+            }
+
+            /// <summary>
+            /// Sets the selected parameter.
+            /// </summary>
+            /// <param name="selected">Parameter.</param>
+            /// <param name="selectedID">Parameter identifier.</param>
+            protected virtual void Set(SurfaceParameter selected, ref Guid selectedID)
+            {
+                SetValue(0, selectedID);
+            }
+        }
+
+        /// <summary>
         /// Surface node type for parameters group Get node.
         /// </summary>
         /// <seealso cref="FlaxEditor.Surface.SurfaceNode" />
-        public class SurfaceNodeParamsGet : SurfaceNode, IParametersDependantNode
+        public class SurfaceNodeParamsGet : SurfaceNodeParamsBase, IParametersDependantNode
         {
-            private ComboBoxElement _combobox;
             private readonly List<ISurfaceNodeElement> _dynamicChildren = new List<ISurfaceNodeElement>();
-            private bool _isUpdateLocked;
             private ScriptType _layoutType;
             private NodeElementArchetype[] _layoutElements;
 
@@ -306,49 +388,6 @@ namespace FlaxEditor.Surface.Archetypes
                 UpdateTitle();
             }
 
-            private void UpdateCombo()
-            {
-                if (_isUpdateLocked)
-                    return;
-                _isUpdateLocked = true;
-                if (_combobox == null)
-                {
-                    _combobox = (ComboBoxElement)_children[0];
-                    _combobox.SelectedIndexChanged += OnSelectedChanged;
-                }
-                int toSelect = -1;
-                Guid loadedSelected = (Guid)Values[0];
-                _combobox.ClearItems();
-                for (int i = 0; i < Surface.Parameters.Count; i++)
-                {
-                    var param = Surface.Parameters[i];
-                    _combobox.AddItem(param.Name);
-                    if (param.ID == loadedSelected)
-                        toSelect = i;
-                }
-                _combobox.SelectedIndex = toSelect;
-                _isUpdateLocked = false;
-            }
-
-            private void OnSelectedChanged(ComboBox cb)
-            {
-                if (_isUpdateLocked)
-                    return;
-                var selected = GetSelected();
-                var selectedID = selected?.ID ?? Guid.Empty;
-                SetValue(0, selectedID);
-            }
-
-            private SurfaceParameter GetSelected()
-            {
-                if (Surface != null)
-                {
-                    var selectedIndex = _combobox.SelectedIndex;
-                    return selectedIndex >= 0 && selectedIndex < Surface.Parameters.Count ? Surface.Parameters[selectedIndex] : null;
-                }
-                return Context.GetParameter((Guid)Values[0]);
-            }
-
             private void ClearDynamicElements()
             {
                 for (int i = 0; i < _dynamicChildren.Count; i++)
@@ -463,15 +502,19 @@ namespace FlaxEditor.Surface.Archetypes
                 else if (!_isUpdateLocked)
                 {
                     _isUpdateLocked = true;
-                    int toSelect = -1;
+                    string toSelect = null;
                     Guid loadedSelected = (Guid)Values[0];
-                    for (int i = 0; i < Surface.Parameters.Count; i++)
+                    var parameters = Surface.Parameters;
+                    for (int i = 0; i < parameters.Count; i++)
                     {
-                        var param = Surface.Parameters[i];
+                        var param = parameters[i];
                         if (param.ID == loadedSelected)
-                            toSelect = i;
+                        {
+                            toSelect = param.Name;
+                            break;
+                        }
                     }
-                    _combobox.SelectedIndex = toSelect;
+                    _combobox.SelectedItem = toSelect;
                     _isUpdateLocked = false;
                 }
                 UpdateLayout();
@@ -817,66 +860,23 @@ namespace FlaxEditor.Surface.Archetypes
         /// Surface node type for parameters group Set node.
         /// </summary>
         /// <seealso cref="FlaxEditor.Surface.SurfaceNode" />
-        public class SurfaceNodeParamsSet : SurfaceNode, IParametersDependantNode
+        public class SurfaceNodeParamsSet : SurfaceNodeParamsBase, IParametersDependantNode
         {
-            private ComboBoxElement _combobox;
-            private bool _isUpdateLocked;
-
             /// <inheritdoc />
             public SurfaceNodeParamsSet(uint id, VisjectSurfaceContext context, NodeArchetype nodeArch, GroupArchetype groupArch)
             : base(id, context, nodeArch, groupArch)
             {
             }
 
-            private void UpdateCombo()
+            /// <inheritdoc />
+            protected override void Set(SurfaceParameter selected, ref Guid selectedID)
             {
-                if (_isUpdateLocked)
-                    return;
-                _isUpdateLocked = true;
-                if (_combobox == null)
+                SetValues(new[]
                 {
-                    _combobox = GetChild<ComboBoxElement>();
-                    _combobox.SelectedIndexChanged += OnSelectedChanged;
-                }
-                int toSelect = -1;
-                Guid loadedSelected = (Guid)Values[0];
-                _combobox.ClearItems();
-                for (int i = 0; i < Surface.Parameters.Count; i++)
-                {
-                    var param = Surface.Parameters[i];
-                    _combobox.AddItem(param.Name);
-                    if (param.ID == loadedSelected)
-                        toSelect = i;
-                }
-                _combobox.SelectedIndex = toSelect;
-                _isUpdateLocked = false;
-            }
-
-            private void OnSelectedChanged(ComboBox cb)
-            {
-                if (_isUpdateLocked)
-                    return;
-                var selected = GetSelected();
-                var selectedID = selected?.ID ?? Guid.Empty;
-                if (selectedID != (Guid)Values[0])
-                {
-                    SetValues(new[]
-                    {
-                        selectedID,
-                        selected != null ? TypeUtils.GetDefaultValue(selected.Type) : null,
-                    });
-                    UpdateUI();
-                }
-            }
-
-            private SurfaceParameter GetSelected()
-            {
-                if (Surface != null)
-                {
-                    var selectedIndex = _combobox.SelectedIndex;
-                    return selectedIndex >= 0 && selectedIndex < Surface.Parameters.Count ? Surface.Parameters[selectedIndex] : null;
-                }
-                return Context.GetParameter((Guid)Values[0]);
+                    selectedID,
+                    selected != null ? TypeUtils.GetDefaultValue(selected.Type) : null,
+                });
+                UpdateUI();
             }
 
             /// <inheritdoc />
@@ -1097,6 +1097,27 @@ namespace FlaxEditor.Surface.Archetypes
                     NodeElementArchetype.Factory.Input(0, string.Empty, false, typeof(void), 0),
                     NodeElementArchetype.Factory.Input(1, string.Empty, true, ScriptType.Null, 1, 1),
                     NodeElementArchetype.Factory.Output(0, string.Empty, typeof(void), 2, true),
+                    NodeElementArchetype.Factory.ComboBox(2 + 20, 0, 116)
+                }
+            },
+            new NodeArchetype
+            {
+                TypeID = 5,
+                Create = (id, context, arch, groupArch) => new SurfaceNodeParamsSet(id, context, arch, groupArch),
+                Title = "Set Parameter",
+                Description = "Parameter value setter invoked when the animation pose is evaluated (output pose comes from input)",
+                Flags = NodeFlags.AnimGraph,
+                Size = new Float2(140, 40),
+                DefaultValues = new object[]
+                {
+                    Guid.Empty,
+                    null
+                },
+                Elements = new[]
+                {
+                    NodeElementArchetype.Factory.Output(0, string.Empty, typeof(void), 0),
+                    NodeElementArchetype.Factory.Input(0, string.Empty, true, typeof(void), 2),
+                    NodeElementArchetype.Factory.Input(1, string.Empty, true, ScriptType.Null, 1, 1),
                     NodeElementArchetype.Factory.ComboBox(2 + 20, 0, 116)
                 }
             },

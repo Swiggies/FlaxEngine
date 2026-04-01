@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -319,6 +319,8 @@ namespace FlaxEditor.GUI.Tree
         public TreeNode(bool canChangeOrder, SpriteHandle iconCollapsed, SpriteHandle iconOpened)
         : base(0, 0, 64, 16)
         {
+            AutoFocus = true;
+
             _canChangeOrder = canChangeOrder;
             _animationProgress = 1.0f;
             _cachedHeight = _headerHeight;
@@ -760,20 +762,21 @@ namespace FlaxEditor.GUI.Tree
             // Show tree guidelines
             if (Editor.Instance.Options.Options.Interface.ShowTreeLines)
             {
-                TreeNode parentNode = Parent as TreeNode;
+                ContainerControl parent = Parent;
+                TreeNode parentNode = parent as TreeNode;
                 bool thisNodeIsLast = false;
-                while (parentNode != null && parentNode != ParentTree.Children[0])
+                while (parentNode != null && (parentNode != tree.Children[0] || tree.DrawRootTreeLine))
                 {
                     float bottomOffset = 0;
                     float topOffset = 0;
 
-                    if (Parent == parentNode && this == Parent.Children[0])
+                    if (parent == parentNode && this == parent.Children[0])
                         topOffset = 2;
 
                     if (thisNodeIsLast && parentNode.Children.Count == 1)
                         bottomOffset = topOffset != 0 ? 4 : 2;
 
-                    if (Parent == parentNode && this == Parent.Children[Parent.Children.Count - 1] && !_opened)
+                    if (parent == parentNode && this == parent.Children[^1] && !_opened)
                     {
                         thisNodeIsLast = true;
                         bottomOffset = topOffset != 0 ? 4 : 2;
@@ -784,6 +787,8 @@ namespace FlaxEditor.GUI.Tree
                     if (_iconCollaped.IsValid)
                         leftOffset += 18;
                     var lineRect1 = new Rectangle(parentNode.TextRect.Left - leftOffset, parentNode.HeaderRect.Top + topOffset, 1, parentNode.HeaderRect.Height - bottomOffset);
+                    if (HasAnyVisibleChild && CustomArrowRect.HasValue && CustomArrowRect.Value.Intersects(lineRect1))
+                        lineRect1 = Rectangle.Empty; // Skip drawing line if it's overlapping the arrow rectangle
                     Render2D.FillRectangle(lineRect1, isSelected ? style.ForegroundGrey : style.LightBackground);
                     parentNode = parentNode.Parent as TreeNode;
                 }
@@ -1135,8 +1140,11 @@ namespace FlaxEditor.GUI.Tree
                         ParentTree.DraggedOverNode = this;
 
                     // Expand node if mouse goes over arrow
-                    if (ArrowRect.Contains(location) && HasAnyVisibleChild)
+                    if (ArrowRect.Contains(location) && HasAnyVisibleChild && IsCollapsed)
+                    {
                         Expand(true);
+                        ParentTree?.FlushPendingPerformLayout();
+                    }
 
                     result = OnDragEnterHeader(data);
                 }
@@ -1167,8 +1175,11 @@ namespace FlaxEditor.GUI.Tree
                         ParentTree.DraggedOverNode = this;
 
                     // Expand node if mouse goes over arrow
-                    if (ArrowRect.Contains(location) && HasAnyVisibleChild)
+                    if (ArrowRect.Contains(location) && HasAnyVisibleChild && IsCollapsed)
+                    {
                         Expand(true);
+                        ParentTree?.FlushPendingPerformLayout();
+                    }
 
                     if (!_isDragOverHeader)
                         result = OnDragEnterHeader(data);

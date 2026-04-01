@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -304,6 +304,12 @@ namespace FlaxEngine.GUI
         public Color TextColor { get; set; }
 
         /// <summary>
+        /// Gets or sets the color used to display highlighted text.
+        /// </summary>
+        [EditorDisplay("Text Style"), EditorOrder(2024), ExpandGroups]
+        public Color TextColorHighlighted { get; set; }
+
+        /// <summary>
         /// Gets or sets the horizontal text alignment within the control bounds.
         /// </summary>
         [EditorDisplay("Text Style"), EditorOrder(2027)]
@@ -381,9 +387,12 @@ namespace FlaxEngine.GUI
         public Dropdown()
         : base(0, 0, 120, 18.0f)
         {
+            AutoFocus = true;
+
             var style = Style.Current;
             Font = new FontReference(style.FontMedium);
             TextColor = style.Foreground;
+            TextColorHighlighted = style.Foreground;
             BackgroundColor = style.BackgroundNormal;
             BackgroundColorHighlighted = BackgroundColor;
             BackgroundColorSelected = BackgroundColor;
@@ -473,6 +482,7 @@ namespace FlaxEngine.GUI
             {
                 AnchorPreset = AnchorPresets.StretchAll,
                 BackgroundColor = Color.Transparent,
+                Pivot = Float2.Zero,
                 IsScrollable = true,
                 AutoSize = true,
                 Parent = popup.MainPanel,
@@ -584,8 +594,8 @@ namespace FlaxEngine.GUI
                 X = margin,
                 Size = new Float2(size.X - margin, size.Y),
                 Font = Font,
-                TextColor = Color.White * 0.9f,
-                TextColorHighlighted = Color.White,
+                TextColor = TextColor * 0.9f,
+                TextColorHighlighted = BackgroundColorSelected.Brightness < 0.05f ? Color.Lerp(TextColorHighlighted, Color.White, 0.3f) : TextColorHighlighted,
                 HorizontalAlignment = HorizontalAlignment,
                 VerticalAlignment = VerticalAlignment,
                 Text = _items[i],
@@ -746,7 +756,7 @@ namespace FlaxEngine.GUI
                 // Draw text of the selected item
                 var textRect = new Rectangle(margin, 0, clientRect.Width - boxSize - 2.0f * margin, clientRect.Height);
                 Render2D.PushClip(textRect);
-                var textColor = TextColor;
+                var textColor = (IsMouseOver || IsNavFocused) ? TextColorHighlighted : TextColor;
                 string text = _items[_selectedIndex];
                 string format = TextFormat != null ? TextFormat : null;
                 if (!string.IsNullOrEmpty(format))

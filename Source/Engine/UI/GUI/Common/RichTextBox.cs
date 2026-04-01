@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 
@@ -57,7 +57,7 @@ namespace FlaxEngine.GUI
         {
             base.OnSizeChanged();
 
-            // Refresh textblocks since thos emight depend on control size (eg. align right)
+            // Refresh textblocks since those might depend on control size (eg. align right)
             UpdateTextBlocks();
         }
     }

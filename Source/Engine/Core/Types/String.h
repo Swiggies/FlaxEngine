@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -548,7 +548,7 @@ public:
     /// <summary>
     /// Instance of the empty string.
     /// </summary>
-    static String Empty;
+    static const String Empty;
 
 public:
     /// <summary>

@@ -1,11 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Variant.h"
 #include "CommonValue.h"
 #include "Engine/Core/Collections/HashFunctions.h"
 #include "Engine/Core/Collections/Dictionary.h"
 #include "Engine/Content/Asset.h"
-#include "Engine/Content/AssetReference.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Mathd.h"
 #include "Engine/Core/Math/BoundingBox.h"
@@ -19,10 +18,11 @@
 #include "Engine/Core/Math/Ray.h"
 #include "Engine/Core/Math/Rectangle.h"
 #include "Engine/Core/Math/Transform.h"
+#include "Engine/Scripting/BinaryModule.h"
 #include "Engine/Scripting/Scripting.h"
 #include "Engine/Scripting/ScriptingObject.h"
+#include "Engine/Scripting/ManagedCLR/MAssembly.h"
 #include "Engine/Scripting/ManagedCLR/MClass.h"
-#include "Engine/Scripting/ManagedCLR/MCore.h"
 #include "Engine/Scripting/ManagedCLR/MCore.h"
 #include "Engine/Scripting/ManagedCLR/MUtils.h"
 #include "Engine/Utilities/Crc.h"
@@ -33,6 +33,7 @@
 #else
 #define MANAGED_GC_HANDLE AsUint
 #endif
+#define AsEnum AsUint64
 
 namespace
 {
@@ -89,6 +90,7 @@ static_assert((int32)VariantType::Types::MAX == ARRAY_COUNT(InBuiltTypesTypeName
 VariantType::VariantType(Types type, const StringView& typeName)
 {
     Type = type;
+    StaticName = 0;
     TypeName = nullptr;
     const int32 length = typeName.Length();
     if (length)
@@ -99,32 +101,41 @@ VariantType::VariantType(Types type, const StringView& typeName)
     }
 }
 
-VariantType::VariantType(Types type, const StringAnsiView& typeName)
+VariantType::VariantType(Types type, const StringAnsiView& typeName, bool staticName)
 {
     Type = type;
-    TypeName = nullptr;
-    int32 length = typeName.Length();
-    if (length)
+    StaticName = staticName && (typeName.HasChars() && typeName[typeName.Length()] == 0); // Require string to be null-terminated (not fully safe check)
+    if (staticName)
     {
-        TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
-        Platform::MemoryCopy(TypeName, typeName.Get(), length);
-        TypeName[length] = 0;
+        TypeName = (char*)typeName.Get();
     }
+    else
+    {
+        TypeName = nullptr;
+        int32 length = typeName.Length();
+        if (length)
+        {
+            TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
+            Platform::MemoryCopy(TypeName, typeName.Get(), length);
+            TypeName[length] = 0;
+        }
+    }
+}
+
+VariantType::VariantType(Types type, const ScriptingType& sType)
+    : VariantType(type)
+{
+    SetTypeName(sType);
 }
 
 VariantType::VariantType(Types type, const MClass* klass)
 {
     Type = type;
+    StaticName = false;
     TypeName = nullptr;
 #if USE_CSHARP
     if (klass)
-    {
-        const StringAnsi& typeName = klass->GetFullName();
-        const int32 length = typeName.Length();
-        TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
-        Platform::MemoryCopy(TypeName, typeName.Get(), length);
-        TypeName[length] = 0;
-    }
+        SetTypeName(*klass);
 #endif
 }
 
@@ -191,9 +202,9 @@ VariantType::VariantType(const StringAnsiView& typeName)
     if (const auto mclass = Scripting::FindClass(typeName))
     {
         if (mclass->IsEnum())
-            new(this) VariantType(Enum, typeName);
+            new(this) VariantType(Enum, mclass);
         else
-            new(this) VariantType(ManagedObject, typeName);
+            new(this) VariantType(ManagedObject, mclass);
         return;
     }
 #endif
@@ -205,36 +216,48 @@ VariantType::VariantType(const StringAnsiView& typeName)
 VariantType::VariantType(const VariantType& other)
 {
     Type = other.Type;
-    TypeName = nullptr;
-    const int32 length = StringUtils::Length(other.TypeName);
-    if (length)
+    StaticName = other.StaticName;
+    if (StaticName)
     {
-        TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
-        Platform::MemoryCopy(TypeName, other.TypeName, length);
-        TypeName[length] = 0;
+        TypeName = other.TypeName;
+    }
+    else
+    {
+        TypeName = nullptr;
+        const int32 length = StringUtils::Length(other.TypeName);
+        if (length)
+        {
+            TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
+            Platform::MemoryCopy(TypeName, other.TypeName, length);
+            TypeName[length] = 0;
+        }
     }
 }
 
 VariantType::VariantType(VariantType&& other) noexcept
 {
     Type = other.Type;
+    StaticName = other.StaticName;
     TypeName = other.TypeName;
     other.Type = Null;
     other.TypeName = nullptr;
+    other.StaticName = 0;
 }
 
 VariantType& VariantType::operator=(const Types& type)
 {
     Type = type;
-    Allocator::Free(TypeName);
+    if (!StaticName)
+        Allocator::Free(TypeName);
     TypeName = nullptr;
+    StaticName = 0;
     return *this;
 }
 
 VariantType& VariantType::operator=(VariantType&& other)
 {
     ASSERT(this != &other);
-    Swap(Type, other.Type);
+    Swap(Packed, other.Packed);
     Swap(TypeName, other.TypeName);
     return *this;
 }
@@ -243,14 +266,23 @@ VariantType& VariantType::operator=(const VariantType& other)
 {
     ASSERT(this != &other);
     Type = other.Type;
-    Allocator::Free(TypeName);
-    TypeName = nullptr;
-    const int32 length = StringUtils::Length(other.TypeName);
-    if (length)
+    if (!StaticName)
+        Allocator::Free(TypeName);
+    StaticName = other.StaticName;
+    if (StaticName)
     {
-        TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
-        Platform::MemoryCopy(TypeName, other.TypeName, length);
-        TypeName[length] = 0;
+        TypeName = other.TypeName;
+    }
+    else
+    {
+        TypeName = nullptr;
+        const int32 length = StringUtils::Length(other.TypeName);
+        if (length)
+        {
+            TypeName = static_cast<char*>(Allocator::Allocate(length + 1));
+            Platform::MemoryCopy(TypeName, other.TypeName, length);
+            TypeName[length] = 0;
+        }
     }
     return *this;
 }
@@ -284,22 +316,43 @@ void VariantType::SetTypeName(const StringView& typeName)
 {
     if (StringUtils::Length(TypeName) != typeName.Length())
     {
-        Allocator::Free(TypeName);
+        if (!StaticName)
+            Allocator::Free(TypeName);
+        StaticName = 0;
         TypeName = static_cast<char*>(Allocator::Allocate(typeName.Length() + 1));
         TypeName[typeName.Length()] = 0;
     }
     StringUtils::ConvertUTF162ANSI(typeName.Get(), TypeName, typeName.Length());
 }
 
-void VariantType::SetTypeName(const StringAnsiView& typeName)
+void VariantType::SetTypeName(const StringAnsiView& typeName, bool staticName)
 {
-    if (StringUtils::Length(TypeName) != typeName.Length())
+    if (StringUtils::Length(TypeName) != typeName.Length() || StaticName != staticName)
     {
-        Allocator::Free(TypeName);
+        if (!StaticName)
+            Allocator::Free(TypeName);
+        StaticName = staticName;
+        if (staticName)
+        {
+            TypeName = (char*)typeName.Get();
+            return;
+        }
         TypeName = static_cast<char*>(Allocator::Allocate(typeName.Length() + 1));
         TypeName[typeName.Length()] = 0;
     }
     Platform::MemoryCopy(TypeName, typeName.Get(), typeName.Length());
+}
+
+void VariantType::SetTypeName(const ScriptingType& type)
+{
+    SetTypeName(type.Fullname, type.Module->CanReload);
+}
+
+void VariantType::SetTypeName(const MClass& klass)
+{
+#if USE_CSHARP
+    SetTypeName(klass.GetFullName(), klass.GetAssembly()->CanReload());
+#endif
 }
 
 const char* VariantType::GetTypeName() const
@@ -321,6 +374,29 @@ VariantType VariantType::GetElementType() const
         return VariantType(Object);
     }
     return VariantType();
+}
+
+void VariantType::Inline()
+{
+    // Check if the typename comes from static assembly which can be used to inline name instead of dynamic memory allocation
+    StringAnsiView typeName(TypeName);
+    auto& modules = BinaryModule::GetModules();
+    for (auto module : modules)
+    {
+        int32 typeIndex;
+        if (!module->CanReload && module->FindScriptingType(typeName, typeIndex))
+        {
+            ScriptingTypeHandle typeHandle(module, typeIndex);
+            SetTypeName(typeHandle.GetType().Fullname, true);
+            return;
+        }
+    }
+
+#if USE_CSHARP
+    // Try with C#-only types
+    if (const auto mclass = Scripting::FindClass(TypeName))
+        SetTypeName(*mclass);
+#endif
 }
 
 ::String VariantType::ToString() const
@@ -633,7 +709,7 @@ Variant::Variant(ScriptingObject* v)
     AsObject = v;
     if (v)
     {
-        Type.SetTypeName(v->GetType().Fullname);
+        Type.SetTypeName(v->GetType());
         v->Deleted.Bind<Variant, &Variant::OnObjectDeleted>(this);
     }
 }
@@ -644,8 +720,8 @@ Variant::Variant(Asset* v)
     AsAsset = v;
     if (v)
     {
-        Type.SetTypeName(v->GetType().Fullname);
         v->AddReference();
+        Type.SetTypeName(v->GetType());
         v->OnUnloaded.Bind<Variant, &Variant::OnAssetUnloaded>(this);
     }
 }
@@ -888,10 +964,13 @@ Variant::Variant(const Span<byte>& v)
     }
 }
 
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+#include "Engine/Content/Deprecated.h"
 Variant::Variant(const CommonValue& value)
     : Variant()
 {
     // [Deprecated on 31.07.2020, expires on 31.07.2022]
+    MARK_CONTENT_DEPRECATED();
     switch (value.Type)
     {
     case CommonType::Bool:
@@ -955,6 +1034,7 @@ Variant::Variant(const CommonValue& value)
         CRASH;
     }
 }
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 Variant::~Variant()
 {
@@ -1155,12 +1235,13 @@ bool Variant::operator==(const Variant& other) const
         case VariantType::Int64:
             return AsInt64 == other.AsInt64;
         case VariantType::Uint64:
-        case VariantType::Enum:
             return AsUint64 == other.AsUint64;
+        case VariantType::Enum:
+            return AsEnum == other.AsEnum;
         case VariantType::Float:
-            return Math::NearEqual(AsFloat, other.AsFloat);
+            return AsFloat == other.AsFloat;
         case VariantType::Double:
-            return Math::Abs(AsDouble - other.AsDouble) < ZeroTolerance;
+            return AsDouble == other.AsDouble;
         case VariantType::Pointer:
             return AsPointer == other.AsPointer;
         case VariantType::String:
@@ -1285,8 +1366,9 @@ bool Variant::operator<(const Variant& other) const
         case VariantType::Int64:
             return AsInt64 < other.AsInt64;
         case VariantType::Uint64:
-        case VariantType::Enum:
             return AsUint64 < other.AsUint64;
+        case VariantType::Enum:
+            return AsEnum < other.AsEnum;
         case VariantType::Float:
             return AsFloat < other.AsFloat;
         case VariantType::Double:
@@ -3000,17 +3082,17 @@ Variant Variant::NewValue(const StringAnsiView& typeName)
         switch (type.Type)
         {
         case ScriptingTypes::Script:
-            v.SetType(VariantType(VariantType::Object, typeName));
+            v.SetType(VariantType(VariantType::Object, type));
             v.AsObject = type.Script.Spawn(ScriptingObjectSpawnParams(Guid::New(), typeHandle));
             if (v.AsObject)
                 v.AsObject->Deleted.Bind<Variant, &Variant::OnObjectDeleted>(&v);
             break;
         case ScriptingTypes::Structure:
-            v.SetType(VariantType(VariantType::Structure, typeName));
+            v.SetType(VariantType(VariantType::Structure, type));
             break;
         case ScriptingTypes::Enum:
-            v.SetType(VariantType(VariantType::Enum, typeName));
-            v.AsUint64 = 0;
+            v.SetType(VariantType(VariantType::Enum, type));
+            v.AsEnum = 0;
             break;
         default:
             LOG(Error, "Unsupported scripting type '{}' for Variant", typeName.ToString());
@@ -3023,16 +3105,16 @@ Variant Variant::NewValue(const StringAnsiView& typeName)
         // Fallback to C#-only types
         if (mclass->IsEnum())
         {
-            v.SetType(VariantType(VariantType::Enum, typeName));
-            v.AsUint64 = 0;
+            v.SetType(VariantType(VariantType::Enum, mclass));
+            v.AsEnum = 0;
         }
         else if (mclass->IsValueType())
         {
-            v.SetType(VariantType(VariantType::Structure, typeName));
+            v.SetType(VariantType(VariantType::Structure, mclass));
         }
         else
         {
-            v.SetType(VariantType(VariantType::ManagedObject, typeName));
+            v.SetType(VariantType(VariantType::ManagedObject, mclass));
             MObject* instance = mclass->CreateInstance();
             if (instance)
             {
@@ -3098,8 +3180,10 @@ Variant Variant::Parse(const StringView& text, const VariantType& type)
             StringUtils::Parse(text.Get(), text.Length(), &result.AsInt64);
             break;
         case VariantType::Uint64:
+            StringUtils::Parse(text.Get(), text.Length(), &result.AsInt64);
+            break;
         case VariantType::Enum:
-            if (!StringUtils::Parse(text.Get(), text.Length(), &result.AsUint64))
+            if (!StringUtils::Parse(text.Get(), text.Length(), &result.AsEnum))
             {
             }
             else if (type.TypeName)
@@ -3114,7 +3198,7 @@ Variant Variant::Parse(const StringView& text, const VariantType& type)
                     {
                         if (textAnsiView == items[i].Name)
                         {
-                            result.AsUint64 = items[i].Value;
+                            result.AsEnum = items[i].Value;
                             break;
                         }
                     }
@@ -3151,6 +3235,13 @@ Variant Variant::Parse(const StringView& text, const VariantType& type)
     return result;
 }
 
+Variant Variant::Typename(const StringAnsiView& value)
+{
+    Variant result;
+    result.SetTypename(value);
+    return result;
+}
+
 bool Variant::CanCast(const Variant& v, const VariantType& to)
 {
     if (v.Type == to)
@@ -3175,6 +3266,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3197,6 +3289,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3219,6 +3312,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3241,6 +3335,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3263,6 +3358,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3285,6 +3381,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3307,6 +3404,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3329,6 +3427,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3351,6 +3450,7 @@ bool Variant::CanCast(const Variant& v, const VariantType& to)
         case VariantType::Double2:
         case VariantType::Double3:
         case VariantType::Double4:
+        case VariantType::Enum:
             return true;
         default:
             return false;
@@ -3493,6 +3593,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3(v.AsBool ? 1.0 : 0.0));
         case VariantType::Double4:
             return Variant(Double4(v.AsBool ? 1.0 : 0.0));
+    case VariantType::Enum:
+            return Enum(to, v.AsBool ? 1 : 0);
         default: ;
         }
         break;
@@ -3529,6 +3631,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3((double)v.AsInt16));
         case VariantType::Double4:
             return Variant(Double4((double)v.AsInt16));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsInt16);
         default: ;
         }
         break;
@@ -3559,6 +3663,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Float4((float)v.AsInt));
         case VariantType::Color:
             return Variant(Color((float)v.AsInt));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsInt);
         default: ;
         }
         break;
@@ -3595,6 +3701,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3((double)v.AsUint16));
         case VariantType::Double4:
             return Variant(Double4((double)v.AsUint16));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsUint16);
         default: ;
         }
         break;
@@ -3631,6 +3739,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3((double)v.AsUint));
         case VariantType::Double4:
             return Variant(Double4((double)v.AsUint));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsUint);
         default: ;
         }
         break;
@@ -3667,6 +3777,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3((double)v.AsInt64));
         case VariantType::Double4:
             return Variant(Double4((double)v.AsInt64));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsInt64);
         default: ;
         }
         break;
@@ -3703,6 +3815,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3((double)v.AsInt));
         case VariantType::Double4:
             return Variant(Double4((double)v.AsInt));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsInt);
         default: ;
         }
         break;
@@ -3739,6 +3853,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3(v.AsFloat));
         case VariantType::Double4:
             return Variant(Double4(v.AsFloat));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsFloat);
         default: ;
         }
         break;
@@ -3775,6 +3891,8 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
             return Variant(Double3(v.AsDouble));
         case VariantType::Double4:
             return Variant(Double4(v.AsDouble));
+        case VariantType::Enum:
+            return Enum(to, (int64)v.AsDouble);
         default: ;
         }
         break;
@@ -3914,7 +4032,7 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
         case VariantType::Float4:
             return Variant(Float4(*(Double2*)v.AsData, 0.0f, 0.0f));
         case VariantType::Color:
-            return Variant(Color(((Double2*)v.AsData)->X, ((Double2*)v.AsData)->Y, 0.0f, 0.0f));
+            return Variant(Color((float)((Double2*)v.AsData)->X, (float)((Double2*)v.AsData)->Y, 0.0f, 0.0f));
         case VariantType::Double3:
             return Variant(Double3(*(Double2*)v.AsData, 0.0));
         case VariantType::Double4:
@@ -3950,7 +4068,7 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
         case VariantType::Float4:
             return Variant(Float4(*(Double3*)v.AsData, 0.0f));
         case VariantType::Color:
-            return Variant(Color(((Double3*)v.AsData)->X, ((Double3*)v.AsData)->Y, ((Double3*)v.AsData)->Z, 0.0f));
+            return Variant(Color((float)((Double3*)v.AsData)->X, (float)((Double3*)v.AsData)->Y, (float)((Double3*)v.AsData)->Z, 0.0f));
         case VariantType::Double2:
             return Variant(Double2(*(Double3*)v.AsData));
         case VariantType::Double4:
@@ -4028,6 +4146,25 @@ Variant Variant::Cast(const Variant& v, const VariantType& to)
         case VariantType::Double4:
             return Variant(Double4(*(Color*)v.AsData));
         default: ;
+        }
+        break;
+    case VariantType::Enum:
+        switch (to.Type)
+        {
+    case VariantType::Bool:
+            return Variant(v.AsEnum != 0);
+        case VariantType::Int:
+            return Variant((int32)v.AsEnum);
+        case VariantType::Uint:
+            return Variant((uint32)v.AsEnum);
+        case VariantType::Int64:
+            return Variant((int64)v.AsEnum);
+        case VariantType::Uint64:
+            return Variant((uint64)v.AsEnum);
+        case VariantType::Float:
+            return Variant((float)v.AsEnum);
+        case VariantType::Double:
+            return Variant((double)v.AsEnum);
         }
         break;
     case VariantType::Null:
@@ -4267,6 +4404,14 @@ void Variant::FreeStructure()
     Allocator::Free(AsBlob.Data);
 }
 
+Variant Variant::Enum(const VariantType& type, const uint64 value)
+{
+    Variant v;
+    v.SetType(type);
+    v.AsEnum = value;
+    return MoveTemp(v);
+}
+
 uint32 GetHash(const Variant& key)
 {
     switch (key.Type.Type)
@@ -4284,8 +4429,9 @@ uint32 GetHash(const Variant& key)
     case VariantType::Int64:
         return GetHash(key.AsInt64);
     case VariantType::Uint64:
-    case VariantType::Enum:
         return GetHash(key.AsUint64);
+    case VariantType::Enum:
+        return GetHash(key.AsEnum);
     case VariantType::Float:
         return GetHash(key.AsFloat);
     case VariantType::Double:

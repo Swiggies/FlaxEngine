@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.GUI.ContextMenu;
@@ -185,7 +185,7 @@ namespace FlaxEditor.Viewport.Previews
             {
                 UseTimeScale = false,
                 UpdateWhenOffscreen = true,
-                BoundsScale = 100.0f,
+                BoundsScale = 1.0f,
                 UpdateMode = AnimatedModel.AnimationUpdateMode.Manual,
             };
             Task.AddCustomActor(_previewModel);
@@ -317,7 +317,7 @@ namespace FlaxEditor.Viewport.Previews
         private void OnScriptsReloadBegin()
         {
             // Prevent any crashes due to dangling references to anim events
-            _previewModel.ResetAnimation();
+            _previewModel?.ResetAnimation();
         }
 
         /// <inheritdoc />

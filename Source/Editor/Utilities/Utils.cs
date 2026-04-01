@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -212,6 +212,10 @@ namespace FlaxEditor.Utilities
             if (value is FlaxEngine.Object)
                 return value;
 
+            // For custom types use interface
+            if (value is ICloneable clonable)
+                return clonable.Clone();
+
             // For objects (eg. arrays) we need to clone them to prevent editing default/reference value within editor
             if (value != null && (!value.GetType().IsValueType || !value.GetType().IsClass))
             {
@@ -402,7 +406,7 @@ namespace FlaxEditor.Utilities
         /// <summary>
         /// Creates an Import path ui that show the asset import path and adds a button to show the folder in the file system.
         /// </summary>
-        /// <param name="parentLayout">The parent layout container.</param>
+        /// <param name="parentLayout">The parent layout element.</param>
         /// <param name="assetItem">The asset item to get the import path of.</param>
         public static void CreateImportPathUI(CustomEditors.LayoutElementsContainer parentLayout, Content.BinaryAssetItem assetItem)
         {
@@ -413,21 +417,16 @@ namespace FlaxEditor.Utilities
         /// <summary>
         /// Creates an Import path ui that show the import path and adds a button to show the folder in the file system.
         /// </summary>
-        /// <param name="parentLayout">The parent layout container.</param>
+        /// <param name="parentLayout">The parent layout element.</param>
         /// <param name="path">The import path.</param>
-        /// <param name="useInitialSpacing">Whether to use an initial layout space of 5 for separation.</param>
-        public static void CreateImportPathUI(CustomEditors.LayoutElementsContainer parentLayout, string path, bool useInitialSpacing = true)
+        public static void CreateImportPathUI(CustomEditors.LayoutElementsContainer parentLayout, string path)
         {
             if (!string.IsNullOrEmpty(path))
             {
-                if (useInitialSpacing)
-                    parentLayout.Space(5);
-                parentLayout.Label("Import Path:").Label.TooltipText = "Source asset path (can be relative or absolute to the project)";
                 var textBox = parentLayout.TextBox().TextBox;
-                textBox.TooltipText = "Path is not editable here.";
+                textBox.TooltipText = "Source asset path. Can be relative or absolute to the project. Path is not editable here.";
                 textBox.IsReadOnly = true;
                 textBox.Text = path;
-                parentLayout.Space(2);
                 var button = parentLayout.Button(Constants.ShowInExplorer).Button;
                 button.Clicked += () => FileSystem.ShowFileExplorer(Path.GetDirectoryName(path));
             }
@@ -551,6 +550,26 @@ namespace FlaxEditor.Utilities
             Marshal.Copy(ptr, arr, 0, size);
             Marshal.FreeHGlobal(ptr);
             return arr;
+        }
+
+        internal static void StructureToByteArray(object value, int valueSize, IntPtr tempBuffer, byte[] dataBuffer)
+        {
+            var valueType = value.GetType();
+            if (valueType.IsEnum)
+            {
+                var ptr = FlaxEngine.Interop.NativeInterop.ValueTypeUnboxer.GetPointer(value, valueType);
+                FlaxEngine.Utils.MemoryCopy(tempBuffer, ptr, (ulong)valueSize);
+            }
+            else
+                Marshal.StructureToPtr(value, tempBuffer, true);
+            Marshal.Copy(tempBuffer, dataBuffer, 0, valueSize);
+        }
+
+        internal static object ByteArrayToStructure(IntPtr valuePtr, Type valueType, int valueSize)
+        {
+            if (valueType.IsEnum)
+                return FlaxEngine.Interop.NativeInterop.MarshalToManaged(valuePtr, valueType);
+            return Marshal.PtrToStructure(valuePtr, valueType);
         }
 
         internal static unsafe string ReadStr(this BinaryReader stream, int check)
@@ -1211,6 +1230,7 @@ namespace FlaxEditor.Utilities
             {
                 Parent = panel1,
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Pivot = Float2.Zero,
                 IsScrollable = true,
             };
             tree = new Tree(false)
@@ -1504,7 +1524,7 @@ namespace FlaxEditor.Utilities
             inputActions.Add(options => options.BuildNav, Editor.Instance.BuildNavMesh);
             inputActions.Add(options => options.BuildSDF, Editor.Instance.BuildAllMeshesSDF);
             inputActions.Add(options => options.TakeScreenshot, Editor.Instance.Windows.TakeScreenshot);
-            inputActions.Add(options => options.ProfilerWindow, () => Editor.Instance.Windows.ProfilerWin.FocusOrShow());
+#if USE_PROFILER
             inputActions.Add(options => options.ProfilerStartStop, () =>
             {
                 bool recording = !Editor.Instance.Windows.ProfilerWin.LiveRecording;
@@ -1514,13 +1534,15 @@ namespace FlaxEditor.Utilities
             inputActions.Add(options => options.ProfilerClear, () =>
             {
                 Editor.Instance.Windows.ProfilerWin.Clear();
-                Editor.Instance.UI.AddStatusMessage($"Profiling results cleared.");
+                Editor.Instance.UI.AddStatusMessage("Profiling results cleared.");
             });
+#endif
             inputActions.Add(options => options.SaveScenes, () => Editor.Instance.Scene.SaveScenes());
             inputActions.Add(options => options.CloseScenes, () => Editor.Instance.Scene.CloseAllScenes());
             inputActions.Add(options => options.OpenScriptsProject, () => Editor.Instance.CodeEditing.OpenSolution());
             inputActions.Add(options => options.GenerateScriptsProject, () => Editor.Instance.ProgressReporting.GenerateScriptsProjectFiles.RunAsync());
             inputActions.Add(options => options.RecompileScripts, ScriptsBuilder.Compile);
+            inputActions.Add(options => options.FocusConsoleCommand, () => Editor.Instance.Windows.OutputLogWin.FocusCommand());
         }
 
         internal static string ToPathProject(string path)
@@ -1545,11 +1567,21 @@ namespace FlaxEditor.Utilities
             return path;
         }
 
-        internal static ISceneContextWindow GetSceneContext(this Control c)
+        internal static bool OnAssetProperties(CustomEditors.LayoutElementsContainer layout, Asset asset)
         {
-            while (c != null && !(c is ISceneContextWindow))
+            if (asset == null || !asset.IsLoaded)
+            {
+                layout.Label(asset != null && asset.LastLoadFailed ? "Failed to load" : "Loading...", TextAlignment.Center);
+                return true;
+            }
+            return false;
+        }
+
+        internal static ISceneEditingContext GetSceneContext(this Control c)
+        {
+            while (c != null && !(c is ISceneEditingContext))
                 c = c.Parent;
-            return c as ISceneContextWindow;
+            return c as ISceneEditingContext;
         }
     }
 }

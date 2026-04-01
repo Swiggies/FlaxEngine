@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -24,33 +24,10 @@ private:
     ID3D11UnorderedAccessView* _uav = nullptr;
 
 public:
-
-    /// <summary>
-    /// Initializes a new instance of the <see cref="GPUTextureViewDX11"/> class.
-    /// </summary>
     GPUTextureViewDX11()
     {
     }
 
-    GPUTextureViewDX11(const GPUTextureViewDX11& other)
-        : GPUTextureViewDX11()
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-    }
-
-    GPUTextureViewDX11& operator=(const GPUTextureViewDX11& other)
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-        return *this;
-    }
-
-    /// <summary>
-    /// Finalizes an instance of the <see cref="GPUTextureViewDX11"/> class.
-    /// </summary>
     ~GPUTextureViewDX11()
     {
         Release();
@@ -181,6 +158,7 @@ private:
     GPUTextureViewDX11 _handleArray;
     GPUTextureViewDX11 _handleVolume;
     GPUTextureViewDX11 _handleReadOnlyDepth;
+    GPUTextureViewDX11 _handleStencil;
     Array<GPUTextureViewDX11> _handlesPerSlice; // [slice]
     Array<Array<GPUTextureViewDX11>> _handlesPerMip; // [slice][mip]
 
@@ -247,6 +225,11 @@ public:
     {
         ASSERT(_desc.Flags & GPUTextureFlags::ReadOnlyDepthView);
         return (GPUTextureView*)&_handleReadOnlyDepth;
+    }
+    GPUTextureView* ViewStencil() const override
+    {
+        ASSERT(_desc.Flags & GPUTextureFlags::DepthStencil);
+        return (GPUTextureView*)&_handleStencil;
     }
     void* GetNativePtr() const override
     {

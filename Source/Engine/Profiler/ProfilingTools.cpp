@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_PROFILER
 
@@ -33,6 +33,7 @@ ProfilingToolsService ProfilingToolsServiceInstance;
 void ProfilingToolsService::Update()
 {
     ZoneScoped;
+    PROFILE_MEM(Profiler);
 
     // Capture stats
     {

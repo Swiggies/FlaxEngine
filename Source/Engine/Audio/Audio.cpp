@@ -1,13 +1,13 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Audio.h"
 #include "AudioBackend.h"
 #include "AudioSettings.h"
-#include "FlaxEngine.Gen.h"
 #include "Engine/Scripting/ScriptingType.h"
 #include "Engine/Scripting/BinaryModule.h"
 #include "Engine/Level/Level.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Engine/Engine.h"
 #include "Engine/Engine/CommandLine.h"
 #include "Engine/Core/Log.h"
@@ -151,6 +151,7 @@ void Audio::SetEnableHRTF(bool value)
 bool AudioService::Init()
 {
     PROFILE_CPU_NAMED("Audio.Init");
+    PROFILE_MEM(Audio);
     const auto settings = AudioSettings::Get();
     const bool mute = CommandLine::Options.Mute.IsTrue() || settings->DisableAudio;
 
@@ -211,6 +212,7 @@ bool AudioService::Init()
 void AudioService::Update()
 {
     PROFILE_CPU_NAMED("Audio.Update");
+    PROFILE_MEM(Audio);
 
     // Update the master volume
     float masterVolume = MasterVolume;

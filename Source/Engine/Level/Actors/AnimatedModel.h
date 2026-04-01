@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -9,22 +9,32 @@
 #include "Engine/Renderer/DrawCall.h"
 #include "Engine/Core/Delegate.h"
 
-API_STRUCT() struct ModelBoneNode
-{
-    DECLARE_SCRIPTING_TYPE_MINIMAL(ModelBoneNode);
-
-    API_FIELD() uint32 NodeIndex;
-    API_FIELD() Matrix NodeMatrix;
-};
-
 /// <summary>
 /// Performs an animation and renders a skinned model.
 /// </summary>
-API_CLASS(Attributes="ActorContextMenu(\"New/Other/Animated Model\"), ActorToolbox(\"Visuals\")")
-class FLAXENGINE_API AnimatedModel : public ModelInstanceActor
+API_CLASS(Attributes="ActorContextMenu(\"New/Animation/Animated Model\"), ActorToolbox(\"Visuals\")")
+class FLAXENGINE_API AnimatedModel : public ModelInstanceActor, IAssetReference
 {
     DECLARE_SCENE_OBJECT(AnimatedModel);
     friend class AnimationsSystem;
+
+    /// <summary>
+    /// Keeps the data of a Node and its relevant Transform Matrix together when passing it between functions.
+    /// </summary>
+    API_STRUCT() struct NodeTransformation
+    {
+        DECLARE_SCRIPTING_TYPE_MINIMAL(NodeTransformation);
+
+        /// <summary>
+        /// The index of the node in the node hierarchy.
+        /// </summary>
+        API_FIELD() uint32 NodeIndex;
+
+        /// <summary>
+        /// The transformation matrix of the node
+        /// </summary>
+        API_FIELD() Matrix NodeMatrix;
+    };
 
     /// <summary>
     /// Describes the animation graph updates frequency for the animated model.
@@ -104,7 +114,7 @@ public:
     bool PerBoneMotionBlur = true;
 
     /// <summary>
-    /// If true, animation speed will be affected by the global time scale parameter.
+    /// If true, animation speed will be affected by the global timescale parameter.
     /// </summary>
     API_FIELD(Attributes="EditorOrder(30), DefaultValue(true), EditorDisplay(\"Skinned Model\")")
     bool UseTimeScale = true;
@@ -116,9 +126,9 @@ public:
     bool UpdateWhenOffscreen = false;
 
     /// <summary>
-    /// The animation update delta time scale. Can be used to speed up animation playback or create slow motion effect.
+    /// The animation update delta timescale. Can be used to speed up animation playback or create slow motion effect.
     /// </summary>
-    API_FIELD(Attributes="EditorOrder(45), EditorDisplay(\"Skinned Model\")")
+    API_FIELD(Attributes="EditorOrder(45), Limit(0, float.MaxValue, 0.025f), EditorDisplay(\"Skinned Model\")")
     float UpdateSpeed = 1.0f;
 
     /// <summary>
@@ -128,9 +138,9 @@ public:
     AnimationUpdateMode UpdateMode = AnimationUpdateMode::Auto;
 
     /// <summary>
-    /// The master scale parameter for the actor bounding box. Helps reducing mesh flickering effect on screen edges.
+    /// The master scale parameter for the actor bounding box. Helps to reduce mesh flickering effect on screen edges.
     /// </summary>
-    API_FIELD(Attributes="EditorOrder(60), DefaultValue(1.5f), Limit(0), EditorDisplay(\"Skinned Model\")")
+    API_FIELD(Attributes="EditorOrder(60), DefaultValue(1.5f), Limit(0, float.MaxValue, 0.025f), EditorDisplay(\"Skinned Model\")")
     float BoundsScale = 1.5f;
 
     /// <summary>
@@ -222,6 +232,12 @@ public:
     API_FUNCTION() void GetCurrentPose(API_PARAM(Out) Array<Matrix>& nodesTransformation, bool worldSpace = false) const;
 
     /// <summary>
+    /// Gets the per-node final transformations (skeleton pose).
+    /// </summary>
+    /// <param name="nodesTransformation">The output per-node final transformation matrices.</param>
+    void GetCurrentPose(Span<Matrix>& nodesTransformation) const;
+
+    /// <summary>
     /// Sets the per-node final transformations (skeleton pose).
     /// </summary>
     /// <param name="nodesTransformation">The per-node final transformation matrices.</param>
@@ -247,10 +263,10 @@ public:
     /// <summary>
     /// Gets the node final transformation for a series of nodes.
     /// </summary>
-    /// <param name="modelBoneNodes">The series of nodes that will be returned</param>
+    /// <param name="nodeTransformations">The series of nodes that will be returned</param>
     /// <param name="worldSpace">True if convert matrices into world-space, otherwise returned values will be in local-space of the actor.</param>
     /// <returns></returns>
-    API_FUNCTION() void GetNodeTransformation(API_PARAM(Out) Array<ModelBoneNode>& modelBoneNodes, bool worldSpace = false) const;
+    API_FUNCTION() void GetNodeTransformation(API_PARAM(Ref) Array<NodeTransformation>& nodeTransformations, bool worldSpace = false) const;
 
     /// <summary>
     /// Sets the node final transformation. If multiple nodes are to be set within a frame, do not use set worldSpace to true, and do the conversion yourself to avoid recalculation of inv matrices. 
@@ -271,10 +287,10 @@ public:
     /// <summary>
     /// Sets a group of nodes final transformation.
     /// </summary>
-    /// <param name="modelBoneNodes">Array of the final node transformation matrix.</param>
+    /// <param name="nodeTransformations">Array of the final node transformation matrix.</param>
     /// <param name="worldSpace">True if convert matrices from world-space, otherwise values will be in local-space of the actor.</param>
     /// <returns></returns>
-    API_FUNCTION() void SetNodeTransformation(Array<ModelBoneNode>& modelBoneNodes, bool worldSpace = false);
+    API_FUNCTION() void SetNodeTransformation(const Array<NodeTransformation>& nodeTransformations, bool worldSpace = false);
 
     /// <summary>
     /// Finds the closest node to a given location.
@@ -396,8 +412,8 @@ public:
     /// Stops the animation playback on the slot in Anim Graph.
     /// </summary>
     /// <param name="slotName">The name of the slot.</param>
-    /// <param name="anim">The animation to stop.</param>
-    API_FUNCTION() void StopSlotAnimation(const StringView& slotName, Animation* anim);
+    /// <param name="anim">The animation to check. Null to use slot name only.</param>
+    API_FUNCTION() void StopSlotAnimation(const StringView& slotName, Animation* anim = nullptr);
 
     /// <summary>
     /// Pauses all the animations playback on the all slots in Anim Graph.
@@ -408,11 +424,11 @@ public:
     /// Pauses the animation playback on the slot in Anim Graph.
     /// </summary>
     /// <param name="slotName">The name of the slot.</param>
-    /// <param name="anim">The animation to pause.</param>
-    API_FUNCTION() void PauseSlotAnimation(const StringView& slotName, Animation* anim);
+    /// <param name="anim">The animation to check. Null to use slot name only.</param>
+    API_FUNCTION() void PauseSlotAnimation(const StringView& slotName, Animation* anim = nullptr);
 
     /// <summary>
-    /// Checks if the any animation playback is active on the any slot in Anim Graph (not paused).
+    /// Checks if any  animation playback is active on any  slot in Anim Graph (not paused).
     /// </summary>
     API_FUNCTION() bool IsPlayingSlotAnimation();
 
@@ -420,8 +436,8 @@ public:
     /// Checks if the animation playback is active on the slot in Anim Graph (not paused).
     /// </summary>
     /// <param name="slotName">The name of the slot.</param>
-    /// <param name="anim">The animation to check.</param>
-    API_FUNCTION() bool IsPlayingSlotAnimation(const StringView& slotName, Animation* anim);
+    /// <param name="anim">The animation to check. Null to use slot name only.</param>
+    API_FUNCTION() bool IsPlayingSlotAnimation(const StringView& slotName, Animation* anim = nullptr);
 
 private:
     void ApplyRootMotion(const Transform& rootMotionDelta);
@@ -440,6 +456,11 @@ private:
     void OnGraphChanged();
     void OnGraphLoaded();
 
+    // [IAssetReference]
+    void OnAssetChanged(Asset* asset, void* caller) override;
+    void OnAssetLoaded(Asset* asset, void* caller) override;
+    void OnAssetUnloaded(Asset* asset, void* caller) override;
+
 public:
     // [ModelInstanceActor]
     bool HasContentLoaded() const override;
@@ -457,7 +478,8 @@ public:
     MaterialBase* GetMaterial(int32 entryIndex) override;
     bool IntersectsEntry(int32 entryIndex, const Ray& ray, Real& distance, Vector3& normal) override;
     bool IntersectsEntry(const Ray& ray, Real& distance, Vector3& normal, int32& entryIndex) override;
-    bool GetMeshData(const MeshReference& mesh, MeshBufferType type, BytesContainer& result, int32& count) const override;
+    bool GetMeshData(const MeshReference& ref, MeshBufferType type, BytesContainer& result, int32& count, GPUVertexLayout** layout) const override;
+    MeshBase* GetMesh(const MeshReference& ref) const override;
     void UpdateBounds() override;
     MeshDeformation* GetMeshDeformation() const override;
     void OnDeleteObject() override;

@@ -20,6 +20,8 @@ float TimeParam;
 float4 ViewInfo;
 float4 ScreenSize;
 float4 ViewSize;
+float3 ViewPadding0;
+float ScaledTimeParam;
 @1META_CB_END
 
 // Shader resources
@@ -159,6 +161,12 @@ float3 GetObjectPosition(MaterialInput input)
 
 // Gets the current object size
 float3 GetObjectSize(MaterialInput input)
+{
+	return float3(1, 1, 1);
+}
+
+// Gets the current object scale (supports instancing)
+float3 GetObjectScale(MaterialInput input)
 {
 	return float3(1, 1, 1);
 }

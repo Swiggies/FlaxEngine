@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 // Copyright (c) 2011 Stefan Gustavson. All rights reserved.
 // Distributed under the MIT license.
@@ -52,6 +52,26 @@ float4 TaylorInvSqrt(float4 r)
 float2 PerlinNoiseFade(float2 t)
 {
     return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+// "Next Generation Post Processing in Call of Duty: Advanced Warfare"
+// http://advances.realtimerendering.com/s2014/index.html
+float InterleavedGradientNoise(float2 uv, uint frameCount)
+{
+    const float2 magicFrameScale = float2(47, 17) * 0.695;
+    uv += frameCount * magicFrameScale;
+    const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+    return frac(magic.z * frac(dot(uv, magic.xy)));
+}
+
+// Removes error from the color to properly store it in lower precision formats (error = 2^(-mantissaBits))
+float3 QuantizeColor(float3 color, float noise, float3 error)
+{
+    float3 delta = color * error;
+    delta.x = asfloat(asuint(delta.x) & ~0x007fffff);
+    delta.y = asfloat(asuint(delta.y) & ~0x007fffff);
+    delta.z = asfloat(asuint(delta.z) & ~0x007fffff);
+    return color + delta * noise;
 }
 
 float rand2dTo1d(float2 value, float2 dotDir = float2(12.9898, 78.233))

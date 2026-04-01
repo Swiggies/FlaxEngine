@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.ComponentModel;
 
@@ -337,14 +337,18 @@ namespace FlaxEngine.GUI
                             size.X = _textSize.X + Margin.Width;
                         if (_autoHeight)
                             size.Y = _textSize.Y + Margin.Height;
-                        var pivotRelative = PivotRelative;
-                        Size = size;
-                        PivotRelative = pivotRelative;
+                        Resize(ref size);
                     }
                 }
             }
 
             base.PerformLayoutBeforeChildren();
+        }
+
+        /// <inheritdoc />
+        public override string ToString()
+        {
+            return $"{GetType()}, '{ConvertedText()}'";
         }
     }
 }

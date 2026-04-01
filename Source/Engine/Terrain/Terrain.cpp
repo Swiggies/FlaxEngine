@@ -1,20 +1,23 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Terrain.h"
 #include "TerrainPatch.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Ray.h"
+#include "Engine/Core/Collections/HashSet.h"
 #include "Engine/Level/Scene/SceneRendering.h"
 #include "Engine/Serialization/Serialization.h"
 #include "Engine/Physics/Physics.h"
+#include "Engine/Physics/PhysicsScene.h"
 #include "Engine/Physics/PhysicalMaterial.h"
 #include "Engine/Physics/PhysicsBackend.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Graphics/RenderView.h"
 #include "Engine/Graphics/RenderTask.h"
 #include "Engine/Graphics/Textures/GPUTexture.h"
 #include "Engine/Level/Scene/Scene.h"
-#include "Engine/Physics/PhysicsScene.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Renderer/GlobalSignDistanceFieldPass.h"
 #include "Engine/Renderer/GI/GlobalSurfaceAtlasPass.h"
 
@@ -239,6 +242,7 @@ void Terrain::DrawChunk(const RenderContext& renderContext, const Int2& patchCoo
 
 void Terrain::DrawPhysicsDebug(RenderView& view)
 {
+    PROFILE_CPU();
     for (int32 pathIndex = 0; pathIndex < _patches.Count(); pathIndex++)
     {
         _patches[pathIndex]->DrawPhysicsDebug(view);
@@ -259,7 +263,7 @@ void Terrain::SetScaleInLightmap(float value)
 
 void Terrain::SetBoundsExtent(const Vector3& value)
 {
-    if (Vector3::NearEqual(_boundsExtent, value))
+    if (_boundsExtent == value)
         return;
 
     _boundsExtent = value;
@@ -288,6 +292,7 @@ void Terrain::SetCollisionLOD(int32 value)
 
 void Terrain::SetPhysicalMaterials(const Array<JsonAssetReference<PhysicalMaterial>, FixedAllocation<8>>& value)
 {
+    PROFILE_MEM(LevelTerrain);
     _physicalMaterials = value;
     _physicalMaterials.Resize(8);
     JsonAsset* materials[8];
@@ -299,6 +304,16 @@ void Terrain::SetPhysicalMaterials(const Array<JsonAssetReference<PhysicalMateri
         if (patch->HasCollision())
             PhysicsBackend::SetShapeMaterials(patch->_physicsShape, ToSpan(materials, 8));
     }
+}
+
+int32 Terrain::GetHeightmapSize() const
+{
+    return GetChunkSize() * ChunksCountEdge + 1;
+}
+
+float Terrain::GetPatchSize() const
+{
+    return TERRAIN_UNITS_PER_VERTEX * ChunksCountEdge * GetChunkSize();
 }
 
 TerrainPatch* Terrain::GetPatch(const Int2& patchCoord) const
@@ -429,6 +444,7 @@ void Terrain::Setup(int32 lodCount, int32 chunkSize)
 
 void Terrain::AddPatches(const Int2& numberOfPatches)
 {
+    PROFILE_MEM(LevelTerrain);
     if (_chunkSize == 0)
         Setup();
     _patches.ClearDelete();
@@ -468,6 +484,7 @@ void Terrain::AddPatch(const Int2& patchCoord)
         LOG(Warning, "Cannot add patch at {0}x{1}. The patch at the given location already exists.", patchCoord.X, patchCoord.Y);
         return;
     }
+    PROFILE_MEM(LevelTerrain);
     if (_chunkSize == 0)
         Setup();
 
@@ -542,19 +559,22 @@ bool Terrain::DrawSetup(RenderContext& renderContext)
     const DrawPass drawModes = DrawModes & renderContext.View.Pass;
     if (drawModes == DrawPass::GlobalSDF)
     {
-        const float chunkSize = TERRAIN_UNITS_PER_VERTEX * (float)_chunkSize;
-        const float posToUV = 0.25f / chunkSize;
-        Float4 localToUV(posToUV, posToUV, 0.0f, 0.0f);
+        const float chunkScale = 0.25f / (TERRAIN_UNITS_PER_VERTEX * (float)_chunkSize); // Patch heightfield is divided into 4x4 chunks
         for (const TerrainPatch* patch : _patches)
         {
             if (!patch->Heightmap)
                 continue;
+            GPUTexture* heightfield = patch->Heightmap->GetTexture();
+            float size = (float)heightfield->Width();
+            Float4 localToUV;
+            localToUV.X = localToUV.Y = chunkScale * (size - 1) / size; // Skip the last edge texel
+            localToUV.Z = localToUV.W = 0.5f / size; // Include half-texel offset
             Transform patchTransform;
             patchTransform.Translation = patch->_offset + Vector3(0, patch->_yOffset, 0);
             patchTransform.Orientation = Quaternion::Identity;
             patchTransform.Scale = Float3(1.0f, patch->_yHeight, 1.0f);
             patchTransform = _transform.LocalToWorld(patchTransform);
-            GlobalSignDistanceFieldPass::Instance()->RasterizeHeightfield(this, patch->Heightmap->GetTexture(), patchTransform, patch->_bounds, localToUV);
+            GlobalSignDistanceFieldPass::Instance()->RasterizeHeightfield(this, heightfield, patchTransform, patch->_bounds, localToUV);
         }
         return true;
     }
@@ -724,6 +744,8 @@ void Terrain::Serialize(SerializeStream& stream, const void* otherObj)
 
 void Terrain::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
 {
+    PROFILE_MEM(LevelTerrain);
+
     // Base
     Actor::Deserialize(stream, modifier);
 
@@ -810,16 +832,23 @@ void Terrain::Deserialize(DeserializeStream& stream, ISerializeModifier* modifie
 
     // [Deprecated on 07.02.2022, expires on 07.02.2024]
     if (modifier->EngineBuild <= 6330)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSDF;
+    }
     // [Deprecated on 27.04.2022, expires on 27.04.2024]
     if (modifier->EngineBuild <= 6331)
+    {
+        MARK_CONTENT_DEPRECATED();
         DrawModes |= DrawPass::GlobalSurfaceAtlas;
+    }
 
     // [Deprecated on 15.02.2024, expires on 15.02.2026]
     JsonAssetReference<PhysicalMaterial> PhysicalMaterial;
     DESERIALIZE(PhysicalMaterial);
     if (PhysicalMaterial)
     {
+        MARK_CONTENT_DEPRECATED();
         for (auto& e : _physicalMaterials)
             e = PhysicalMaterial;
     }
@@ -836,16 +865,14 @@ void Terrain::OnEnable()
     GetScene()->Navigation.Actors.Add(this);
     GetSceneRendering()->AddActor(this, _sceneRenderingKey);
 #if TERRAIN_USE_PHYSICS_DEBUG
-    GetSceneRendering()->AddPhysicsDebug<Terrain, &Terrain::DrawPhysicsDebug>(this);
+    GetSceneRendering()->AddPhysicsDebug(this);
 #endif
     void* scene = GetPhysicsScene()->GetPhysicsScene();
     for (int32 i = 0; i < _patches.Count(); i++)
     {
         auto patch = _patches[i];
         if (patch->_physicsActor)
-        {
             PhysicsBackend::AddSceneActor(scene, patch->_physicsActor);
-        }
     }
 
     // Base
@@ -857,16 +884,14 @@ void Terrain::OnDisable()
     GetScene()->Navigation.Actors.Remove(this);
     GetSceneRendering()->RemoveActor(this, _sceneRenderingKey);
 #if TERRAIN_USE_PHYSICS_DEBUG
-    GetSceneRendering()->RemovePhysicsDebug<Terrain, &Terrain::DrawPhysicsDebug>(this);
+    GetSceneRendering()->RemovePhysicsDebug(this);
 #endif
     void* scene = GetPhysicsScene()->GetPhysicsScene();
     for (int32 i = 0; i < _patches.Count(); i++)
     {
         auto patch = _patches[i];
         if (patch->_physicsActor)
-        {
             PhysicsBackend::RemoveSceneActor(scene, patch->_physicsActor);
-        }
     }
 
     // Base
@@ -883,7 +908,7 @@ void Terrain::OnTransformChanged()
         auto patch = _patches[i];
         patch->UpdateTransform();
     }
-    if (!Float3::NearEqual(_cachedScale, _transform.Scale))
+    if (_cachedScale != _transform.Scale)
     {
         _cachedScale = _transform.Scale;
         for (int32 i = 0; i < _patches.Count(); i++)

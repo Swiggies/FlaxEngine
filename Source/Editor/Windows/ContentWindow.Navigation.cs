@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.Content;
@@ -10,15 +10,41 @@ namespace FlaxEditor.Windows
 {
     public partial class ContentWindow
     {
-        private static readonly List<ContentTreeNode> NavUpdateCache = new List<ContentTreeNode>(8);
+        private static readonly List<ContentFolderTreeNode> NavUpdateCache = new List<ContentFolderTreeNode>(8);
 
         private void OnTreeSelectionChanged(List<TreeNode> from, List<TreeNode> to)
         {
+            if (!_showAllContentInTree && to.Count > 1)
+            {
+                _tree.Select(to[^1]);
+                return;
+            }
+            if (_showAllContentInTree && to.Count > 1)
+            {
+                var activeNode = GetActiveTreeSelection(to);
+                if (activeNode is ContentItemTreeNode itemNode)
+                    SaveLastViewedFolder(itemNode.Item?.ParentFolder?.Node);
+                else
+                    SaveLastViewedFolder(activeNode as ContentFolderTreeNode);
+                UpdateUI();
+                return;
+            }
+
             // Navigate
-            var source = from.Count > 0 ? from[0] as ContentTreeNode : null;
-            var target = to.Count > 0 ? to[0] as ContentTreeNode : null;
+            var source = from.Count > 0 ? from[0] as ContentFolderTreeNode : null;
+            var targetNode = GetActiveTreeSelection(to);
+            if (targetNode is ContentItemTreeNode itemNode2)
+            {
+                SaveLastViewedFolder(itemNode2.Item?.ParentFolder?.Node);
+                UpdateUI();
+                itemNode2.Focus();
+                return;
+            }
+
+            var target = targetNode as ContentFolderTreeNode;
             Navigate(source, target);
 
+            SaveLastViewedFolder(target);
             target?.Focus();
         }
 
@@ -26,12 +52,12 @@ namespace FlaxEditor.Windows
         /// Navigates to the specified target content location.
         /// </summary>
         /// <param name="target">The target.</param>
-        public void Navigate(ContentTreeNode target)
+        public void Navigate(ContentFolderTreeNode target)
         {
             Navigate(SelectedNode, target);
         }
 
-        private void Navigate(ContentTreeNode source, ContentTreeNode target)
+        private void Navigate(ContentFolderTreeNode source, ContentFolderTreeNode target)
         {
             if (target == null)
                 target = _root;
@@ -50,7 +76,8 @@ namespace FlaxEditor.Windows
                 }
 
                 // Show folder contents and select tree node
-                RefreshView(target);
+                if (!_showAllContentInTree)
+                    RefreshView(target);
                 _tree.Select(target);
                 target.ExpandAllParents();
 
@@ -62,7 +89,8 @@ namespace FlaxEditor.Windows
                 //UndoList.SetSize(32);
 
                 // Update search
-                UpdateItemsSearch();
+                if (!_showAllContentInTree)
+                    UpdateItemsSearch();
 
                 // Unlock navigation
                 _navigationUnlocked = true;
@@ -81,7 +109,7 @@ namespace FlaxEditor.Windows
             if (_navigationUnlocked && _navigationUndo.Count > 0)
             {
                 // Pop node
-                ContentTreeNode node = _navigationUndo.Pop();
+                ContentFolderTreeNode node = _navigationUndo.Pop();
 
                 // Lock navigation
                 _navigationUnlocked = false;
@@ -90,7 +118,8 @@ namespace FlaxEditor.Windows
                 _navigationRedo.Push(SelectedNode);
 
                 // Select node
-                RefreshView(node);
+                if (!_showAllContentInTree)
+                    RefreshView(node);
                 _tree.Select(node);
                 node.ExpandAllParents();
 
@@ -99,14 +128,16 @@ namespace FlaxEditor.Windows
                 //UndoList.SetSize(32);
 
                 // Update search
-                UpdateItemsSearch();
+                if (!_showAllContentInTree)
+                    UpdateItemsSearch();
 
                 // Unlock navigation
                 _navigationUnlocked = true;
 
                 // Update UI
                 UpdateUI();
-                _view.SelectFirstItem();
+                if (!_showAllContentInTree)
+                    _view.SelectFirstItem();
             }
         }
 
@@ -119,7 +150,7 @@ namespace FlaxEditor.Windows
             if (_navigationUnlocked && _navigationRedo.Count > 0)
             {
                 // Pop node
-                ContentTreeNode node = _navigationRedo.Pop();
+                ContentFolderTreeNode node = _navigationRedo.Pop();
 
                 // Lock navigation
                 _navigationUnlocked = false;
@@ -128,7 +159,8 @@ namespace FlaxEditor.Windows
                 _navigationUndo.Push(SelectedNode);
 
                 // Select node
-                RefreshView(node);
+                if (!_showAllContentInTree)
+                    RefreshView(node);
                 _tree.Select(node);
                 node.ExpandAllParents();
 
@@ -137,14 +169,16 @@ namespace FlaxEditor.Windows
                 //UndoList.SetSize(32);
 
                 // Update search
-                UpdateItemsSearch();
+                if (!_showAllContentInTree)
+                    UpdateItemsSearch();
 
                 // Unlock navigation
                 _navigationUnlocked = true;
 
                 // Update UI
                 UpdateUI();
-                _view.SelectFirstItem();
+                if (!_showAllContentInTree)
+                    _view.SelectFirstItem();
             }
         }
 
@@ -153,8 +187,8 @@ namespace FlaxEditor.Windows
         /// </summary>
         public void NavigateUp()
         {
-            ContentTreeNode target = _root;
-            ContentTreeNode current = SelectedNode;
+            ContentFolderTreeNode target = _root;
+            ContentFolderTreeNode current = SelectedNode;
 
             if (current?.Folder.ParentFolder != null)
             {
@@ -188,23 +222,24 @@ namespace FlaxEditor.Windows
             // Spawn buttons
             var nodes = NavUpdateCache;
             nodes.Clear();
-            ContentTreeNode node = SelectedNode;
+            ContentFolderTreeNode node = SelectedNode;
             while (node != null)
             {
                 nodes.Add(node);
                 node = node.ParentNode;
             }
+            float margin = 1;
             float x = NavigationBar.DefaultButtonsMargin;
-            float h = _toolStrip.ItemsHeight - 2 * ToolStrip.DefaultMarginV;
+            float h = _toolStrip.ItemsHeight - 2 * margin;
             for (int i = nodes.Count - 1; i >= 0; i--)
             {
-                var button = new ContentNavigationButton(nodes[i], x, ToolStrip.DefaultMarginV, h);
+                var button = new ContentNavigationButton(nodes[i], x, margin, h);
                 button.PerformLayout();
                 x += button.Width + NavigationBar.DefaultButtonsMargin;
                 _navigationBar.AddChild(button);
                 if (i > 0)
                 {
-                    var separator = new ContentNavigationSeparator(button, x, ToolStrip.DefaultMarginV, h);
+                    var separator = new ContentNavigationSeparator(button, x, margin, h);
                     separator.PerformLayout();
                     x += separator.Width + NavigationBar.DefaultButtonsMargin;
                     _navigationBar.AddChild(separator);
@@ -215,17 +250,36 @@ namespace FlaxEditor.Windows
             // Update
             _navigationBar.IsLayoutLocked = wasLayoutLocked;
             _navigationBar.PerformLayout();
+            UpdateNavigationBarBounds();
         }
 
         /// <summary>
         /// Gets the selected tree node.
         /// </summary>
-        public ContentTreeNode SelectedNode => _tree.SelectedNode as ContentTreeNode;
+        public ContentFolderTreeNode SelectedNode
+        {
+            get
+            {
+                var selected = GetActiveTreeSelection(_tree.Selection);
+                if (selected is ContentItemTreeNode itemNode)
+                    return itemNode.Parent as ContentFolderTreeNode;
+                return selected as ContentFolderTreeNode;
+            }
+        }
 
         /// <summary>
         /// Gets the current view folder.
         /// </summary>
         public ContentFolder CurrentViewFolder => SelectedNode?.Folder;
+
+        private TreeNode GetActiveTreeSelection(List<TreeNode> selection)
+        {
+            if (selection == null || selection.Count == 0)
+                return null;
+            return _showAllContentInTree && selection.Count > 1
+                ? selection[^1]
+                : selection[0];
+        }
 
         /// <summary>
         /// Shows the root folder.
@@ -233,6 +287,11 @@ namespace FlaxEditor.Windows
         public void ShowRoot()
         {
             _tree.Select(_root);
+        }
+
+        private void SaveLastViewedFolder(ContentFolderTreeNode node)
+        {
+            Editor.ProjectCache.SetCustomData(ProjectDataLastViewedFolder, node?.Path ?? string.Empty);
         }
     }
 }

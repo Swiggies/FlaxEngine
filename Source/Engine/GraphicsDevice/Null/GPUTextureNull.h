@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -30,6 +30,10 @@ public:
         return nullptr;
     }
     GPUTextureView* ViewReadOnlyDepth() const override
+    {
+        return nullptr;
+    }
+    GPUTextureView* ViewStencil() const override
     {
         return nullptr;
     }

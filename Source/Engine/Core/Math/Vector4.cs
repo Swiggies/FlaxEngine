@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -72,7 +72,7 @@ namespace FlaxEngine
 #if FLAX_EDITOR
     [System.ComponentModel.TypeConverter(typeof(TypeConverters.Vector4Converter))]
 #endif
-    public partial struct Vector4 : IEquatable<Vector4>, IFormattable
+    public partial struct Vector4 : IEquatable<Vector4>, IFormattable, Json.ICustomValueEquals
     {
         private static readonly string _formatString = "X:{0:F2} Y:{1:F2} Z:{2:F2} W:{3:F2}";
 
@@ -259,6 +259,19 @@ namespace FlaxEngine
         /// Gets a value indicting whether this instance is normalized.
         /// </summary>
         public bool IsNormalized => Mathr.Abs((X * X + Y * Y + Z * Z + W * W) - 1.0f) < 1e-4f;
+
+        /// <summary>
+        /// Gets the normalized vector. Returned vector has length equal 1.
+        /// </summary>
+        public Vector4 Normalized
+        {
+            get
+            {
+                Vector4 vector4 = this;
+                vector4.Normalize();
+                return vector4;
+            }
+        }
 
         /// <summary>
         /// Gets a value indicting whether this vector is zero
@@ -879,6 +892,33 @@ namespace FlaxEngine
         }
 
         /// <summary>
+        /// Performs a spherical linear interpolation between two vectors.
+        /// </summary>
+        /// <param name="start">Start vector.</param>
+        /// <param name="end">End vector.</param>
+        /// <param name="amount">Value between 0 and 1 indicating the weight of <paramref name="end" />.</param>
+        /// <param name="result">When the method completes, contains the linear interpolation of the two vectors.</param>
+        public static void Slerp(ref Vector4 start, ref Vector4 end, Real amount, out Vector4 result)
+        {
+            var dot = Mathr.Clamp(Dot(start, end), -1.0f, 1.0f);
+            var theta = Mathr.Acos(dot) * amount;
+            Vector4 relativeVector = (end - start * dot).Normalized;
+            result = ((start * Mathr.Cos(theta)) + (relativeVector * Mathr.Sin(theta)));
+        }
+
+        /// <summary>
+        /// Performs a spherical linear interpolation between two vectors.
+        /// </summary>
+        /// <param name="start">Start vector.</param>
+        /// <param name="end">End vector.</param>
+        /// <param name="amount">Value between 0 and 1 indicating the weight of <paramref name="end" />.</param>
+        public static Vector4 Slerp(Vector4 start, Vector4 end, Real amount)
+        {
+            Slerp(ref start, ref end, amount, out var result);
+            return result;
+        }
+
+        /// <summary>
         /// Performs a cubic interpolation between two vectors.
         /// </summary>
         /// <param name="start">Start vector.</param>
@@ -1362,7 +1402,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(Vector4 left, Vector4 right)
         {
-            return Mathr.NearEqual(left.X, right.X) && Mathr.NearEqual(left.Y, right.Y) && Mathr.NearEqual(left.Z, right.Z) && Mathr.NearEqual(left.W, right.W);
+            return left.Equals(ref right);
         }
 
         /// <summary>
@@ -1486,6 +1526,13 @@ namespace FlaxEngine
             }
         }
 
+        /// <inheritdoc />
+        public bool ValueEquals(object other)
+        {
+            var o = (Vector4)other;
+            return Equals(ref o);
+        }
+
         /// <summary>
         /// Determines whether the specified <see cref="Vector4" /> is equal to this instance.
         /// </summary>
@@ -1493,7 +1540,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="Vector4" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public bool Equals(ref Vector4 other)
         {
-            return Mathr.NearEqual(other.X, X) && Mathr.NearEqual(other.Y, Y) && Mathr.NearEqual(other.Z, Z) && Mathr.NearEqual(other.W, W);
+            return X == other.X && Y == other.Y && Z == other.Z && W == other.W;
         }
 
         /// <summary>
@@ -1504,7 +1551,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(Vector4 other)
         {
-            return Mathr.NearEqual(other.X, X) && Mathr.NearEqual(other.Y, Y) && Mathr.NearEqual(other.Z, Z) && Mathr.NearEqual(other.W, W);
+            return Equals(ref other);
         }
 
         /// <summary>
@@ -1514,7 +1561,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public override bool Equals(object value)
         {
-            return value is Vector4 other && Mathr.NearEqual(other.X, X) && Mathr.NearEqual(other.Y, Y) && Mathr.NearEqual(other.Z, Z) && Mathr.NearEqual(other.W, W);
+            return value is Vector4 other && Equals(ref other);
         }
     }
 }

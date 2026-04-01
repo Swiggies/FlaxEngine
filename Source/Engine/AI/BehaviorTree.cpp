@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "BehaviorTree.h"
 #include "BehaviorTreeNode.h"
@@ -10,9 +10,11 @@
 #include "Engine/Serialization/JsonSerializer.h"
 #include "Engine/Serialization/MemoryReadStream.h"
 #include "Engine/Threading/Threading.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "FlaxEngine.Gen.h"
 #if USE_EDITOR
 #include "Engine/Level/Level.h"
+#include "Engine/Serialization/MemoryWriteStream.h"
 #endif
 
 REGISTER_BINARY_ASSET(BehaviorTree, "FlaxEngine.BehaviorTree", false);
@@ -164,7 +166,7 @@ BehaviorTreeNode* BehaviorTree::GetNodeInstance(uint32 id)
     return nullptr;
 }
 
-BytesContainer BehaviorTree::LoadSurface()
+BytesContainer BehaviorTree::LoadSurface() const
 {
     if (WaitForLoaded())
         return BytesContainer();
@@ -182,19 +184,10 @@ BytesContainer BehaviorTree::LoadSurface()
 
 #if USE_EDITOR
 
-bool BehaviorTree::SaveSurface(const BytesContainer& data)
+bool BehaviorTree::SaveSurface(const BytesContainer& data) const
 {
-    // Wait for asset to be loaded or don't if last load failed
-    if (LastLoadFailed())
-    {
-        LOG(Warning, "Saving asset that failed to load.");
-    }
-    else if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave())
         return true;
-    }
-
     ScopeLock lock(Locker);
 
     // Set Visject Surface data
@@ -250,6 +243,19 @@ void BehaviorTree::GetReferences(Array<Guid>& assets, Array<String>& files) cons
     }
 }
 
+bool BehaviorTree::Save(const StringView& path)
+{
+    if (OnCheckSave(path))
+        return true;
+    ScopeLock lock(Locker);
+    MemoryWriteStream stream;
+    if (Graph.Save(&stream, true))
+        return true;
+    BytesContainer data;
+    data.Link(ToSpan(stream));
+    return SaveSurface(data);
+}
+
 #endif
 
 void BehaviorTree::OnScriptingDispose()
@@ -270,6 +276,7 @@ Asset::LoadResult BehaviorTree::load()
     if (surfaceChunk == nullptr)
         return LoadResult::MissingDataChunk;
     MemoryReadStream surfaceStream(surfaceChunk->Get(), surfaceChunk->Size());
+    PROFILE_MEM(AI);
     if (Graph.Load(&surfaceStream, true))
     {
         LOG(Warning, "Failed to load graph \'{0}\'", ToString());

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -148,7 +148,7 @@ public:
         const ::DrawCall* DrawCall = nullptr;
         MaterialParamsLink* ParamsLink = nullptr;
         void* CustomData = nullptr;
-        float TimeParam;
+        float Time, ScaledTime;
         bool Instanced = false;
 
         /// <summary>
@@ -156,8 +156,8 @@ public:
         /// </summary>
         GPUTextureView* Input = nullptr;
 
-        BindParameters(::GPUContext* context, const ::RenderContext& renderContext);
-        BindParameters(::GPUContext* context, const ::RenderContext& renderContext, const ::DrawCall& drawCall, bool instanced = false);
+        FLAXENGINE_API BindParameters(::GPUContext* context, const ::RenderContext& renderContext);
+        FLAXENGINE_API BindParameters(::GPUContext* context, const ::RenderContext& renderContext, const ::DrawCall& drawCall, bool instanced = false);
 
         // Per-view shared constant buffer (see ViewData in MaterialCommon.hlsl).
         static GPUConstantBuffer* PerViewConstants;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.ComponentModel;
@@ -166,8 +166,26 @@ namespace FlaxEngine.GUI
         [NoSerialize, HideInEditor]
         public Float2 LocalLocation
         {
-            get => _bounds.Location - (_parent != null ? _parent._bounds.Size * (_anchorMax + _anchorMin) * 0.5f : Float2.Zero) + _bounds.Size * _pivot;
-            set => Bounds = new Rectangle(value + (_parent != null ? _parent.Bounds.Size * (_anchorMax + _anchorMin) * 0.5f : Float2.Zero) - _bounds.Size * _pivot, _bounds.Size);
+            get
+            {
+                var anchor = Float2.Zero;
+                if (_parent != null)
+                {
+                    _parent.GetDesireClientArea(out var parentBounds);
+                    anchor = parentBounds.Location + parentBounds.Size * (_anchorMin + _anchorMax) * 0.5f;
+                }
+                return _bounds.Location - anchor + _bounds.Size * _pivot;
+            }
+            set
+            {
+                var anchor = Float2.Zero;
+                if (_parent != null)
+                {
+                    _parent.GetDesireClientArea(out var parentBounds);
+                    anchor = parentBounds.Location + parentBounds.Size * (_anchorMin + _anchorMax) * 0.5f;
+                }
+                Bounds = new Rectangle(value + anchor - _bounds.Size * _pivot, _bounds.Size);
+            }
         }
 
         /// <summary>
@@ -417,6 +435,19 @@ namespace FlaxEngine.GUI
                     SetRotationInternal(value);
                 }
             }
+        }
+
+        /// <summary>
+        /// Resizes the control based on where the pivot is rather than just the top-left.
+        /// </summary>
+        [NoAnimate]
+        public void Resize(ref Float2 value)
+        {
+            if (_bounds.Size.Equals(ref value))
+                return;
+            var bounds = new Rectangle(_bounds.Location, value);
+            bounds.Location += (_bounds.Size - value) * Pivot; // Pivot-relative resizing
+            SetBounds(ref bounds);
         }
 
         /// <summary>

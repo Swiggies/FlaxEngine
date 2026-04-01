@@ -4,6 +4,7 @@ on: [push, pull_request]
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: false
+  DOTNET_ROLL_FORWARD: 'minor'
 
 jobs:
 
@@ -28,7 +29,8 @@ jobs:
         git lfs pull
     - name: Install dependencies
       run: |
-        sudo apt-get install libx11-dev libxcursor-dev libxinerama-dev build-essential gettext libtool libtool-bin libpulse-dev libasound2-dev libjack-dev portaudio19-dev
+        sudo apt-get update
+        sudo apt-get install -y --fix-missing libx11-dev libxcursor-dev libxinerama-dev build-essential gettext libtool libtool-bin libpulse-dev libasound2-dev libjack-dev portaudio19-dev
     - name: Build
       run: |
         ./GenerateProjectFiles.sh -vs2022 -log -verbose -printSDKs -dotnet=8
@@ -58,7 +60,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: 8.0.x
+        dotnet-version: 8.0.419
     - name: Print .NET info
       run: |
         dotnet --info
@@ -69,12 +71,18 @@ jobs:
         git lfs pull
     - name: Build
       run: |
+        PowerShell "(Get-Content global.json).Replace('latestMajor', 'minor') | Set-Content global.json"
+        PowerShell "(Get-Content Source/Tools/Flax.Build/global.json).Replace('latestMajor', 'minor') | Set-Content Source/Tools/Flax.Build/global.json"
+        PowerShell "(Get-Content Source/Tools/Flax.Build/Flax.Build.csproj).Replace('LatestMajor', 'Minor') | Set-Content Source/Tools/Flax.Build/Flax.Build.csproj"
         .\GenerateProjectFiles.bat -vs2022 -log -verbose -printSDKs -dotnet=8
         .\Development\Scripts\Windows\CallBuildTool.bat -build -log -dotnet=8 -arch=x64 -platform=Windows -configuration=Development -buildtargets=FlaxTestsTarget
         dotnet msbuild Source\Tools\Flax.Build.Tests\Flax.Build.Tests.csproj /m /t:Restore,Build /p:Configuration=Debug /p:Platform=AnyCPU /nologo
     - name: Test
+      shell: pwsh
       run: |
+        $ErrorActionPreference = "Stop"
         .\Binaries\Editor\Win64\Development\FlaxTests.exe
+        if(!$?) { Write-Host "Tests failed with exit code $LastExitCode" -ForegroundColor Red; Exit $LastExitCode }
         dotnet test -f net8.0 Binaries\Tests\Flax.Build.Tests.dll
         xcopy /y Binaries\Editor\Win64\Development\FlaxEngine.CSharp.dll Binaries\Tests
         xcopy /y Binaries\Editor\Win64\Development\FlaxEngine.CSharp.runtimeconfig.json Binaries\Tests

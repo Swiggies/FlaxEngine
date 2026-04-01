@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 // -----------------------------------------------------------------------------
 // Original code from SharpDX project. https://github.com/sharpdx/SharpDX/
@@ -60,7 +60,7 @@ namespace FlaxEngine
 #if FLAX_EDITOR
     [System.ComponentModel.TypeConverter(typeof(TypeConverters.Float4Converter))]
 #endif
-    partial struct Float4 : IEquatable<Float4>, IFormattable
+    partial struct Float4 : IEquatable<Float4>, IFormattable, Json.ICustomValueEquals
     {
         private static readonly string _formatString = "X:{0:F2} Y:{1:F2} Z:{2:F2} W:{3:F2}";
 
@@ -1288,7 +1288,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(Float4 left, Float4 right)
         {
-            return Mathf.NearEqual(left.X, right.X) && Mathf.NearEqual(left.Y, right.Y) && Mathf.NearEqual(left.Z, right.Z) && Mathf.NearEqual(left.W, right.W);
+            return left.Equals(ref right);
         }
 
         /// <summary>
@@ -1341,6 +1341,16 @@ namespace FlaxEngine
         public static explicit operator Float3(Float4 value)
         {
             return new Float3(value.X, value.Y, value.Z);
+        }
+
+        /// <summary>
+        /// Performs an explicit conversion from <see cref="Float4" /> to <see cref="Int4" />.
+        /// </summary>
+        /// <param name="value">The value.</param>
+        /// <returns>The result of the conversion.</returns>
+        public static implicit operator Int4(Float4 value)
+        {
+            return new Int4((int)value.X, (int)value.Y, (int)value.Z, (int)value.W);
         }
 
         /// <summary>
@@ -1402,6 +1412,13 @@ namespace FlaxEngine
             }
         }
 
+        /// <inheritdoc />
+        public bool ValueEquals(object other)
+        {
+            var o = (Float4)other;
+            return Equals(ref o);
+        }
+
         /// <summary>
         /// Determines whether the specified <see cref="Float4" /> is equal to this instance.
         /// </summary>
@@ -1409,7 +1426,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="Float4" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public bool Equals(ref Float4 other)
         {
-            return Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y) && Mathf.NearEqual(other.Z, Z) && Mathf.NearEqual(other.W, W);
+            return X == other.X && Y == other.Y && Z == other.Z && W == other.W;
         }
 
         /// <summary>
@@ -1420,7 +1437,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(Float4 other)
         {
-            return Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y) && Mathf.NearEqual(other.Z, Z) && Mathf.NearEqual(other.W, W);
+            return Equals(ref other);
         }
 
         /// <summary>
@@ -1430,7 +1447,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public override bool Equals(object value)
         {
-            return value is Float4 other && Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y) && Mathf.NearEqual(other.Z, Z) && Mathf.NearEqual(other.W, W);
+            return value is Float4 other && Equals(ref other);
         }
     }
 }

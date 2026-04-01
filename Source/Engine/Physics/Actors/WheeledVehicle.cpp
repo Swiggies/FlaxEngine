@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "WheeledVehicle.h"
-#include "Engine/Physics/Physics.h"
 #include "Engine/Level/Scene/Scene.h"
+#include "Engine/Physics/Physics.h"
 #include "Engine/Physics/PhysicsBackend.h"
 #include "Engine/Physics/PhysicsScene.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Serialization/Serialization.h"
 #if USE_EDITOR
 #include "Engine/Level/Scene/SceneRendering.h"
@@ -190,7 +191,7 @@ void WheeledVehicle::SetThrottle(float value)
     _throttle = Math::Clamp(value, -1.0f, 1.0f);
 }
 
-float WheeledVehicle::GetThrottle()
+float WheeledVehicle::GetThrottle() const
 {
     return _throttle;
 }
@@ -198,6 +199,11 @@ float WheeledVehicle::GetThrottle()
 void WheeledVehicle::SetSteering(float value)
 {
     _steering = Math::Clamp(value, -1.0f, 1.0f);
+}
+
+float WheeledVehicle::GetSteering()
+{
+    return _steering;
 }
 
 void WheeledVehicle::SetBrake(float value)
@@ -208,9 +214,19 @@ void WheeledVehicle::SetBrake(float value)
     _tankRightBrake = value;
 }
 
+float WheeledVehicle::GetBrake()
+{
+    return _brake;
+}
+
 void WheeledVehicle::SetHandbrake(float value)
 {
     _handBrake = Math::Saturate(value);
+}
+
+float WheeledVehicle::GetHandbrake()
+{
+    return _handBrake;
 }
 
 void WheeledVehicle::SetTankLeftThrottle(float value)
@@ -355,19 +371,19 @@ void WheeledVehicle::Setup()
 void WheeledVehicle::DrawPhysicsDebug(RenderView& view)
 {
     // Wheels shapes
-    for (const auto& data : _wheelsData)
+    for (const auto& wheel : _wheels)
     {
-        int32 wheelIndex = 0;
-        for (; wheelIndex < _wheels.Count(); wheelIndex++)
-        {
-            if (_wheels[wheelIndex].Collider == data.Collider)
-                break;
-        }
-        if (wheelIndex == _wheels.Count())
-            break;
-        const auto& wheel = _wheels[wheelIndex];
         if (wheel.Collider && wheel.Collider->GetParent() == this && !wheel.Collider->GetIsTrigger())
         {
+            WheelData data = { wheel.Collider, wheel.Collider->GetLocalOrientation() };
+            for (auto& e : _wheelsData)
+            {
+                if (e.Collider == data.Collider)
+                {
+                    data = e;
+                    break;
+                }
+            }
             const Vector3 currentPos = wheel.Collider->GetPosition();
             const Vector3 basePos = currentPos - Vector3(0, data.State.SuspensionOffset, 0);
             const Quaternion wheelDebugOrientation = GetOrientation() * Quaternion::Euler(-data.State.RotationAngle, data.State.SteerAngle, 0) * Quaternion::Euler(90, 0, 90);
@@ -386,25 +402,29 @@ void WheeledVehicle::DrawPhysicsDebug(RenderView& view)
 void WheeledVehicle::OnDebugDrawSelected()
 {
     // Wheels shapes
-    for (const auto& data : _wheelsData)
+    int32 wheelIndex = 0;
+    for (const auto& wheel : _wheels)
     {
-        int32 wheelIndex = 0;
-        for (; wheelIndex < _wheels.Count(); wheelIndex++)
-        {
-            if (_wheels[wheelIndex].Collider == data.Collider)
-                break;
-        }
-        if (wheelIndex == _wheels.Count())
-            break;
-        const auto& wheel = _wheels[wheelIndex];
         if (wheel.Collider && wheel.Collider->GetParent() == this && !wheel.Collider->GetIsTrigger())
         {
+            WheelData data = { wheel.Collider, wheel.Collider->GetLocalOrientation() };
+            for (auto& e : _wheelsData)
+            {
+                if (e.Collider == data.Collider)
+                {
+                    data = e;
+                    break;
+                }
+            }
             const Vector3 currentPos = wheel.Collider->GetPosition();
             const Vector3 basePos = currentPos - Vector3(0, data.State.SuspensionOffset, 0);
             const Quaternion wheelDebugOrientation = GetOrientation() * Quaternion::Euler(-data.State.RotationAngle, data.State.SteerAngle, 0) * Quaternion::Euler(90, 0, 90);
-            Transform actorPose = Transform::Identity, shapePose = Transform::Identity;
-            PhysicsBackend::GetRigidActorPose(_actor, actorPose.Translation, actorPose.Orientation);
-            PhysicsBackend::GetShapeLocalPose(wheel.Collider->GetPhysicsShape(), shapePose.Translation, shapePose.Orientation);
+            Transform actorPose = GetTransform(), shapePose = wheel.Collider->GetLocalTransform();
+            actorPose.Scale = Float3::One;
+            if (_actor)
+                PhysicsBackend::GetRigidActorPose(_actor, actorPose.Translation, actorPose.Orientation);
+            if (wheel.Collider->GetPhysicsShape())
+                PhysicsBackend::GetShapeLocalPose(wheel.Collider->GetPhysicsShape(), shapePose.Translation, shapePose.Orientation);
             DEBUG_DRAW_WIRE_SPHERE(BoundingSphere(basePos, wheel.Radius * 0.07f), Color::Blue * 0.3f, 0, false);
             DEBUG_DRAW_WIRE_SPHERE(BoundingSphere(currentPos, wheel.Radius * 0.08f), Color::Blue * 0.8f, 0, false);
             DEBUG_DRAW_WIRE_SPHERE(BoundingSphere(actorPose.LocalToWorld(shapePose.Translation), wheel.Radius * 0.11f), Color::OrangeRed * 0.8f, 0, false);
@@ -419,14 +439,20 @@ void WheeledVehicle::OnDebugDrawSelected()
             {
                 DEBUG_DRAW_WIRE_SPHERE(BoundingSphere(data.State.TireContactPoint, 5.0f), Color::Green, 0, false);
             }
+            if (ShowDebugDrawWheelNames)
+            {
+                const String text = String::Format(TEXT("Index: {}\nCollider: {}"), wheelIndex, wheel.Collider->GetName());
+                DEBUG_DRAW_TEXT(text, currentPos, Color::Blue, 10, 0);
+            }
         }
+        wheelIndex++;
     }
 
     // Anti roll bars axes
     const int32 wheelsCount = _wheels.Count();
-    for (int32 i = 0; i < GetAntiRollBars().Count(); i++)
+    for (int32 i = 0; i < _antiRollBars.Count(); i++)
     {
-        const int32 axleIndex = GetAntiRollBars()[i].Axle;
+        const int32 axleIndex = _antiRollBars[i].Axle;
         const int32 leftWheelIndex = axleIndex * 2;
         const int32 rightWheelIndex = leftWheelIndex + 1;
         if (leftWheelIndex >= wheelsCount || rightWheelIndex >= wheelsCount)
@@ -476,7 +502,11 @@ void WheeledVehicle::Deserialize(DeserializeStream& stream, ISerializeModifier* 
     DESERIALIZE_MEMBER(AntiRollBars, _antiRollBars);
 
     // [Deprecated on 13.06.2023, expires on 13.06.2025]
-    _fixInvalidForwardDir |= modifier->EngineBuild < 6341;
+    if (modifier->EngineBuild < 6341)
+    {
+        MARK_CONTENT_DEPRECATED();
+        _fixInvalidForwardDir = true;
+    }
 }
 
 void WheeledVehicle::OnColliderChanged(Collider* c)
@@ -556,14 +586,14 @@ void WheeledVehicle::BeginPlay(SceneBeginData* data)
 #endif
 
 #if USE_EDITOR
-    GetSceneRendering()->AddPhysicsDebug<WheeledVehicle, &WheeledVehicle::DrawPhysicsDebug>(this);
+    GetSceneRendering()->AddPhysicsDebug(this);
 #endif
 }
 
 void WheeledVehicle::EndPlay()
 {
 #if USE_EDITOR
-    GetSceneRendering()->RemovePhysicsDebug<WheeledVehicle, &WheeledVehicle::DrawPhysicsDebug>(this);
+    GetSceneRendering()->RemovePhysicsDebug(this);
 #endif
 
 #if WITH_VEHICLE

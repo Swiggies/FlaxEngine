@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Joint.h"
 #include "Engine/Serialization/Serialization.h"
@@ -24,7 +24,7 @@ Joint::Joint(const SpawnParams& params)
 
 void Joint::SetBreakForce(float value)
 {
-    if (Math::NearEqual(value, _breakForce))
+    if (value == _breakForce)
         return;
     _breakForce = value;
     if (_joint)
@@ -33,7 +33,7 @@ void Joint::SetBreakForce(float value)
 
 void Joint::SetBreakTorque(float value)
 {
-    if (Math::NearEqual(value, _breakTorque))
+    if (value == _breakTorque)
         return;
     _breakTorque = value;
     if (_joint)
@@ -61,7 +61,7 @@ void Joint::SetEnableAutoAnchor(bool value)
 
 void Joint::SetTargetAnchor(const Vector3& value)
 {
-    if (Vector3::NearEqual(value, _targetAnchor))
+    if (value == _targetAnchor)
         return;
     _targetAnchor = value;
     if (_joint && !_enableAutoAnchor)
@@ -298,7 +298,7 @@ void Joint::EndPlay()
 
 void Joint::OnEnable()
 {
-    GetSceneRendering()->AddPhysicsDebug<Joint, &Joint::DrawPhysicsDebug>(this);
+    GetSceneRendering()->AddPhysicsDebug(this);
 
     // Base
     Actor::OnEnable();
@@ -306,7 +306,7 @@ void Joint::OnEnable()
 
 void Joint::OnDisable()
 {
-    GetSceneRendering()->RemovePhysicsDebug<Joint, &Joint::DrawPhysicsDebug>(this);
+    GetSceneRendering()->RemovePhysicsDebug(this);
 
     // Base
     Actor::OnDisable();

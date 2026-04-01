@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -254,13 +254,29 @@ namespace FlaxEditor.Modules
             PrefabApplying?.Invoke(prefab, instance);
 
             // When applying changes to prefab from actor in level ignore it's root transformation (see ActorEditor.ProcessDiff)
+            Actor prefabRoot = null;
             var originalTransform = instance.LocalTransform;
-            if (instance.IsPrefabRoot && instance.HasScene)
-                instance.LocalTransform = prefab.GetDefaultInstance().Transform;
+            var originalName = instance.Name;
+            if (instance.HasScene)
+            {
+                prefabRoot = instance.GetPrefabRoot();
+                if (prefabRoot != null && prefabRoot.IsPrefabRoot && instance.HasScene)
+                {
+                    var defaultInstance = prefab.GetDefaultInstance();
+                    originalTransform = prefabRoot.LocalTransform;
+                    originalName = prefabRoot.Name;
+                    prefabRoot.LocalTransform = defaultInstance.Transform;
+                    prefabRoot.Name = defaultInstance.Name;
+                }
+            }
 
             // Call backend
             var failed = PrefabManager.Internal_ApplyAll(FlaxEngine.Object.GetUnmanagedPtr(instance));
-            instance.LocalTransform = originalTransform;
+            if (prefabRoot != null)
+            {
+                prefabRoot.LocalTransform = originalTransform;
+                prefabRoot.Name = originalName;
+            }
             if (failed)
                 throw new Exception("Failed to apply the prefab. See log to learn more.");
 

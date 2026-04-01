@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections;
@@ -36,6 +36,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
         {
             ScriptName = scriptName;
             TooltipText = "Create a new script";
+            DrawHighlights = false;
         }
     }
 
@@ -70,7 +71,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
             var buttonHeight = (textSize.Y < 18) ? 18 : textSize.Y + 4;
             _addScriptsButton = new Button
             {
-                TooltipText = "Add new scripts to the actor",
+                TooltipText = "Add new scripts to the actor.",
                 AnchorPreset = AnchorPresets.MiddleCenter,
                 Text = buttonText,
                 Parent = this,
@@ -102,11 +103,12 @@ namespace FlaxEditor.CustomEditors.Dedicated
                     var actors = ScriptsEditor.ParentEditor.Values;
                     foreach (var a in actors)
                     {
-                        if (a.GetType() != requireActor.RequiredType)
-                        {
-                            item.Enabled = false;
-                            break;
-                        }
+                        if (a.GetType() == requireActor.RequiredType)
+                            continue;
+                        if (requireActor.IncludeInheritedTypes && a.GetType().IsSubclassOf(requireActor.RequiredType))
+                            continue;
+                        item.Enabled = false;
+                        break;
                     }
                 }
                 cm.AddItem(item);
@@ -114,7 +116,16 @@ namespace FlaxEditor.CustomEditors.Dedicated
             cm.TextChanged += text =>
             {
                 if (!IsValidScriptName(text))
+                {
+                    // Remove NewScriptItems
+                    List<Control> newScriptItems = cm.ItemsPanel.Children.FindAll(c => c is NewScriptItem);
+                    foreach (var item in newScriptItems)
+                    {
+                        cm.ItemsPanel.RemoveChild(item);
+                    }
+
                     return;
+                }
                 if (!cm.ItemsPanel.Children.Any(x => x.Visible && x is not NewScriptItem))
                 {
                     // If there are no visible items, that means the search failed so we can find the create script button or create one if it's the first time
@@ -729,6 +740,8 @@ namespace FlaxEditor.CustomEditors.Dedicated
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
+            var style = FlaxEngine.GUI.Style.Current;
+
             // Area for drag&drop scripts
             var dragArea = layout.CustomContainer<DragAreaControl>();
             dragArea.CustomControl.ScriptsEditor = this;
@@ -790,17 +803,10 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 bool hasAllRequirements = true;
                 if (scriptType.HasAttribute(typeof(RequireScriptAttribute), false))
                 {
-                    RequireScriptAttribute scriptAttribute = null;
-                    foreach (var e in scriptType.GetAttributes(false))
+                    var attribute = (RequireScriptAttribute)scriptType.GetAttributes(false).FirstOrDefault(x => x is RequireScriptAttribute);
+                    if (attribute != null)
                     {
-                        if (e is not RequireScriptAttribute requireScriptAttribute)
-                            continue;
-                        scriptAttribute = requireScriptAttribute;
-                    }
-
-                    if (scriptAttribute != null)
-                    {
-                        foreach (var type in scriptAttribute.RequiredTypes)
+                        foreach (var type in attribute.RequiredTypes)
                         {
                             if (!type.IsSubclassOf(typeof(Script)))
                                 continue;
@@ -815,19 +821,11 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 }
                 if (scriptType.HasAttribute(typeof(RequireActorAttribute), false))
                 {
-                    RequireActorAttribute attribute = null;
-                    foreach (var e in scriptType.GetAttributes(false))
-                    {
-                        if (e is not RequireActorAttribute requireActorAttribute)
-                            continue;
-                        attribute = requireActorAttribute;
-                        break;
-                    }
-
+                    var attribute = (RequireActorAttribute)scriptType.GetAttributes(false).FirstOrDefault(x => x is RequireActorAttribute);
                     if (attribute != null)
                     {
                         var actor = script.Actor;
-                        if (actor.GetType() != attribute.RequiredType && !actor.GetType().IsSubclassOf(attribute.RequiredType))
+                        if (actor.GetType() != attribute.RequiredType && (attribute.IncludeInheritedTypes && !actor.GetType().IsSubclassOf(attribute.RequiredType)))
                         {
                             Editor.LogWarning($"`{Utilities.Utils.GetPropertyNameUI(scriptType.Name)}` on `{script.Actor}` is missing a required Actor of type `{attribute.RequiredType}`.");
                             hasAllRequirements = false;
@@ -840,7 +838,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 var title = Utilities.Utils.GetPropertyNameUI(scriptType.Name);
                 var group = layout.Group(title, editor);
                 if (!hasAllRequirements)
-                    group.Panel.HeaderTextColor = FlaxEngine.GUI.Style.Current.Statusbar.Failed;
+                    group.Panel.HeaderTextColor = style.Statusbar.Failed;
                 if ((Presenter.Features & FeatureFlags.CacheExpandedGroups) != 0)
                 {
                     if (Editor.Instance.ProjectCache.IsGroupToggled(title))
@@ -853,9 +851,10 @@ namespace FlaxEditor.CustomEditors.Dedicated
                     group.Panel.Open();
 
                 // Customize
+                float totalHeaderButtonsOffset = 0f;
                 group.Panel.TooltipText = Editor.Instance.CodeDocs.GetTooltip(scriptType);
                 if (script.HasPrefabLink)
-                    group.Panel.HeaderTextColor = FlaxEngine.GUI.Style.Current.ProgressNormal;
+                    group.Panel.HeaderTextColor = style.ProgressNormal;
 
                 // Add toggle button to the group
                 var headerHeight = group.Panel.HeaderHeight;
@@ -876,10 +875,10 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 // Add drag button to the group
                 var scriptDrag = new DragImage
                 {
-                    TooltipText = "Script reference",
+                    TooltipText = "Script reference.",
                     AutoFocus = true,
                     IsScrollable = false,
-                    Color = FlaxEngine.GUI.Style.Current.ForegroundGrey,
+                    Color = style.ForegroundGrey,
                     Parent = group.Panel,
                     Bounds = new Rectangle(scriptToggle.Right, 0.5f, headerHeight, headerHeight),
                     Margin = new Margin(1),
@@ -898,15 +897,43 @@ namespace FlaxEditor.CustomEditors.Dedicated
                 var settingsButton = group.AddSettingsButton();
                 settingsButton.Tag = script;
                 settingsButton.Clicked += OnSettingsButtonClicked;
+                totalHeaderButtonsOffset += settingsButton.Width + FlaxEditor.Utilities.Constants.UIMargin;
 
-                group.Panel.HeaderTextMargin = new Margin(scriptDrag.Right - 12, 15, 2, 2);
+                // Add script obsolete icon to the group
+                if (scriptType.HasAttribute(typeof(ObsoleteAttribute), false))
+                {
+                    var attribute = (ObsoleteAttribute)scriptType.GetAttributes(false).First(x => x is ObsoleteAttribute);
+                    var tooltip = "Script marked as obsolete." +
+                        (string.IsNullOrEmpty(attribute.Message) ? "" : $"\n{attribute.Message}") +
+                        (string.IsNullOrEmpty(attribute.DiagnosticId) ? "" : $"\n{attribute.DiagnosticId}");
+                    var obsoleteButton = group.AddHeaderButton(tooltip, totalHeaderButtonsOffset, Editor.Instance.Icons.Info32);
+                    obsoleteButton.Color = Color.Orange;
+                    obsoleteButton.MouseOverColor = Color.DarkOrange;
+                    totalHeaderButtonsOffset += obsoleteButton.Width;
+                }
+
+                // Show visual indicator if script only exists in prefab instance and is not part of the prefab
+                bool isPrefabActor = scripts.Any(s => s.Actor.HasPrefabLink);
+                if (isPrefabActor && script.PrefabID == Guid.Empty)
+                {
+                    var prefabInstanceButton = group.AddHeaderButton("Script only exists in this prefab instance.", totalHeaderButtonsOffset, Editor.Instance.Icons.Add32);
+                    prefabInstanceButton.Color = style.ProgressNormal;
+                    prefabInstanceButton.MouseOverColor = style.ProgressNormal * 0.9f;
+                    totalHeaderButtonsOffset += prefabInstanceButton.Width;
+                }
+
+                // Adjust margin to not overlap with other ui elements in the header
+                group.Panel.HeaderTextMargin = group.Panel.HeaderTextMargin with { Left = scriptDrag.Right - 12, Right = settingsButton.Width + Utilities.Constants.UIMargin };
                 group.Object(values, editor);
+
                 // Remove drop down arrows and containment lines if no objects in the group
                 if (group.Children.Count == 0)
                 {
+                    group.Panel.Close();
                     group.Panel.ArrowImageOpened = null;
                     group.Panel.ArrowImageClosed = null;
                     group.Panel.EnableContainmentLines = false;
+                    group.Panel.CanOpenClose = false;
                 }
 
                 // Scripts arrange bar
@@ -1057,6 +1084,7 @@ namespace FlaxEditor.CustomEditors.Dedicated
         protected override void Deinitialize()
         {
             _scriptToggles = null;
+            _scripts.Clear();
 
             base.Deinitialize();
         }

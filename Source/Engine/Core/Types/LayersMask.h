@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -27,12 +27,29 @@ public:
     {
     }
 
+    /// <summary>
+    /// Determines whether the specified layer index is set in the mask.
+    /// </summary>
+    /// <param name="layerIndex">Index of the layer (zero-based).</param>
+    /// <returns><c>true</c> if the specified layer is set; otherwise, <c>false</c>.</returns>
     FORCE_INLINE bool HasLayer(int32 layerIndex) const
     {
         return (Mask & (1 << layerIndex)) != 0;
     }
 
+    /// <summary>
+    /// Determines whether the specified layer name is set in the mask.
+    /// </summary>
+    /// <param name="layerName">Name of the layer (from Layers settings).</param>
+    /// <returns><c>true</c> if the specified layer is set; otherwise, <c>false</c>.</returns>
     bool HasLayer(const StringView& layerName) const;
+
+    /// <summary>
+    /// Gets a layers mask from a specific layer name.
+    /// </summary>
+    /// <param name="layerNames">The names of the layers (from Layers settings).</param>
+    /// <returns>A layers mask with the Mask set to the same Mask as the layer name passed in. Returns a LayersMask with a mask of 0 if no layer found.</returns>
+    static LayersMask GetMask(Span<StringView> layerNames);
 
     operator uint32() const
     {
@@ -77,6 +94,29 @@ public:
     LayersMask operator-() const
     {
         return ~Mask;
+    }
+
+    LayersMask operator~() const
+    {
+        return ~Mask;
+    }
+
+    LayersMask& operator|=(const LayersMask& other)
+    {
+        Mask |= other.Mask;
+        return *this;
+    }
+
+    LayersMask& operator&=(const LayersMask& other)
+    {
+        Mask &= other.Mask;
+        return *this;
+    }
+
+    LayersMask& operator^=(const LayersMask& other)
+    {
+        Mask ^= other.Mask;
+        return *this;
     }
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Prefab.h"
 
@@ -210,14 +210,26 @@ public:
             sceneObjects->At(index) = nullptr;
         return removed;
     }
+
+    static void SerializeObjects(const ActorsCache::SceneObjectsListType& sceneObjects, JsonWriter& writer)
+    {
+        PROFILE_CPU();
+        writer.StartArray();
+        for (int32 i = 0; i < sceneObjects.Count(); i++)
+        {
+            SceneObject* obj = sceneObjects[i];
+            writer.SceneObject(obj);
+        }
+        writer.EndArray();
+    }
 };
 
 void PrefabInstanceData::CollectPrefabInstances(PrefabInstancesData& prefabInstancesData, const Guid& prefabId, Actor* defaultInstance, Actor* targetActor)
 {
     ScopeLock lock(PrefabManager::PrefabsReferencesLocker);
-    if (PrefabManager::PrefabsReferences.ContainsKey(prefabId))
+    if (auto instancesPtr = PrefabManager::PrefabsReferences.TryGet(prefabId))
     {
-        auto& instances = PrefabManager::PrefabsReferences[prefabId];
+        auto& instances = *instancesPtr;
         int32 usedCount = 0;
         for (int32 instanceIndex = 0; instanceIndex < instances.Count(); instanceIndex++)
         {
@@ -264,14 +276,7 @@ void PrefabInstanceData::SerializePrefabInstances(PrefabInstancesData& prefabIns
         // Serialize
         tmpBuffer.Clear();
         CompactJsonWriter writerObj(tmpBuffer);
-        JsonWriter& writer = writerObj;
-        writer.StartArray();
-        for (int32 i = 0; i < sceneObjects->Count(); i++)
-        {
-            SceneObject* obj = sceneObjects.Value->At(i);
-            writer.SceneObject(obj);
-        }
-        writer.EndArray();
+        SerializeObjects(*sceneObjects.Value, writerObj);
 
         // Parse json to get DOM
         {
@@ -285,7 +290,7 @@ void PrefabInstanceData::SerializePrefabInstances(PrefabInstancesData& prefabIns
         }
 
         // Build acceleration table
-        instance.PrefabInstanceIdToDataIndex.EnsureCapacity(sceneObjects->Count() * 4);
+        instance.PrefabInstanceIdToDataIndex.EnsureCapacity(sceneObjects->Count());
         for (int32 i = 0; i < sceneObjects->Count(); i++)
         {
             SceneObject* obj = sceneObjects.Value->At(i);
@@ -299,6 +304,7 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
 {
     for (int32 instanceIndex = 0; instanceIndex < prefabInstancesData.Count(); instanceIndex++)
     {
+        PROFILE_CPU_NAMED("Instance");
         auto& instance = prefabInstancesData[instanceIndex];
         ISerializeModifierCacheType modifier = Cache::ISerializeModifier.Get();
         Scripting::ObjectsLookupIdMapping.Set(&modifier.Value->IdsMapping);
@@ -325,7 +331,7 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
         SceneQuery::GetAllSerializableSceneObjects(instance.TargetActor, *sceneObjects.Value);
 
         int32 existingObjectsCount = sceneObjects->Count();
-        modifier->IdsMapping.EnsureCapacity((existingObjectsCount + newPrefabObjectIds.Count()) * 4);
+        modifier->IdsMapping.EnsureCapacity((existingObjectsCount + newPrefabObjectIds.Count()));
 
         // Map prefab objects to the prefab instance objects
         for (int32 i = 0; i < existingObjectsCount; i++)
@@ -372,6 +378,10 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
             sceneObjects->Add(obj);
         }
 
+        // Generate nested prefab instances to properly handle Ids Mapping within each nested prefab
+        SceneObjectsFactory::PrefabSyncData prefabSyncData(*sceneObjects.Value, instance.Data, modifier.Value);
+        SceneObjectsFactory::SetupPrefabInstances(context, prefabSyncData);
+
         // Apply modifications
         for (int32 i = existingObjectsCount - 1; i >= 0; i--)
         {
@@ -383,6 +393,7 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
                 if (prefabObjectIdToDiffData.TryGet(obj->GetPrefabObjectID(), data))
                 {
                     // Apply prefab changes
+                    context.SetupIdsMapping(obj, modifier.Value);
                     obj->Deserialize(*(ISerializable::DeserializeStream*)data, modifier.Value);
                 }
                 else
@@ -419,7 +430,6 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
         for (int32 i = 0; i < sceneObjects->Count(); i++)
         {
             SceneObject* obj = sceneObjects->At(i);
-
             int32 dataIndex;
             if (instance.PrefabInstanceIdToDataIndex.TryGet(obj->GetSceneObjectId(), dataIndex))
             {
@@ -435,6 +445,7 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
                 data.RemoveMember("ParentID");
 #endif
 
+                context.SetupIdsMapping(obj, modifier.Value);
                 obj->Deserialize(data, modifier.Value);
 
                 // Preserve order in parent (values from prefab are used)
@@ -522,6 +533,7 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
 {
     if (prefabInstancesData.IsEmpty())
         return false;
+    PROFILE_CPU();
 
     // Fully serialize default instance scene objects (accumulate all prefab and nested prefabs changes into a single linear list of objects)
     rapidjson_flax::Document defaultInstanceData;
@@ -588,7 +600,7 @@ bool PrefabInstanceData::SynchronizePrefabInstances(PrefabInstancesData& prefabI
 
     // Build cache data
     IdToDataLookupType prefabObjectIdToDiffData;
-    prefabObjectIdToDiffData.EnsureCapacity(defaultInstanceData.Size() * 3);
+    prefabObjectIdToDiffData.EnsureCapacity(defaultInstanceData.Size());
     for (int32 i = 0; i < sceneObjects->Count(); i++)
     {
         SceneObject* obj = sceneObjects.Value->At(i);
@@ -636,6 +648,11 @@ bool Prefab::ApplyAll(Actor* targetActor)
     if (GetDefaultInstance() == nullptr)
     {
         LOG(Warning, "Failed to create default prefab instance for the prefab asset.");
+        return true;
+    }
+    if (targetActor == _defaultInstance || targetActor->HasActorInHierarchy(_defaultInstance) || _defaultInstance->HasActorInHierarchy(targetActor))
+    {
+        LOG(Error, "Cannot apply changes to the prefab using default instance. Use manually spawned prefab instance instead.");
         return true;
     }
     if (targetActor->GetPrefabObjectID() != GetRootObjectId())
@@ -707,7 +724,7 @@ bool Prefab::ApplyAll(Actor* targetActor)
         for (int32 i = 0; i < nestedPrefabIds.Count(); i++)
         {
             const auto nestedPrefab = Content::LoadAsync<Prefab>(nestedPrefabIds[i]);
-            if (nestedPrefab && nestedPrefab != this && (nestedPrefab->Flags & ObjectFlags::WasMarkedToDelete) == ObjectFlags::None)
+            if (nestedPrefab && nestedPrefab != this && EnumHasNoneFlags(nestedPrefab->Flags, ObjectFlags::WasMarkedToDelete))
             {
                 allPrefabs.Add(nestedPrefab);
             }
@@ -754,6 +771,50 @@ bool Prefab::ApplyAll(Actor* targetActor)
     return false;
 }
 
+bool Prefab::Resave()
+{
+    if (OnCheckSave())
+        return true;
+    PROFILE_CPU_NAMED("Prefab.Resave");
+    ScopeLock lock(Locker);
+
+    Dictionary<Guid, Guid> objectIds;
+    objectIds.EnsureCapacity(ObjectsIds.Count());
+    for (int32 i = 0; i < ObjectsIds.Count(); i++)
+    {
+        Guid id = ObjectsIds[i];
+        objectIds.Add(id, id);
+    }
+    PrefabManager::SpawnOptions options;
+    options.WithLink = false;
+    options.IDs = &objectIds;
+    auto instance = PrefabManager::SpawnPrefab(this, options);
+    if (instance == nullptr)
+        return true;
+
+    // Serialize to json data
+    CollectionPoolCache<ActorsCache::SceneObjectsListType>::ScopeCache sceneObjects = ActorsCache::SceneObjectsListCache.Get();
+    SceneQuery::GetAllSerializableSceneObjects(instance, *sceneObjects.Value);
+    rapidjson_flax::StringBuffer dataBuffer;
+    {
+        PrettyJsonWriter writerObj(dataBuffer);
+        PrefabInstanceData::SerializeObjects(*sceneObjects.Value, writerObj);
+    }
+
+    // Remove temporary objects
+    instance->DeleteObject();
+    instance = nullptr;
+
+    // Save to file
+    if (CreateJson::Create(GetPath(), dataBuffer, TypeName))
+    {
+        LOG(Warning, "Failed to serialize prefab data to the asset.");
+        return true;
+    }
+
+    return false;
+}
+
 bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPrefab, PrefabInstancesData& prefabInstancesData)
 {
     PROFILE_CPU_NAMED("Prefab.Apply");
@@ -778,6 +839,29 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
         for (int32 i = 0; i < targetObjects->Count(); i++)
         {
             SceneObject* obj = targetObjects.Value->At(i);
+
+            // Check the whole chain of prefab references to be valid for this object
+            bool brokenPrefab = false;
+            Guid nestedPrefabId = obj->GetPrefabID(), nestedPrefabObjectId = obj->GetPrefabObjectID();
+            while (!brokenPrefab && nestedPrefabId.IsValid() && nestedPrefabObjectId.IsValid())
+            {
+                auto prefab = Content::Load<Prefab>(nestedPrefabId);
+                if (prefab)
+                {
+                    prefab->GetNestedObject(nestedPrefabObjectId, nestedPrefabId, nestedPrefabObjectId);
+                }
+                else
+                {
+                    LOG(Warning, "Missing prefab {0}.", nestedPrefabId);
+                    brokenPrefab = true;
+                }
+            }
+            if (brokenPrefab)
+            {
+                LOG(Warning, "Broken prefab reference on object {0}. Breaking linkage to inline object inside prefab.", GetObjectName(obj));
+                obj->BreakPrefabLink();
+            }
+
             writer.SceneObject(obj);
         }
         writer.EndArray();
@@ -787,8 +871,8 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
     rapidjson_flax::Document diffDataDocument;
     Dictionary<Guid, int32> diffPrefabObjectIdToDataIndex; // Maps Prefab Object Id -> Actor Data index in diffDataDocument json array (for actors/scripts to modify prefab)
     Dictionary<Guid, int32> newPrefabInstanceIdToDataIndex; // Maps Prefab Instance Id -> Actor Data index in diffDataDocument json array (for new actors/scripts to add to prefab), maps to -1 for scripts
-    diffPrefabObjectIdToDataIndex.EnsureCapacity(ObjectsCount * 4);
-    newPrefabInstanceIdToDataIndex.EnsureCapacity(ObjectsCount * 4);
+    diffPrefabObjectIdToDataIndex.EnsureCapacity(ObjectsCount);
+    newPrefabInstanceIdToDataIndex.EnsureCapacity(ObjectsCount);
     {
         // Parse json to DOM document
         {
@@ -809,7 +893,7 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
             SceneObject* obj = targetObjects.Value->At(i);
             auto data = it->GetObject();
 
-            // Check if object is from that prefab
+            // Check if object is from this prefab
             if (obj->GetPrefabID() == prefabId)
             {
                 if (!obj->GetPrefabObjectID().IsValid())
@@ -840,7 +924,7 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
 
         // Change object ids to match the prefab objects ids (helps with linking references in scripts)
         Dictionary<Guid, Guid> objectInstanceIdToPrefabObjectId;
-        objectInstanceIdToPrefabObjectId.EnsureCapacity(ObjectsCount * 3);
+        objectInstanceIdToPrefabObjectId.EnsureCapacity(ObjectsCount);
         i = 0;
         for (auto it = array.Begin(); it != array.End(); ++it, i++)
         {
@@ -854,7 +938,6 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
         // TODO: what if user applied prefab with references to the other objects from scene? clear them or what?
         JsonTools::ChangeIds(diffDataDocument, objectInstanceIdToPrefabObjectId);
     }
-    dataBuffer.Clear();
     CollectionPoolCache<ActorsCache::SceneObjectsListType>::ScopeCache sceneObjects = ActorsCache::SceneObjectsListCache.Get();
 
     // Destroy default instance and some cache data in Prefab
@@ -870,7 +953,7 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
         Scripting::ObjectsLookupIdMapping.Set(&modifier.Value->IdsMapping);
 
         // Generate new IDs for the added objects (objects in prefab has to have a unique Ids, other than the targetActor instance objects to prevent Id collisions)
-        newPrefabInstanceIdToPrefabObjectId.EnsureCapacity(newPrefabInstanceIdToDataIndex.Count() * 4);
+        newPrefabInstanceIdToPrefabObjectId.EnsureCapacity(newPrefabInstanceIdToDataIndex.Count());
         for (auto i = newPrefabInstanceIdToDataIndex.Begin(); i.IsNotEnd(); ++i)
         {
             const auto prefabObjectId = Guid::New();
@@ -883,7 +966,7 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
         {
             const SceneObject* obj = targetObjects->At(i);
 
-            // Check if object is from that prefab
+            // Check if object is from this prefab
             if (obj->GetPrefabID() == prefabId)
             {
                 // Map prefab instance to existing prefab object
@@ -930,6 +1013,32 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
             obj->RegisterObject();
         }
 
+        // Generate nested prefab instances to properly handle Ids Mapping within each nested prefab
+        rapidjson_flax::Document targetDataDocument;
+        if (NestedPrefabs.HasItems())
+        {
+            targetDataDocument.Parse(dataBuffer.GetString(), dataBuffer.GetSize());
+            SceneObjectsFactory::PrefabSyncData prefabSyncData(*sceneObjects.Value, targetDataDocument, modifier.Value);
+            SceneObjectsFactory::SetupPrefabInstances(context, prefabSyncData);
+
+            if (context.Instances.HasItems())
+            {
+                // Only main prefab instance is allowed (in case nested prefab was added to this prefab)
+                for (auto i = context.ObjectToInstance.Begin(); i.IsNotEnd(); ++i)
+                {
+                    if (i->Value != 0)
+                        context.ObjectToInstance.Remove(i);
+                }
+                context.Instances.Resize(1);
+
+                // Trash object mapping to prevent messing up prefab structure when applying hierarchy changes (only nested instances are used)
+                context.Instances[0].IdsMapping.Clear();
+            }
+        }
+
+        dataBuffer.Clear();
+        auto originalIdsMapping = modifier.Value->IdsMapping;
+
         // Deserialize prefab objects and apply modifications
         for (int32 i = 0; i < ObjectsCount; i++)
         {
@@ -964,6 +1073,9 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
                 PrefabInstanceData::DeletePrefabObject(obj, i, sceneObjects, false);
             }
         }
+
+        // Use the initial Ids Mapping (SetupIdsMapping overrides it for instanced prefabs)
+        modifier.Value->IdsMapping = originalIdsMapping;
 
         // Deserialize new prefab objects
         newPrefabInstanceIdToDataIndexCounter = 0;
@@ -1018,7 +1130,7 @@ bool Prefab::ApplyAllInternal(Actor* targetActor, bool linkTargetActorObjectToPr
                 root = dynamic_cast<Actor*>(sceneObjects.Value->At(targetActorIdx));
             }
 
-            // Try using the first actor without a parent as a new ro0t
+            // Try using the first actor without a parent as a new root
             for (int32 i = 1; i < sceneObjects->Count(); i++)
             {
                 SceneObject* obj = sceneObjects.Value->At(i);
@@ -1105,14 +1217,7 @@ bool Prefab::UpdateInternal(const Array<SceneObject*>& defaultInstanceObjects, r
     {
         tmpBuffer.Clear();
         PrettyJsonWriter writerObj(tmpBuffer);
-        JsonWriter& writer = writerObj;
-        writer.StartArray();
-        for (int32 i = 0; i < defaultInstanceObjects.Count(); i++)
-        {
-            auto obj = defaultInstanceObjects.At(i);
-            writer.SceneObject(obj);
-        }
-        writer.EndArray();
+        PrefabInstanceData::SerializeObjects(defaultInstanceObjects, writerObj);
     }
 
     LOG(Info, "Updating prefab data");
@@ -1201,9 +1306,9 @@ bool Prefab::UpdateInternal(const Array<SceneObject*>& defaultInstanceObjects, r
         const int32 objectsCount = Data->GetArray().Size();
         if (objectsCount <= 0)
             return true;
-        ObjectsIds.EnsureCapacity(objectsCount * 2);
+        ObjectsIds.EnsureCapacity(objectsCount);
         NestedPrefabs.EnsureCapacity(objectsCount);
-        ObjectsDataCache.EnsureCapacity(objectsCount * 3);
+        ObjectsDataCache.EnsureCapacity(objectsCount);
         const auto& data = *Data;
         for (int32 objectIndex = 0; objectIndex < objectsCount; objectIndex++)
         {
@@ -1218,12 +1323,16 @@ bool Prefab::UpdateInternal(const Array<SceneObject*>& defaultInstanceObjects, r
             ObjectsDataCache.Add(objectId, &objData);
             ObjectsCount++;
 
+            Guid parentID;
+            if (JsonTools::GetGuidIfValid(parentID, objData, "ParentID"))
+                ObjectsHierarchyCache[parentID].Add(objectId);
+
             Guid prefabId = JsonTools::GetGuid(objData, "PrefabID");
             if (prefabId.IsValid() && !NestedPrefabs.Contains(prefabId))
             {
                 if (prefabId == _id)
                 {
-                    LOG(Error, "Circural reference in prefab.");
+                    LOG(Error, "Circular reference in prefab.");
                     continue;
                 }
 

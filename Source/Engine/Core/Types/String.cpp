@@ -1,10 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "String.h"
 #include "StringView.h"
 #include "Engine/Core/Collections/Array.h"
 
-String String::Empty;
+const String String::Empty;
 
 String::String(const StringAnsi& str)
 {

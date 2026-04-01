@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -13,6 +13,7 @@ class MaterialShader;
 API_CLASS(NoSpawn) class FLAXENGINE_API Material : public ShaderAssetTypeBase<MaterialBase>
 {
     DECLARE_BINARY_ASSET_HEADER(Material, ShadersSerializedVersion);
+
 private:
     MaterialShader* _materialShader = nullptr;
 
@@ -25,7 +26,6 @@ public:
     API_FUNCTION() BytesContainer LoadSurface(bool createDefaultIfMissing);
 
 #if USE_EDITOR
-
     /// <summary>
     /// Updates the material surface (save new one, discard cached data, reload asset).
     /// </summary>
@@ -33,12 +33,14 @@ public:
     /// <param name="info">The material info structure.</param>
     /// <returns>True if cannot save it, otherwise false.</returns>
     API_FUNCTION() bool SaveSurface(const BytesContainer& data, const MaterialInfo& info);
-
 #endif
 
 public:
     // [MaterialBase]
     bool IsMaterialInstance() const override;
+#if USE_EDITOR
+    void GetReferences(Array<Guid>& assets, Array<String>& files) const override;
+#endif
 
     // [IMaterial]
     const MaterialInfo& GetInfo() const override;
@@ -52,6 +54,7 @@ public:
     // [ShaderAssetBase]
 #if USE_EDITOR
     void InitCompilationOptions(ShaderCompilationOptions& options) override;
+    bool Save(const StringView& path = StringView::Empty) override;
 #endif
 
 protected:

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "MaterialInstance.h"
 #include "Engine/Core/Log.h"
@@ -8,6 +8,9 @@
 #include "Engine/Content/Factories/BinaryAssetFactory.h"
 #include "Engine/Serialization/MemoryReadStream.h"
 #include "Engine/Threading/Threading.h"
+#if USE_EDITOR
+#include "Engine/Serialization/MemoryWriteStream.h"
+#endif
 
 REGISTER_BINARY_ASSET_WITH_UPGRADER(MaterialInstance, "FlaxEngine.MaterialInstance", MaterialInstanceUpgrader, true);
 
@@ -87,9 +90,11 @@ void MaterialInstance::OnBaseParamsChanged()
     // Get the newest parameters
     baseParams->Clone(Params);
 
+#if 0
     // Override all public parameters by default
     for (auto& param : Params)
         param.SetIsOverride(param.IsPublic());
+#endif
 
     // Copy previous parameters values
     for (int32 i = 0; i < oldParams.Count(); i++)
@@ -213,9 +218,17 @@ Asset::LoadResult MaterialInstance::load()
     Guid baseMaterialId;
     headerStream.Read(baseMaterialId);
     auto baseMaterial = Content::LoadAsync<MaterialBase>(baseMaterialId);
+    if (baseMaterial)
+        baseMaterial->AddReference();
 
     // Load parameters
-    Params.Load(&headerStream);
+    if (Params.Load(&headerStream))
+    {
+        if (baseMaterial)
+            baseMaterial->RemoveReference();
+        LOG(Warning, "Cannot load material parameters.");
+        return LoadResult::CannotLoadData;
+    }
 
     if (baseMaterial && !baseMaterial->WaitForLoaded())
     {
@@ -230,6 +243,8 @@ Asset::LoadResult MaterialInstance::load()
         ParamsChanged();
     }
 
+    if (baseMaterial)
+        baseMaterial->RemoveReference();
     return LoadResult::Ok;
 }
 
@@ -303,18 +318,8 @@ void MaterialInstance::ResetParameters()
 
 bool MaterialInstance::Save(const StringView& path)
 {
-    // Validate state
-    if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave(path))
         return true;
-    }
-    if (IsVirtual() && path.IsEmpty())
-    {
-        LOG(Error, "To save virtual asset asset you need to specify the target asset path location.");
-        return true;
-    }
-
     ScopeLock lock(Locker);
 
     // Save instance data
@@ -327,7 +332,7 @@ bool MaterialInstance::Save(const StringView& path)
         // Save parameters
         Params.Save(&stream);
     }
-    SetChunk(0, ToSpan(stream.GetHandle(), stream.GetPosition()));
+    SetChunk(0, ToSpan(stream));
 
     // Setup asset data
     AssetInitData data;

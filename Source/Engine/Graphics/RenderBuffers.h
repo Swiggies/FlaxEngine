@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -12,6 +12,17 @@
 #define GBUFFER1_FORMAT PixelFormat::R10G10B10A2_UNorm
 #define GBUFFER2_FORMAT PixelFormat::R8G8B8A8_UNorm
 #define GBUFFER3_FORMAT PixelFormat::R8G8B8A8_UNorm
+
+// Stencil bits usage (must match GBuffer.hlsl)
+// [0] | Object Layer
+// [1] | Object Layer
+// [2] | Object Layer
+// [3] | Object Layer
+// [4] | Object Layer
+// [5] | <unsued>
+// [6] | <unsued>
+// [7] | <unsued>
+#define STENCIL_BUFFER_OBJECT_LAYER(value) uint8(value & 0x1f)
 
 /// <summary>
 /// The scene rendering buffers container.
@@ -173,6 +184,12 @@ public:
     const T* FindCustomBuffer(const StringView& name, bool withLinked = true) const
     {
         return (const T*)FindCustomBuffer(name, withLinked);
+    }
+
+    template<class T>
+    const T* FindLinkedBuffer(const StringView& name) const
+    {
+        return LinkedCustomBuffers ? (const T*)LinkedCustomBuffers->FindCustomBuffer(name, true) : nullptr;
     }
 
     template<class T>

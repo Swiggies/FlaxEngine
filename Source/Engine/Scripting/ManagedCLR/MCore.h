@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -45,10 +45,21 @@ public:
     /// </summary>
     static void UnloadEngine();
 
+    /// <summary>
+    /// Creates the assembly load context for assemblies used by Scripting.
+    /// </summary>
+    static void CreateScriptingAssemblyLoadContext();
+
 #if USE_EDITOR
-    // Called by Scripting in a middle of hot-reload (after unloading modules but before loading them again).
-    static void ReloadScriptingAssemblyLoadContext();
+    /// <summary>
+    /// Called by Scripting in a middle of hot-reload (after unloading modules but before loading them again).
+    /// </summary>
+    static void UnloadScriptingAssemblyLoadContext();
 #endif
+
+    // Utility for guarding against using C# scripting runtime after shutdown (eg. when asset delegate is not properly disposed).
+    static bool Ready;
+    static void OnManagedEventAfterShutdown(const char* eventName);
 
 public:
     /// <summary>
@@ -115,6 +126,7 @@ public:
         static void Collect(int32 generation);
         static void Collect(int32 generation, MGCCollectionMode collectionMode, bool blocking, bool compacting);
         static int32 MaxGeneration();
+        static void MemoryInfo(int64& totalCommitted, int64& heapSize);
         static void WaitForPendingFinalizers();
         static void WriteRef(void* ptr, MObject* ref);
         static void WriteValue(void* dst, void* src, int32 count, const MClass* klass);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -412,3 +412,6 @@ struct TIsPODType<ProfilerCPU::Event>
 #define PROFILE_CPU_ACTOR(actor)
 
 #endif
+
+// CPU-wait zones can be marked with red color for better readability
+#define TracyWaitZoneColor 0xba1904

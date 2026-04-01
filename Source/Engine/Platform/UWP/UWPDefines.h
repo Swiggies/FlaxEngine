@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -8,6 +8,7 @@
 
 // Platform description
 #define PLATFORM_TYPE PlatformType::UWP
+#define PLATFORM_DESKTOP 1
 
 // Use AOT for Mono
 #define USE_MONO_AOT 1

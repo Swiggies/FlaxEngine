@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Linq;
 using FlaxEditor.CustomEditors.Elements;
@@ -27,7 +27,7 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            float trackBallSize = 80.0f;
+            float trackBallSize = 100f;
             float margin = 4.0f;
 
             // Panel
@@ -50,7 +50,7 @@ namespace FlaxEditor.CustomEditors.Editors
 
             // Scale editor
             {
-                var grid = masterPanel.CustomContainer<UniformGridPanel>();
+                var grid = masterPanel.UniformGrid();
                 var gridControl = grid.CustomControl;
                 gridControl.SlotPadding = new Margin(4, 2, 2, 2);
                 gridControl.ClipChildren = false;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_WINDOWS && !USE_EDITOR
 
@@ -9,8 +9,6 @@
 
 void WindowsGame::InitMainWindowSettings(CreateWindowSettings& settings)
 {
-    // TODO: restore window size and fullscreen mode from the cached local settings saved after previous session
-
     const auto platformSettings = WindowsPlatformSettings::Get();
     auto windowMode = platformSettings->WindowMode;
 

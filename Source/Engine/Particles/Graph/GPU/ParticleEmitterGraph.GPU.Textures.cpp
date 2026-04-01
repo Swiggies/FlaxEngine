@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_PARTICLE_GPU_GRAPH
 
@@ -34,8 +34,8 @@ bool ParticleEmitterGPUGenerator::loadTexture(Node* caller, Box* box, const Seri
     Value location = tryGetValue(locationBox, Value::InitForZero(VariantType::Float2));
 
     // Convert into a proper type
-    if (isCubemap || isVolume || isArray)
-        location = Value::Cast(location, VariantType::Float3);
+    if (isVolume || isArray)
+        location = Value::Cast(location, VariantType::Float4);
     else
         location = Value::Cast(location, VariantType::Float3);
 
@@ -246,6 +246,8 @@ void ParticleEmitterGPUGenerator::ProcessGroupTextures(Box* box, Node* node, Val
             break;
         }
         case MaterialSceneTextures::WorldPosition:
+        case MaterialSceneTextures::SceneStencil:
+        case MaterialSceneTextures::ObjectLayer:
             value = Value::Zero; // Not implemented
             break;
         default:
@@ -330,6 +332,21 @@ void ParticleEmitterGPUGenerator::ProcessGroupTextures(Box* box, Node* node, Val
         gradientBox->Cache = gradient;
         distanceBox->Cache = distance;
         value = box == gradientBox ? gradient : distance;
+        break;
+    }
+    // Texture Size
+    case 24:
+    {
+        value = Value::Zero;
+        auto textureBox = node->GetBox(0);
+        if (!textureBox->HasConnection())
+            break;
+        const auto texture = eatBox(textureBox->GetParent<Node>(), textureBox->FirstConnection());
+        const auto textureParam = findParam(texture.Value);
+        if (!textureParam)
+            break;
+        value = writeLocal(VariantType::Float2, node);
+        _writer.Write(TEXT("\t{0}.GetDimensions({1}.x, {1}.y);\n"), textureParam->ShaderName, value.Value);
         break;
     }
     default:

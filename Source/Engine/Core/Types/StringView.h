@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -208,6 +208,14 @@ public:
             return StringUtils::CompareIgnoreCase(&(*this)[Length() - suffix.Length()], *suffix) == 0;
         return StringUtils::Compare(&(*this)[Length() - suffix.Length()], *suffix) == 0;
     }
+
+    bool Contains(const T* subStr, StringSearchCase searchCase = StringSearchCase::CaseSensitive) const
+    {
+        const int32 length = Length();
+        if (subStr == nullptr || length == 0)
+            return false;
+        return (searchCase == StringSearchCase::IgnoreCase ? StringUtils::FindIgnoreCase(_data, subStr) : StringUtils::Find(_data, subStr)) != nullptr;
+    }
 };
 
 /// <summary>
@@ -219,7 +227,7 @@ public:
     /// <summary>
     /// Instance of the empty string.
     /// </summary>
-    static StringView Empty;
+    static const StringView Empty;
 
 public:
     /// <summary>

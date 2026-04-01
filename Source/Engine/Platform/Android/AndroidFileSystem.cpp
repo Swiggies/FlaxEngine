@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_ANDROID
 
@@ -422,24 +422,8 @@ bool AndroidFileSystem::getFilesFromDirectoryTop(Array<String>& results, const c
         if (S_ISREG(statEntry.st_mode) != 0)
         {
             // Validate with filter
-            const int32 fullPathLength = StringUtils::Length(fullPath);
-            const int32 searchPatternLength = StringUtils::Length(searchPattern);
-            if (searchPatternLength == 0 || StringUtils::Compare(searchPattern, "*") == 0)
-            {
-                // All files
-            }
-            else if (searchPattern[0] == '*' && searchPatternLength < fullPathLength && StringUtils::Compare(fullPath + fullPathLength - searchPatternLength + 1, searchPattern + 1) == 0)
-            {
-                // Path ending
-            }
-            else
-            {
-                // TODO: implement all cases in a generic way
-                continue;
-            }
-
-            // Add file
-            results.Add(String(fullPath));
+            if (FileSystem::PathFilterHelper(fullPath, searchPattern))
+                results.Add(String(fullPath));
         }
     }
 

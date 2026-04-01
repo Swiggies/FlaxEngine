@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "SkyLight.h"
 #include "Engine/Core/Log.h"
@@ -26,7 +26,7 @@ SkyLight::SkyLight(const SpawnParams& params)
 void SkyLight::SetRadius(float value)
 {
     value = Math::Max(0.0f, value);
-    if (Math::NearEqual(value, _radius))
+    if (value == _radius)
         return;
 
     _radius = value;

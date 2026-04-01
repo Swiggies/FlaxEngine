@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -85,8 +85,7 @@ namespace FlaxEditor.Tools.Terrain.Undo
         {
             _terrain = terrain.ID;
             _patches = new List<PatchData>(4);
-            var chunkSize = terrain.ChunkSize;
-            var heightmapSize = chunkSize * FlaxEngine.Terrain.PatchEdgeChunksCount + 1;
+            var heightmapSize = terrain.HeightmapSize;
             _heightmapLength = heightmapSize * heightmapSize;
             _heightmapDataSize = _heightmapLength * stride;
 
@@ -172,7 +171,7 @@ namespace FlaxEditor.Tools.Terrain.Undo
             if (_navmeshBoundsModifications != null)
             {
                 foreach (var bounds in _navmeshBoundsModifications)
-                    Navigation.BuildNavMesh(scene, bounds, _dirtyNavMeshTimeoutMs);
+                    Navigation.BuildNavMesh(bounds, _dirtyNavMeshTimeoutMs);
             }
 
             Editor.Instance.Scene.MarkSceneEdited(scene);
@@ -217,11 +216,10 @@ namespace FlaxEditor.Tools.Terrain.Undo
             }
 
             // Update navmesh
-            var scene = Terrain.Scene;
             if (_navmeshBoundsModifications != null)
             {
                 foreach (var bounds in _navmeshBoundsModifications)
-                    Navigation.BuildNavMesh(scene, bounds, _dirtyNavMeshTimeoutMs);
+                    Navigation.BuildNavMesh(bounds, _dirtyNavMeshTimeoutMs);
             }
 
             Editor.Instance.Scene.MarkSceneEdited(Terrain.Scene);

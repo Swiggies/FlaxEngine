@@ -1,11 +1,15 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "NavMeshRuntime.h"
 #include "NavigationSettings.h"
 #include "NavMesh.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Random.h"
+#if COMPILE_WITH_DEBUG_DRAW
+#include "Engine/Level/Scene/Scene.h"
+#endif
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Threading/Threading.h"
 #include <ThirdParty/recastnavigation/DetourNavMesh.h>
 #include <ThirdParty/recastnavigation/DetourNavMeshQuery.h>
@@ -13,8 +17,20 @@
 
 #define MAX_NODES 2048
 #define USE_DATA_LINK 0
-#define USE_NAV_MESH_ALLOC 1
-// TODO: try not using USE_NAV_MESH_ALLOC
+#define USE_NAV_MESH_ALLOC 0
+
+#if USE_NAV_MESH_ALLOC
+#define GET_NAV_TILE_DATA(tile) \
+    const int32 dataSize = (tile).Data.Length(); \
+    const auto flags = DT_TILE_FREE_DATA; \
+    const auto data = (byte*)dtAlloc(dataSize, DT_ALLOC_PERM); \
+    Platform::MemoryCopy(data, (tile).Data.Get(), dataSize)
+#else
+#define GET_NAV_TILE_DATA(tile) \
+    const int32 dataSize = (tile).Data.Length(); \
+    const auto flags = 0; \
+    const auto data = (tile).Data.Get()
+#endif
 
 namespace
 {
@@ -293,7 +309,7 @@ void NavMeshRuntime::SetTileSize(float tileSize)
     ScopeLock lock(Locker);
 
     // Skip if the same or invalid
-    if (Math::NearEqual(_tileSize, tileSize) || tileSize < 1)
+    if (_tileSize == tileSize || tileSize < 1)
         return;
 
     // Dispose the existing mesh (its invalid)
@@ -313,6 +329,7 @@ void NavMeshRuntime::EnsureCapacity(int32 tilesToAddCount)
     if (newTilesCount <= capacity)
         return;
     PROFILE_CPU_NAMED("NavMeshRuntime.EnsureCapacity");
+    PROFILE_MEM(NavigationMesh);
 
     // Navmesh tiles capacity growing rule
     int32 newCapacity = capacity ? capacity : 32;
@@ -354,19 +371,14 @@ void NavMeshRuntime::EnsureCapacity(int32 tilesToAddCount)
     // Restore previous tiles
     for (auto& tile : _tiles)
     {
-        const int32 dataSize = tile.Data.Length();
-#if USE_NAV_MESH_ALLOC
-        const auto flags = DT_TILE_FREE_DATA;
-        const auto data = (byte*)dtAlloc(dataSize, DT_ALLOC_PERM);
-        Platform::MemoryCopy(data, tile.Data.Get(), dataSize);
-#else
-		const auto flags = 0;
-		const auto data = tile.Data.Get();
-#endif
+        GET_NAV_TILE_DATA(tile);
         const auto result = _navMesh->addTile(data, dataSize, flags, 0, nullptr);
         if (dtStatusFailed(result))
         {
             LOG(Warning, "Could not add tile ({2}x{3}, layer {4}) to navmesh {0} (error: {1})", Properties.Name, result & ~DT_FAILURE, tile.X, tile.Y, tile.Layer);
+#if USE_NAV_MESH_ALLOC
+            dtFree(data);
+#endif
         }
     }
 }
@@ -378,6 +390,7 @@ void NavMeshRuntime::AddTiles(NavMesh* navMesh)
         return;
     auto& data = navMesh->Data;
     PROFILE_CPU_NAMED("NavMeshRuntime.AddTiles");
+    PROFILE_MEM(NavigationMesh);
     ScopeLock lock(Locker);
 
     // Validate data (must match navmesh) or init navmesh to match the tiles options
@@ -409,6 +422,7 @@ void NavMeshRuntime::AddTile(NavMesh* navMesh, NavMeshTileData& tileData)
     ASSERT(navMesh);
     auto& data = navMesh->Data;
     PROFILE_CPU_NAMED("NavMeshRuntime.AddTile");
+    PROFILE_MEM(NavigationMesh);
     ScopeLock lock(Locker);
 
     // Validate data (must match navmesh) or init navmesh to match the tiles options
@@ -592,7 +606,21 @@ void NavMeshRuntime::DebugDraw()
         if (!tile->header)
             continue;
 
-        //DebugDraw::DrawWireBox(*(BoundingBox*)&tile->header->bmin[0], Color::CadetBlue);
+#if 0
+        // Debug draw tile bounds and owner scene name
+        BoundingBox tileBounds = *(BoundingBox*)&tile->header->bmin[0];
+        DebugDraw::DrawWireBox(tileBounds, Color::CadetBlue);
+        // TODO: build map from tile coords to tile data to avoid this loop
+        for (const auto& e : _tiles)
+        {
+            if (e.X == tile->header->x && e.Y == tile->header->y && e.Layer == tile->header->layer)
+            {
+                if (e.NavMesh && e.NavMesh->GetScene())
+                    DebugDraw::DrawText(e.NavMesh->GetScene()->GetName(), tileBounds.Minimum + tileBounds.GetSize() * Float3(0.5f, 0.8f, 0.5f), Color::CadetBlue);
+                break;
+            }
+        }
+#endif
 
         for (int i = 0; i < tile->header->polyCount; i++)
         {
@@ -659,18 +687,13 @@ void NavMeshRuntime::AddTileInternal(NavMesh* navMesh, NavMeshTileData& tileData
 #endif
 
     // Add tile to navmesh
-    const int32 dataSize = tile->Data.Length();
-#if USE_NAV_MESH_ALLOC
-    const auto flags = DT_TILE_FREE_DATA;
-    const auto data = (byte*)dtAlloc(dataSize, DT_ALLOC_PERM);
-    Platform::MemoryCopy(data, tile->Data.Get(), dataSize);
-#else
-	const auto flags = 0;
-	const auto data = tile->Data.Get();
-#endif
+    GET_NAV_TILE_DATA(*tile);
     const auto result = _navMesh->addTile(data, dataSize, flags, 0, nullptr);
     if (dtStatusFailed(result))
     {
         LOG(Warning, "Could not add tile ({2}x{3}, layer {4}) to navmesh {0} (error: {1})", Properties.Name, result & ~DT_FAILURE, tileData.PosX, tileData.PosY, tileData.Layer);
+#if USE_NAV_MESH_ALLOC
+        dtFree(data);
+#endif
     }
 }

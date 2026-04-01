@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Actor.h"
 #include "ActorsCache.h"
 #include "Level.h"
 #include "SceneQuery.h"
 #include "SceneObjectsFactory.h"
+#include "FlaxEngine.Gen.h"
 #include "Scene/Scene.h"
 #include "Prefabs/Prefab.h"
 #include "Prefabs/PrefabManager.h"
@@ -13,6 +14,7 @@
 #include "Engine/Scripting/ManagedCLR/MClass.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Core/Cache.h"
 #include "Engine/Core/Collections/CollectionPoolCache.h"
 #include "Engine/Core/Math/Double4x4.h"
@@ -34,8 +36,6 @@
 #else
 #define CHECK_EXECUTE_IN_EDITOR
 #endif
-
-#define ACTOR_ORIENTATION_EPSILON 0.000000001f
 
 // Start loop over actor children/scripts from the beginning to account for any newly added or removed actors.
 #define ACTOR_LOOP_START_MODIFIED_HIERARCHY() _isHierarchyDirty = false
@@ -179,20 +179,19 @@ void Actor::OnDeleteObject()
             _scene = nullptr;
         }
     }
-    else if (_parent)
+    else
     {
-        // Unlink from the parent
-        _parent->Children.RemoveKeepOrder(this);
-        _parent->_isHierarchyDirty = true;
-        _parent = nullptr;
-        _scene = nullptr;
+        if (_isEnabled)
+            OnDisable();
+        if (_parent)
+        {
+            // Unlink from the parent
+            _parent->Children.RemoveKeepOrder(this);
+            _parent->_isHierarchyDirty = true;
+            _parent = nullptr;
+            _scene = nullptr;
+        }
     }
-
-    // Ensure to exit gameplay in a valid way
-    ASSERT(!IsDuringPlay());
-#if BUILD_DEBUG || BUILD_DEVELOPMENT
-    ASSERT(!_isEnabled);
-#endif
 
     // Fire event
     Deleted(this);
@@ -467,12 +466,73 @@ Array<Actor*> Actor::GetChildren(const MClass* type) const
 
 void Actor::DestroyChildren(float timeLeft)
 {
+    if (Children.IsEmpty())
+        return;
     PROFILE_CPU();
+
+    // Actors system doesn't support editing scene hierarchy from multiple threads
+    if (!IsInMainThread() && IsDuringPlay())
+    {
+        LOG(Error, "Editing scene hierarchy is only allowed on a main thread.");
+        return;
+    }
+
+    // Get all actors
     Array<Actor*> children = Children;
+
+#if USE_EDITOR
+    // Inform Editor beforehand
+    Level::callActorEvent(Level::ActorEventType::OnActorDestroyChildren, this, nullptr);
+#endif
+
+    if (_scene && IsActiveInHierarchy())
+    {
+        // Disable children
+        for (Actor* child : children)
+        {
+            if (child->IsActiveInHierarchy())
+            {
+                child->OnDisableInHierarchy();
+            }
+        }
+    }
+
+    Level::ScenesLock.Lock();
+
+    // Remove children all at once
+    Children.Clear();
+    _isHierarchyDirty = true;
+
+    // Unlink children from scene hierarchy
+    for (Actor* child : children)
+    {
+        child->_parent = nullptr;
+        if (!_isActiveInHierarchy)
+            child->_isActive = false; // Force keep children deactivated to reduce overhead during destruction
+        if (_scene)
+            child->SetSceneInHierarchy(nullptr);
+    }
+
+    Level::ScenesLock.Unlock();
+
+    // Inform actors about this
+    for (Actor* child : children)
+    {
+        child->OnParentChanged();
+    }
+
+    // Unlink children for hierarchy
+    for (Actor* child : children)
+    {
+        //child->EndPlay();
+
+        //child->SetParent(nullptr, false, false);
+    }
+
+    // Delete objects
     const bool useGameTime = timeLeft > ZeroTolerance;
     for (Actor* child : children)
     {
-        child->SetParent(nullptr, false, false);
         child->DeleteObject(timeLeft, useGameTime);
     }
 }
@@ -659,7 +719,7 @@ void Actor::SetStaticFlags(StaticFlags value)
 void Actor::SetTransform(const Transform& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!(Vector3::NearEqual(_transform.Translation, value.Translation) && Quaternion::NearEqual(_transform.Orientation, value.Orientation, ACTOR_ORIENTATION_EPSILON) && Float3::NearEqual(_transform.Scale, value.Scale)))
+    if (_transform.Translation != value.Translation || _transform.Orientation != value.Orientation || _transform.Scale != value.Scale)
     {
         if (_parent)
             _parent->_transform.WorldToLocal(value, _localTransform);
@@ -672,7 +732,7 @@ void Actor::SetTransform(const Transform& value)
 void Actor::SetPosition(const Vector3& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!Vector3::NearEqual(_transform.Translation, value))
+    if (_transform.Translation != value)
     {
         if (_parent)
             _localTransform.Translation = _parent->_transform.WorldToLocal(value);
@@ -685,7 +745,7 @@ void Actor::SetPosition(const Vector3& value)
 void Actor::SetOrientation(const Quaternion& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!Quaternion::NearEqual(_transform.Orientation, value, ACTOR_ORIENTATION_EPSILON))
+    if (_transform.Orientation != value)
     {
         if (_parent)
             _parent->_transform.WorldToLocal(value, _localTransform.Orientation);
@@ -698,7 +758,7 @@ void Actor::SetOrientation(const Quaternion& value)
 void Actor::SetScale(const Float3& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!Float3::NearEqual(_transform.Scale, value))
+    if (_transform.Scale != value)
     {
         if (_parent)
             Float3::Divide(value, _parent->_transform.Scale, _localTransform.Scale);
@@ -747,7 +807,7 @@ void Actor::ResetLocalTransform()
 void Actor::SetLocalTransform(const Transform& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!(Vector3::NearEqual(_localTransform.Translation, value.Translation) && Quaternion::NearEqual(_localTransform.Orientation, value.Orientation, ACTOR_ORIENTATION_EPSILON) && Float3::NearEqual(_localTransform.Scale, value.Scale)))
+    if (_localTransform.Translation != value.Translation || _localTransform.Orientation != value.Orientation || _localTransform.Scale != value.Scale)
     {
         _localTransform = value;
         OnTransformChanged();
@@ -757,7 +817,7 @@ void Actor::SetLocalTransform(const Transform& value)
 void Actor::SetLocalPosition(const Vector3& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!Vector3::NearEqual(_localTransform.Translation, value))
+    if (_localTransform.Translation != value)
     {
         _localTransform.Translation = value;
         OnTransformChanged();
@@ -769,7 +829,7 @@ void Actor::SetLocalOrientation(const Quaternion& value)
     CHECK(!value.IsNanOrInfinity());
     Quaternion v = value;
     v.Normalize();
-    if (!Quaternion::NearEqual(_localTransform.Orientation, v, ACTOR_ORIENTATION_EPSILON))
+    if (_localTransform.Orientation != value)
     {
         _localTransform.Orientation = v;
         OnTransformChanged();
@@ -779,7 +839,7 @@ void Actor::SetLocalOrientation(const Quaternion& value)
 void Actor::SetLocalScale(const Float3& value)
 {
     CHECK(!value.IsNanOrInfinity());
-    if (!Float3::NearEqual(_localTransform.Scale, value))
+    if (_localTransform.Scale != value)
     {
         _localTransform.Scale = value;
         OnTransformChanged();
@@ -1125,9 +1185,10 @@ void Actor::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
             }
             else if (!parent && parentId.IsValid())
             {
+                Guid tmpId;
                 if (_prefabObjectID.IsValid())
                     LOG(Warning, "Missing parent actor {0} for \'{1}\', prefab object {2}", parentId, ToString(), _prefabObjectID);
-                else
+                else if (!modifier->IdsMapping.TryGet(parentId, tmpId) || tmpId.IsValid()) // Skip warning if object was mapped to empty id (intentionally ignored)
                     LOG(Warning, "Missing parent actor {0} for \'{1}\'", parentId, ToString());
             }
         }
@@ -1136,12 +1197,18 @@ void Actor::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
     // StaticFlags update - added StaticFlags::Navigation
     // [Deprecated on 17.05.2020, expires on 17.05.2021]
     if (modifier->EngineBuild < 6178 && (int32)_staticFlags == (1 + 2 + 4))
+    {
+        MARK_CONTENT_DEPRECATED();
         _staticFlags |= StaticFlags::Navigation;
+    }
 
     // StaticFlags update - added StaticFlags::Shadow
     // [Deprecated on 17.05.2020, expires on 17.05.2021]
     if (modifier->EngineBuild < 6601 && (int32)_staticFlags == (1 + 2 + 4 + 8))
+    {
+        MARK_CONTENT_DEPRECATED();
         _staticFlags |= StaticFlags::Shadow;
+    }
 
     const auto tag = stream.FindMember("Tag");
     if (tag != stream.MemberEnd())
@@ -1271,7 +1338,6 @@ void Actor::OnActiveChanged()
     if (wasActiveInTree != IsActiveInHierarchy())
         OnActiveInTreeChanged();
 
-    //if (GetScene())
     Level::callActorEvent(Level::ActorEventType::OnActorActiveChanged, this, nullptr);
 }
 
@@ -1302,7 +1368,6 @@ void Actor::OnActiveInTreeChanged()
 
 void Actor::OnOrderInParentChanged()
 {
-    //if (GetScene())
     Level::callActorEvent(Level::ActorEventType::OnActorOrderInParentChanged, this, nullptr);
 }
 
@@ -1620,7 +1685,7 @@ Quaternion Actor::LookingAt(const Vector3& worldPos) const
 {
     const Vector3 direction = worldPos - _transform.Translation;
     if (direction.LengthSquared() < ZeroTolerance)
-        return _parent->GetOrientation();
+        return _parent ? _parent->GetOrientation() : Quaternion::Identity;
 
     const Float3 newForward = Vector3::Normalize(direction);
     const Float3 oldForward = _transform.Orientation * Vector3::Forward;
@@ -1647,7 +1712,7 @@ Quaternion Actor::LookingAt(const Vector3& worldPos, const Vector3& worldUp) con
 {
     const Vector3 direction = worldPos - _transform.Translation;
     if (direction.LengthSquared() < ZeroTolerance)
-        return _parent->GetOrientation();
+        return _parent ? _parent->GetOrientation() : Quaternion::Identity;
     const Float3 forward = Vector3::Normalize(direction);
     const Float3 up = Vector3::Normalize(worldUp);
     if (Math::IsOne(Float3::Dot(forward, up)))
@@ -1689,7 +1754,7 @@ bool Actor::ToBytes(const Array<Actor*>& actors, MemoryWriteStream& output)
     }
 
     // Collect object ids that exist in the serialized data to allow references mapping later
-    Array<Guid> ids(Math::RoundUpToPowerOf2(actors.Count() * 2));
+    Array<Guid> ids(actors.Count());
     for (int32 i = 0; i < actors.Count(); i++)
     {
         // By default we collect actors and scripts (they are ManagedObjects recognized by the id)
@@ -1709,7 +1774,7 @@ bool Actor::ToBytes(const Array<Actor*>& actors, MemoryWriteStream& output)
     output.WriteInt32(FLAXENGINE_VERSION_BUILD);
 
     // Serialized objects ids (for references mapping)
-    output.WriteArray(ids);
+    output.Write(ids);
 
     // Objects data
     rapidjson_flax::StringBuffer buffer;
@@ -1764,7 +1829,7 @@ bool Actor::FromBytes(const Span<byte>& data, Array<Actor*>& output, ISerializeM
 
     // Serialized objects ids (for references mapping)
     Array<Guid> ids;
-    stream.ReadArray(&ids);
+    stream.Read(ids);
     int32 objectsCount = ids.Count();
     if (objectsCount < 0)
         return true;
@@ -1936,7 +2001,7 @@ Array<Guid> Actor::TryGetSerializedObjectsIds(const Span<byte>& data)
         if (engineBuild <= FLAXENGINE_VERSION_BUILD && engineBuild >= 6165)
         {
             // Serialized objects ids (for references mapping)
-            stream.ReadArray(&result);
+            stream.Read(result);
         }
     }
 
@@ -1992,23 +2057,31 @@ Actor* Actor::Clone()
 
     // Remap object ids into a new ones
     auto modifier = Cache::ISerializeModifier.Get();
-    for (int32 i = 0; i < actors->Count(); i++)
+    for (const Actor* actor : *actors.Value)
     {
-        auto actor = actors->At(i);
         if (!actor)
             continue;
         modifier->IdsMapping.Add(actor->GetID(), Guid::New());
-        for (int32 j = 0; j < actor->Scripts.Count(); j++)
+        for (const Script* script : actor->Scripts)
         {
-            const auto script = actor->Scripts[j];
             if (script)
                 modifier->IdsMapping.Add(script->GetID(), Guid::New());
         }
     }
+    if (HasPrefabLink() && HasParent() && !IsPrefabRoot())
+    {
+        // When cloning actor that is part of prefab (but not as whole), ignore the prefab hierarchy
+        Actor* parent = GetParent();
+        do
+        {
+            modifier->IdsMapping.Add(parent->GetPrefabObjectID(), Guid::Empty);
+            parent = parent->GetParent();
+        } while (parent && !parent->IsPrefabRoot());
+    }
 
     // Deserialize objects
     Array<Actor*> output;
-    if (FromBytes(ToSpan(stream.GetHandle(), (int32)stream.GetPosition()), output, modifier.Value) || output.IsEmpty())
+    if (FromBytes(ToSpan(stream), output, modifier.Value) || output.IsEmpty())
         return nullptr;
     return output[0];
 }

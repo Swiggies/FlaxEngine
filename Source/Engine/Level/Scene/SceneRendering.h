@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -7,10 +7,10 @@
 #include "Engine/Core/Math/BoundingSphere.h"
 #include "Engine/Core/Math/BoundingFrustum.h"
 #include "Engine/Level/Actor.h"
-#include "Engine/Platform/CriticalSection.h"
 
 class SceneRenderTask;
 class SceneRendering;
+class IPhysicsDebug;
 struct PostProcessSettings;
 struct RenderContext;
 struct RenderContextBatch;
@@ -55,6 +55,8 @@ public:
         Bounds = 2,
         Layer = 4,
         StaticFlags = 8,
+        AutoDelayDuringRendering = 16, // Conditionally allow updating data during rendering when writes are locked
+        DrawModes = 32,
         Auto = Visual | Bounds | Layer,
     };
 
@@ -68,13 +70,14 @@ public:
     virtual void OnSceneRenderingClear(SceneRendering* scene) = 0;
 };
 
+DECLARE_ENUM_OPERATORS(ISceneRenderingListener::UpdateFlags);
+
 /// <summary>
 /// Scene rendering helper subsystem that boosts the level rendering by providing efficient objects cache and culling implementation.
 /// </summary>
 class FLAXENGINE_API SceneRendering
 {
 #if USE_EDITOR
-    typedef Function<void(RenderView&)> PhysicsDebugCallback;
     typedef Function<void(RenderView&)> LightsDebugCallback;
     friend class ViewportIconsRendererService;
 #endif
@@ -100,12 +103,14 @@ public:
     };
 
     Array<DrawActor> Actors[MAX];
+    Array<int32> FreeActors[MAX];
     Array<IPostFxSettingsProvider*> PostFxProviders;
-    CriticalSection Locker;
+    ReadWriteLock Locker;
 
 private:
+    bool _isRendering = false;
 #if USE_EDITOR
-    Array<PhysicsDebugCallback> PhysicsDebug;
+    Array<IPhysicsDebug*> PhysicsDebug;
     Array<LightsDebugCallback> LightsDebug;
     Array<Actor*> ViewportIcons;
 #endif
@@ -149,20 +154,14 @@ public:
     }
 
 #if USE_EDITOR
-    template<class T, void(T::*Method)(RenderView&)>
-    FORCE_INLINE void AddPhysicsDebug(T* obj)
+    FORCE_INLINE void AddPhysicsDebug(IPhysicsDebug* obj)
     {
-        PhysicsDebugCallback f;
-        f.Bind<T, Method>(obj);
-        PhysicsDebug.Add(f);
+        PhysicsDebug.Add(obj);
     }
 
-    template<class T, void(T::*Method)(RenderView&)>
-    void RemovePhysicsDebug(T* obj)
+    FORCE_INLINE void RemovePhysicsDebug(IPhysicsDebug* obj)
     {
-        PhysicsDebugCallback f;
-        f.Bind<T, Method>(obj);
-        PhysicsDebug.Remove(f);
+        PhysicsDebug.Remove(obj);
     }
 
     template<class T, void(T::*Method)(RenderView&)>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -6,11 +6,11 @@ using System.Linq;
 using FlaxEditor.Content;
 using FlaxEditor.Gizmo;
 using FlaxEditor.GUI.ContextMenu;
+using FlaxEditor.Modules;
 using FlaxEditor.SceneGraph;
 using FlaxEditor.Scripting;
 using FlaxEditor.Viewport.Cameras;
 using FlaxEditor.Viewport.Previews;
-using FlaxEditor.Viewport.Widgets;
 using FlaxEditor.Windows.Assets;
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -71,8 +71,11 @@ namespace FlaxEditor.Viewport
 
         private PrefabUIEditorRoot _uiRoot;
         private bool _showUI = false;
-        
+
+        private int _defaultScaleActiveIndex = -1;
+        private int _customScaleActiveIndex = -1;
         private ContextMenuButton _uiModeButton;
+        private ContextMenuChildMenu _uiViewOptions;
 
         /// <summary>
         /// Event fired when the UI Mode is toggled.
@@ -138,6 +141,8 @@ namespace FlaxEditor.Viewport
                 UseAutomaticTaskManagement = defaultFeatures;
                 ShowDefaultSceneActors = defaultFeatures;
                 TintColor = defaultFeatures ? Color.White : Color.Transparent;
+                if (_uiViewOptions != null)
+                    _uiViewOptions.Visible = _showUI;
                 UIModeToggled?.Invoke(_showUI);
             }
         }
@@ -178,6 +183,7 @@ namespace FlaxEditor.Viewport
             showGridButton.Clicked += () =>
             {
                 _gridGizmo.Enabled = !_gridGizmo.Enabled;
+                _uiRoot.ShowGrid = _gridGizmo.Enabled;
                 showGridButton.Checked = _gridGizmo.Enabled;
             };
             showGridButton.Checked = true;
@@ -211,7 +217,7 @@ namespace FlaxEditor.Viewport
             _uiParentLink = _uiRoot.UIRoot;
 
             // UI mode buton
-            _uiModeButton = ViewWidgetShowMenu.AddButton("UI Mode", (button) => ShowUI = button.Checked);
+            _uiModeButton = ViewWidgetShowMenu.AddButton("UI Mode", button => ShowUI = button.Checked);
             _uiModeButton.AutoCheck = true;
             _uiModeButton.VisibleChanged += control => (control as ContextMenuButton).Checked = ShowUI;
 
@@ -221,6 +227,91 @@ namespace FlaxEditor.Viewport
             InputActions.Add(options => options.FocusSelection, ShowSelectedActors);
 
             SetUpdate(ref _update, OnUpdate);
+        }
+
+        /// <summary>
+        /// Creates the view scaling options. Needs to be called after a Prefab is valid and loaded.
+        /// </summary>
+        public void CreateViewScalingOptions()
+        {
+            if (_uiViewOptions != null)
+                return;
+            _uiViewOptions = ViewWidgetButtonMenu.AddChildMenu("UI View Scaling");
+            _uiViewOptions.Visible = _showUI;
+            LoadCustomUIScalingOption();
+            Editor.Instance.UI.CreateViewportSizingContextMenu(_uiViewOptions.ContextMenu, _defaultScaleActiveIndex, _customScaleActiveIndex, true, ChangeUIView, (a, b) =>
+            {
+                _defaultScaleActiveIndex = a;
+                _customScaleActiveIndex = b;
+            });
+        }
+
+        private void ChangeUIView(UIModule.ViewportScaleOption uiViewScaleOption)
+        {
+            _uiRoot.SetViewSize((Float2)uiViewScaleOption.Size);
+        }
+
+        /// <summary>
+        /// Saves the active ui scaling option.
+        /// </summary>
+        public void SaveActiveUIScalingOption()
+        {
+            if (!Prefab)
+                return;
+            var id = Prefab.ID;
+            var defaultKey = $"{id}:DefaultViewportScalingIndex";
+            Editor.Instance.ProjectCache.SetCustomData(defaultKey, _defaultScaleActiveIndex.ToString());
+            var customKey = $"{id}:CustomViewportScalingIndex";
+            Editor.Instance.ProjectCache.SetCustomData(customKey, _customScaleActiveIndex.ToString());
+        }
+
+        private void LoadCustomUIScalingOption()
+        {
+            if (!Prefab)
+                return;
+            var id = Prefab.ID;
+            Prefab.WaitForLoaded();
+
+            var defaultKey = $"{id}:DefaultViewportScalingIndex";
+            if (Editor.Instance.ProjectCache.TryGetCustomData(defaultKey, out string defaultData))
+            {
+                if (int.TryParse(defaultData, out var index))
+                {
+                    var options = Editor.Instance.UI.DefaultViewportScaleOptions;
+                    if (options.Count > index)
+                    {
+                        _defaultScaleActiveIndex = index;
+                        if (index != -1)
+                            ChangeUIView(Editor.Instance.UI.DefaultViewportScaleOptions[index]);
+                    }
+                    // Assume option does not exist anymore so move to default.
+                    else if (index != -1)
+                    {
+                        _defaultScaleActiveIndex = 0;
+                    }
+                }
+            }
+
+            var customKey = $"{id}:CustomViewportScalingIndex";
+            if (Editor.Instance.ProjectCache.TryGetCustomData(customKey, out string data))
+            {
+                if (int.TryParse(data, out var index))
+                {
+                    var options = Editor.Instance.UI.CustomViewportScaleOptions;
+                    if (options.Count > index)
+                    {
+                        _customScaleActiveIndex = index;
+                        if (index != -1)
+                            ChangeUIView(options[index]);
+                    }
+                    // Assume option does not exist anymore so move to default.
+                    else if (index != -1)
+                    {
+                        _defaultScaleActiveIndex = 0;
+                        _customScaleActiveIndex = -1;
+                    }
+                }
+            }
         }
 
         private void OnUpdate(float deltaTime)
@@ -244,7 +335,12 @@ namespace FlaxEditor.Viewport
                     _tempDebugDrawContext = DebugDraw.AllocateContext();
                 DebugDraw.SetContext(_tempDebugDrawContext);
                 DebugDraw.UpdateContext(_tempDebugDrawContext, 1.0f);
-
+                if (task is SceneRenderTask sceneRenderTask)
+                {
+                    // Sync debug view to avoid lag on culling/LODing
+                    var view = sceneRenderTask.View;
+                    DebugDraw.SetView(ref view);
+                }
                 for (int i = 0; i < selectedParents.Count; i++)
                 {
                     if (selectedParents[i].IsActiveInHierarchy)
@@ -585,7 +681,7 @@ namespace FlaxEditor.Viewport
         }
 
         /// <inheritdoc />
-        protected override void OrientViewport(ref Quaternion orientation)
+        public override void OrientViewport(ref Quaternion orientation)
         {
             if (TransformGizmo.SelectedParents.Count != 0)
                 FocusSelection(ref orientation);
@@ -623,9 +719,12 @@ namespace FlaxEditor.Viewport
         public override void DrawEditorPrimitives(GPUContext context, ref RenderContext renderContext, GPUTexture target, GPUTexture targetDepth)
         {
             // Draw gizmos
-            for (int i = 0; i < Gizmos.Count; i++)
+            foreach (var gizmo in Gizmos)
             {
-                Gizmos[i].Draw(ref renderContext);
+                if (gizmo.Visible)
+                {
+                    gizmo.Draw(ref renderContext);
+                }
             }
 
             base.DrawEditorPrimitives(context, ref renderContext, target, targetDepth);
@@ -644,14 +743,7 @@ namespace FlaxEditor.Viewport
                 if (selectedParents[i].IsActiveInHierarchy)
                     selectedParents[i].OnDebugDraw(_debugDrawData);
             }
-
-            unsafe
-            {
-                fixed (IntPtr* actors = _debugDrawData.ActorsPtrs)
-                {
-                    DebugDraw.DrawActors(new IntPtr(actors), _debugDrawData.ActorsCount, false);
-                }
-            }
+            _debugDrawData.DrawActors();
 
             // Debug draw all actors in prefab and collect actors
             var view = Task.View;
@@ -671,10 +763,7 @@ namespace FlaxEditor.Viewport
             if ((view.Flags & ViewFlags.PhysicsDebug) != 0 || view.Mode == ViewMode.PhysicsColliders)
             {
                 foreach (var actor in _debugDrawActors)
-                {
-                    if (actor is Collider c && c.IsActiveInHierarchy)
-                        DebugDraw.DrawColliderDebugPhysics(c, renderContext.View);
-                }
+                    DebugDraw.DrawDebugPhysics(actor, renderContext.View);
             }
 
             // Draw lights debug

@@ -1,9 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_DIRECTX12
 
 #include "GPUPipelineStateDX12.h"
 #include "GPUShaderProgramDX12.h"
+#include "GPUVertexLayoutDX12.h"
 #include "GPUTextureDX12.h"
 #include "Engine/Profiler/ProfilerCPU.h"
 #include "Engine/GraphicsDevice/DirectX/RenderToolsDX.h"
@@ -45,14 +46,14 @@ bool GPUPipelineStateDX12::IsValid() const
     return !!_memoryUsage;
 }
 
-ID3D12PipelineState* GPUPipelineStateDX12::GetState(GPUTextureViewDX12* depth, int32 rtCount, GPUTextureViewDX12** rtHandles)
+ID3D12PipelineState* GPUPipelineStateDX12::GetState(GPUTextureViewDX12* depth, int32 rtCount, GPUTextureViewDX12** rtHandles, GPUVertexLayoutDX12* vertexLayout)
 {
-    // Validate
     ASSERT(depth || rtCount);
 
     // Prepare key
     GPUPipelineStateKeyDX12 key;
     key.RTsCount = rtCount;
+    key.VertexLayout = vertexLayout;
     key.DepthFormat = depth ? depth->GetFormat() : PixelFormat::Unknown;
     key.MSAA = depth ? depth->GetMSAA() : (rtCount ? rtHandles[0]->GetMSAA() : MSAALevel::None);
     for (int32 i = 0; i < rtCount; i++)
@@ -72,8 +73,12 @@ ID3D12PipelineState* GPUPipelineStateDX12::GetState(GPUTextureViewDX12* depth, i
 #endif
         return state;
     }
-
-    PROFILE_CPU_NAMED("Create Pipeline State");
+    PROFILE_CPU();
+#if !BUILD_RELEASE
+    DebugName name;
+    GetDebugName(name);
+    ZoneText(name.Get(), name.Count() - 1);
+#endif
 
     // Update description to match the pipeline
     _desc.NumRenderTargets = key.RTsCount;
@@ -83,42 +88,33 @@ ID3D12PipelineState* GPUPipelineStateDX12::GetState(GPUTextureViewDX12* depth, i
     _desc.SampleDesc.Quality = key.MSAA == MSAALevel::None ? 0 : GPUDeviceDX12::GetMaxMSAAQuality((int32)key.MSAA);
     _desc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
     _desc.DSVFormat = RenderToolsDX::ToDxgiFormat(PixelFormatExtensions::FindDepthStencilFormat(key.DepthFormat));
+    if (!vertexLayout)
+        vertexLayout = VertexBufferLayout; // Fallback to shader-specified layout (if using old APIs)
+    if (vertexLayout)
+    {
+        int32 missingSlotOverride = GPU_MAX_VB_BINDED; // Use additional slot with empty VB
+        if (VertexInputLayout)
+            vertexLayout = (GPUVertexLayoutDX12*)GPUVertexLayout::Merge(vertexLayout, VertexInputLayout, false, true, missingSlotOverride);
+        _desc.InputLayout.pInputElementDescs = vertexLayout->InputElements;
+        _desc.InputLayout.NumElements = vertexLayout->InputElementsCount;
+    }
+    else
+    {
+        _desc.InputLayout.pInputElementDescs = nullptr;
+        _desc.InputLayout.NumElements = 0;
+    }
 
     // Create object
     const HRESULT result = _device->GetDevice()->CreateGraphicsPipelineState(&_desc, IID_PPV_ARGS(&state));
     LOG_DIRECTX_RESULT(result);
     if (FAILED(result))
+    {
+#if !BUILD_RELEASE
+        LOG(Error, "CreateGraphicsPipelineState failed for {}", String(name.Get(), name.Count() - 1));
+#endif
         return nullptr;
-#if GPU_ENABLE_RESOURCE_NAMING && BUILD_DEBUG
-    Array<char, InlinedAllocation<200>> name;
-    if (DebugDesc.VS)
-    {
-        name.Add(*DebugDesc.VS->GetName(), DebugDesc.VS->GetName().Length());
-        name.Add('+');
     }
-    if (DebugDesc.HS)
-    {
-        name.Add(*DebugDesc.HS->GetName(), DebugDesc.HS->GetName().Length());
-        name.Add('+');
-    }
-    if (DebugDesc.DS)
-    {
-        name.Add(*DebugDesc.DS->GetName(), DebugDesc.DS->GetName().Length());
-        name.Add('+');
-    }
-    if (DebugDesc.GS)
-    {
-        name.Add(*DebugDesc.GS->GetName(), DebugDesc.GS->GetName().Length());
-        name.Add('+');
-    }
-    if (DebugDesc.PS)
-    {
-        name.Add(*DebugDesc.PS->GetName(), DebugDesc.PS->GetName().Length());
-        name.Add('+');
-    }
-    if (name.Count() != 0 && name[name.Count() - 1] == '+')
-        name.RemoveLast();
-    name.Add('\0');
+#if GPU_ENABLE_RESOURCE_NAMING && !BUILD_RELEASE
     SetDebugObjectName(state, name.Get(), name.Count() - 1);
 #endif
 
@@ -139,7 +135,8 @@ void GPUPipelineStateDX12::OnReleaseGPU()
 
 bool GPUPipelineStateDX12::Init(const Description& desc)
 {
-    ASSERT(!IsValid());
+    if (IsValid())
+        OnReleaseGPU();
 
     // Create description
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psDesc;
@@ -148,7 +145,6 @@ bool GPUPipelineStateDX12::Init(const Description& desc)
 
     // Shaders
     Platform::MemoryClear(&Header, sizeof(Header));
-    psDesc.InputLayout = { static_cast<D3D12_INPUT_ELEMENT_DESC*>(desc.VS->GetInputLayout()), desc.VS->GetInputLayoutSize() };
 #define INIT_SHADER_STAGE(stage, type) \
     if (desc.stage) \
     { \
@@ -172,14 +168,21 @@ bool GPUPipelineStateDX12::Init(const Description& desc)
 #endif
     INIT_SHADER_STAGE(VS, GPUShaderProgramVSDX12);
     INIT_SHADER_STAGE(PS, GPUShaderProgramPSDX12);
-    const static D3D12_PRIMITIVE_TOPOLOGY_TYPE primTypes1[] =
+
+    // Input Assembly
+    if (desc.VS)
+    {
+        VertexBufferLayout = (GPUVertexLayoutDX12*)desc.VS->Layout;
+        VertexInputLayout = (GPUVertexLayoutDX12*)desc.VS->InputLayout;
+    }
+    const D3D12_PRIMITIVE_TOPOLOGY_TYPE primTypes1[] =
     {
         D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED,
         D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT,
         D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE,
         D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
     };
-    const static D3D_PRIMITIVE_TOPOLOGY primTypes2[] =
+    const D3D_PRIMITIVE_TOPOLOGY primTypes2[] =
     {
         D3D_PRIMITIVE_TOPOLOGY_UNDEFINED,
         D3D_PRIMITIVE_TOPOLOGY_POINTLIST,

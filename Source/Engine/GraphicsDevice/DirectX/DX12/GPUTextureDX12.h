@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -21,25 +21,8 @@ private:
     DescriptorHeapWithSlotsDX12::Slot _rtv, _srv, _dsv, _uav;
 
 public:
-
     GPUTextureViewDX12()
     {
-    }
-
-    GPUTextureViewDX12(const GPUTextureViewDX12& other)
-        : GPUTextureViewDX12()
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-    }
-
-    GPUTextureViewDX12& operator=(const GPUTextureViewDX12& other)
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-        return *this;
     }
 
     ~GPUTextureViewDX12()
@@ -108,7 +91,7 @@ public:
     // [IShaderResourceDX12]
     bool IsDepthStencilResource() const override
     {
-        return _dsv.IsValid();
+        return ReadOnlyDepthView || _dsv.IsValid();
     }
     D3D12_CPU_DESCRIPTOR_HANDLE SRV() const override
     {
@@ -134,6 +117,7 @@ private:
     GPUTextureViewDX12 _handleArray;
     GPUTextureViewDX12 _handleVolume;
     GPUTextureViewDX12 _handleReadOnlyDepth;
+    GPUTextureViewDX12 _handleStencil;
     Array<GPUTextureViewDX12> _handlesPerSlice; // [slice]
     Array<Array<GPUTextureViewDX12>> _handlesPerMip; // [slice][mip]
 
@@ -181,6 +165,11 @@ public:
     {
         ASSERT(_desc.Flags & GPUTextureFlags::ReadOnlyDepthView);
         return (GPUTextureView*)&_handleReadOnlyDepth;
+    }
+    GPUTextureView* ViewStencil() const override
+    {
+        ASSERT(_desc.Flags & GPUTextureFlags::DepthStencil);
+        return (GPUTextureView*)&_handleStencil;
     }
     void* GetNativePtr() const override
     {

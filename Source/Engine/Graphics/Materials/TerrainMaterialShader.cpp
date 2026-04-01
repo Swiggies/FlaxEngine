@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "TerrainMaterialShader.h"
 #include "MaterialShaderFeatures.h"
@@ -50,7 +50,7 @@ void TerrainMaterialShader::Bind(BindParameters& params)
     Span<byte> cb(_cbData.Get(), _cbData.Count());
     ASSERT_LOW_LAYER(cb.Length() >= sizeof(TerrainMaterialShaderData));
     auto materialData = reinterpret_cast<TerrainMaterialShaderData*>(cb.Get());
-    cb = Span<byte>(cb.Get() + sizeof(TerrainMaterialShaderData), cb.Length() - sizeof(TerrainMaterialShaderData));
+    cb = cb.Slice(sizeof(TerrainMaterialShaderData));
     int32 srv = 3;
 
     // Setup features
@@ -76,7 +76,7 @@ void TerrainMaterialShader::Bind(BindParameters& params)
             scaleX > 0.00001f ? 1.0f / scaleX : 0.0f,
             scaleY > 0.00001f ? 1.0f / scaleY : 0.0f,
             scaleZ > 0.00001f ? 1.0f / scaleZ : 0.0f);
-        materialData->WorldDeterminantSign = drawCall.WorldDeterminantSign;
+        materialData->WorldDeterminantSign = drawCall.WorldDeterminant ? -1.0f : 1.0f;
         materialData->PerInstanceRandom = drawCall.PerInstanceRandom;
         materialData->CurrentLOD = drawCall.Terrain.CurrentLOD;
         materialData->ChunkSizeNextLOD = drawCall.Terrain.ChunkSizeNextLOD;
@@ -88,9 +88,8 @@ void TerrainMaterialShader::Bind(BindParameters& params)
     }
 
     // Bind terrain textures
-    const auto heightmap = drawCall.Terrain.Patch->Heightmap->GetTexture();
-    const auto splatmap0 = drawCall.Terrain.Patch->Splatmap[0] ? drawCall.Terrain.Patch->Splatmap[0]->GetTexture() : nullptr;
-    const auto splatmap1 = drawCall.Terrain.Patch->Splatmap[1] ? drawCall.Terrain.Patch->Splatmap[1]->GetTexture() : nullptr;
+    GPUTexture* heightmap, *splatmap0, *splatmap1;
+    drawCall.Terrain.Patch->GetTextures(heightmap, splatmap0, splatmap1);
     context->BindSR(0, heightmap);
     context->BindSR(1, splatmap0);
     context->BindSR(2, splatmap1);
@@ -109,13 +108,10 @@ void TerrainMaterialShader::Bind(BindParameters& params)
     if (IsRunningRadiancePass)
         cullMode = CullMode::TwoSided;
 #endif
-    if (cullMode != CullMode::TwoSided && drawCall.WorldDeterminantSign < 0)
+    if (cullMode != CullMode::TwoSided && drawCall.WorldDeterminant)
     {
         // Invert culling when scale is negative
-        if (cullMode == CullMode::Normal)
-            cullMode = CullMode::Inverted;
-        else
-            cullMode = CullMode::Normal;
+        cullMode = cullMode == CullMode::Normal ? CullMode::Inverted : CullMode::Normal;
     }
     const PipelineStateCache* psCache = _cache.GetPS(view.Pass, useLightmap);
     ASSERT(psCache);
@@ -123,6 +119,7 @@ void TerrainMaterialShader::Bind(BindParameters& params)
 
     // Bind pipeline
     context->SetState(state);
+    context->SetStencilRef(drawCall.StencilValue);
 }
 
 void TerrainMaterialShader::Unload()
@@ -138,6 +135,10 @@ bool TerrainMaterialShader::Load()
     GPUPipelineState::Description psDesc = GPUPipelineState::Description::Default;
     psDesc.DepthEnable = (_info.FeaturesFlags & MaterialFeaturesFlags::DisableDepthTest) == MaterialFeaturesFlags::None;
     psDesc.DepthWriteEnable = (_info.FeaturesFlags & MaterialFeaturesFlags::DisableDepthWrite) == MaterialFeaturesFlags::None;
+
+    psDesc.StencilEnable = true;
+    psDesc.StencilReadMask = 0;
+    psDesc.StencilPassOp = StencilOperation::Replace;
 
 #if GPU_ALLOW_TESSELLATION_SHADERS
     // Check if use tessellation (both material and runtime supports it)

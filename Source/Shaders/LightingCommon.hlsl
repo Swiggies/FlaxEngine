@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __LIGHTING_COMMON__
 #define __LIGHTING_COMMON__
@@ -62,26 +62,31 @@ void GetRadialLightAttenuation(
     float distanceBiasSqr,
     float3 toLight,
     float3 L,
-    inout float NoL,
-    inout float attenuation)
+    out float NoL,
+    out float attenuation)
 {
     // Distance attenuation
     if (lightData.InverseSquared)
     {
+        // Convert scene units to meters for inverse-squared falloff
+        const float distanceScale = UNITS_TO_METERS_SCALE;
+        const float distanceScaleSqr = distanceScale * distanceScale;
+        float distanceSqrScaled = distanceSqr * distanceScaleSqr;
+        float distanceBiasSqrScaled = distanceBiasSqr * distanceScaleSqr;
         BRANCH
         if (lightData.SourceLength > 0)
         {
-            float3 l01 = lightData.Direction * lightData.SourceLength;
-            float3 l0 = toLight - 0.5 * l01;
-            float3 l1 = toLight + 0.5 * l01;
+            float3 l01 = lightData.Direction * (lightData.SourceLength * distanceScale);
+            float3 l0 = (toLight * distanceScale) - 0.5 * l01;
+            float3 l1 = (toLight * distanceScale) + 0.5 * l01;
             float lengthL0 = length(l0);
             float lengthL1 = length(l1);
-            attenuation = rcp((lengthL0 * lengthL1 + dot(l0, l1)) * 0.5 + distanceBiasSqr);
+            attenuation = rcp((lengthL0 * lengthL1 + dot(l0, l1)) * 0.5 + distanceBiasSqrScaled);
             NoL = saturate(0.5 * (dot(N, l0) / lengthL0 + dot(N, l1) / lengthL1));
         }
         else
         {
-            attenuation = rcp(distanceSqr + distanceBiasSqr);
+            attenuation = rcp(distanceSqrScaled + distanceBiasSqrScaled);
             NoL = saturate(dot(N, L));
         }
         attenuation *= Square(saturate(1 - Square(distanceSqr * Square(lightData.RadiusInv))));
@@ -102,6 +107,20 @@ void GetRadialLightAttenuation(
         float invCosConeDifference = lightData.SpotAngles.y;
         attenuation *= Square(saturate((dot(normalize(-L), lightData.Direction) - cosOuterCone) * invCosConeDifference));
     }
+}
+
+// Calculates radial light (point or spot) attenuation factors (distance, spot and radius mask)
+void GetRadialLightAttenuation(
+    LightData lightData,
+    bool isSpotLight,
+    float3 toLight,
+    float3 N,
+    out float NoL,
+    out float attenuation)
+{
+    float distanceSqr = dot(toLight, toLight);
+    float3 L = toLight * rsqrt(distanceSqr);
+    GetRadialLightAttenuation(lightData, isSpotLight, N, distanceSqr, 1, toLight, L, NoL, attenuation);
 }
 
 // Find representative incoming light direction and energy modification

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __COMMON__
 #define __COMMON__
@@ -33,7 +33,7 @@
 
 // Meta macros used by shaders parser
 #define META_VS(isVisible, minFeatureLevel)
-#define META_VS_IN_ELEMENT(type, index, format, slot, offset, slotClass, stepRate, isVisible)
+#define META_VS_IN_ELEMENT(type, index, format, slot, offset, slotClass, stepRate, isVisible) // [Deprecated in v1.10]
 #define META_HS(isVisible, minFeatureLevel)
 #define META_HS_PATCH(inControlPoints)
 #define META_DS(isVisible, minFeatureLevel)
@@ -93,6 +93,15 @@
 
 #endif
 
+// Compiler support for HLSL 2021 that is stricter (need to use or/and/select for vector-based logical operators)
+#if !defined(__DXC_VERSION_MAJOR) || (__DXC_VERSION_MAJOR <= 1 && __DXC_VERSION_MINOR < 7)
+
+#define and(a, b) (a) && (b)
+#define or(a, b) (a) || (b)
+#define select(c, a, b) (c) ? (a) : (b)
+
+#endif
+
 // Compiler attribute fallback
 #ifndef UNROLL
 #define UNROLL
@@ -122,6 +131,7 @@ SamplerComparisonState ShadowSamplerLinear : register(s5);
 #define SAMPLE_RT_LINEAR(rt, texCoord) rt.SampleLevel(SamplerLinearClamp, texCoord, 0)
 #define HDR_CLAMP_MAX 65472.0
 #define PI 3.1415926535897932
+#define UNITS_TO_METERS_SCALE 0.01f
 
 // Structure that contains information about GBuffer
 struct GBufferData

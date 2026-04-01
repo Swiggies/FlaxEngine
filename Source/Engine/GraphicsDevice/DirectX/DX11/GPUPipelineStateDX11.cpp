@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_DIRECTX11
 
@@ -31,7 +31,8 @@ bool GPUPipelineStateDX11::IsValid() const
 
 bool GPUPipelineStateDX11::Init(const Description& desc)
 {
-    ASSERT(!IsValid());
+    if (IsValid())
+        OnReleaseGPU();
 
     // Cache shaders
     VS = (GPUShaderProgramVSDX11*)desc.VS;

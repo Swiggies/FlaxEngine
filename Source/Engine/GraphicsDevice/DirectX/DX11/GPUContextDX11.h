@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,10 +6,12 @@
 #include "GPUDeviceDX11.h"
 #include "GPUPipelineStateDX11.h"
 #include "../IncludeDirectXHeaders.h"
+#include <ThirdParty/tracy/tracy/TracyD3D11.hpp>
 
 #if GRAPHICS_API_DIRECTX11
 
 class GPUBufferDX11;
+class GPUVertexLayoutDX11;
 
 /// <summary>
 /// GPU Context for DirectX 11 backend.
@@ -23,7 +25,12 @@ private:
 #if GPU_ALLOW_PROFILE_EVENTS
     ID3DUserDefinedAnnotation* _userDefinedAnnotations;
 #endif
+#if COMPILE_WITH_PROFILER
+    void* _tracyContext;
+    byte _tracyZone[TracyD3D11ZoneSize];
+#endif
     int32 _maxUASlots;
+    bool _flushOnDispatch;
 
     // Output Merger
     bool _omDirtyFlag;
@@ -49,8 +56,11 @@ private:
     ID3D11Buffer* _vbHandles[GPU_MAX_VB_BINDED];
     UINT _vbStrides[GPU_MAX_VB_BINDED];
     UINT _vbOffsets[GPU_MAX_VB_BINDED];
+    GPUVertexLayoutDX11* _vertexLayout;
+    bool _iaInputLayoutDirtyFlag;
 
     // Pipeline State
+    ID3D11ComputeShader* _currentCompute;
     GPUPipelineStateDX11* _currentState;
     ID3D11BlendState* CurrentBlendState;
     ID3D11RasterizerState* CurrentRasterizerState;
@@ -100,12 +110,15 @@ private:
     void flushUAVs();
     void flushCBs();
     void flushOM();
+    void flushIA();
     void onDrawCall();
+    void onDispatch(GPUShaderProgramCS* shader);
 
 public:
 
     // [GPUContext]
     void FrameBegin() override;
+    void OnPresent() override;
 #if GPU_ALLOW_PROFILE_EVENTS
     void EventBegin(const Char* name) override;
     void EventEnd() override;
@@ -130,7 +143,7 @@ public:
     void BindCB(int32 slot, GPUConstantBuffer* cb) override;
     void BindSR(int32 slot, GPUResourceView* view) override;
     void BindUA(int32 slot, GPUResourceView* view) override;
-    void BindVB(const Span<GPUBuffer*>& vertexBuffers, const uint32* vertexBuffersOffsets = nullptr) override;
+    void BindVB(const Span<GPUBuffer*>& vertexBuffers, const uint32* vertexBuffersOffsets = nullptr, GPUVertexLayout* vertexLayout = nullptr) override;
     void BindIB(GPUBuffer* indexBuffer) override;
     void BindSampler(int32 slot, GPUSampler* sampler) override;
     void UpdateCB(GPUConstantBuffer* cb, const void* data) override;
@@ -145,7 +158,7 @@ public:
     void SetScissor(const Rectangle& scissorRect) override;
     GPUPipelineState* GetState() const override;
     void SetState(GPUPipelineState* state) override;
-    void ClearState() override;
+    void ResetState() override;
     void FlushState() override;
     void Flush() override;
     void UpdateBuffer(GPUBuffer* buffer, const void* data, uint32 size, uint32 offset) override;
@@ -156,6 +169,7 @@ public:
     void CopyCounter(GPUBuffer* dstBuffer, uint32 dstOffset, GPUBuffer* srcBuffer) override;
     void CopyResource(GPUResource* dstResource, GPUResource* srcResource) override;
     void CopySubresource(GPUResource* dstResource, uint32 dstSubresource, GPUResource* srcResource, uint32 srcSubresource) override;
+    void OverlapUA(bool end) override;
 };
 
 #endif

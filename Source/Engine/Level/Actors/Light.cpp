@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Light.h"
 #include "../Scene/Scene.h"
@@ -107,6 +107,7 @@ void LightWithShadow::Serialize(SerializeStream& stream, const void* otherObj)
     SERIALIZE(ContactShadowsLength);
     SERIALIZE(ShadowsUpdateRate);
     SERIALIZE(ShadowsUpdateRateAtDistance);
+    SERIALIZE(ShadowsResolution);
 }
 
 void LightWithShadow::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
@@ -125,4 +126,5 @@ void LightWithShadow::Deserialize(DeserializeStream& stream, ISerializeModifier*
     DESERIALIZE(ContactShadowsLength);
     DESERIALIZE(ShadowsUpdateRate);
     DESERIALIZE(ShadowsUpdateRateAtDistance);
+    DESERIALIZE(ShadowsResolution);
 }

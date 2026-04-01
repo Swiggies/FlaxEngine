@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -67,9 +67,7 @@ public:
 
 protected:
     // [Collider]
-#if USE_EDITOR
-    void DrawPhysicsDebug(RenderView& view) override;
-#endif
+    ImplementPhysicsDebug;
     void UpdateBounds() override;
     void GetGeometry(CollisionShape& collision) override;
 };

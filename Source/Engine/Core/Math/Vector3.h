@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -686,6 +686,24 @@ public:
         return result;
     }
 
+    // Performs a spherical linear interpolation between two vectors.
+    static void Slerp(const Vector3Base& start, const Vector3Base& end, T amount, Vector3Base& result) 
+    {
+        T dot = Math::Clamp(Dot(start, end), -1.0f, 1.0f);
+        T theta = Math::Acos(dot) * amount;
+        Vector3Base relativeVector = end - start * dot;
+        relativeVector.Normalize();
+        result = ((start * Math::Cos(theta)) + (relativeVector * Math::Sin(theta)));
+    }
+
+    // Performs a spherical linear interpolation between two vectors.
+    static Vector3Base Slerp(const Vector3Base& start, const Vector3Base& end, T amount)
+    {
+        Vector3Base result;
+        Slerp(start, end, amount, result);
+        return result;
+    }
+
     // Performs a cubic interpolation between two vectors.
     static void SmoothStep(const Vector3Base& start, const Vector3Base& end, T amount, Vector3Base& result)
     {
@@ -812,12 +830,21 @@ public:
     static FLAXENGINE_API T TriangleArea(const Vector3Base& v0, const Vector3Base& v1, const Vector3Base& v2);
 
     /// <summary>
-    /// Calculates the angle (in radians) between from and to. This is always the smallest value.
+    /// Calculates the angle (in degrees) between from and to vectors. This is always the smallest value.
     /// </summary>
     /// <param name="from">The first vector.</param>
     /// <param name="to">The second vector.</param>
-    /// <returns>The angle (in radians).</returns>
+    /// <returns>The angle (in degrees).</returns>
     static FLAXENGINE_API T Angle(const Vector3Base& from, const Vector3Base& to);
+
+    /// <summary>
+    /// Calculates the signed angle (in degrees) between from and to vectors. This is always the smallest value. The sign of the result depends on: the order of input vectors, and the direction of the axis vector.
+    /// </summary>
+    /// <param name="from">The first vector.</param>
+    /// <param name="to">The second vector.</param>
+    /// <param name="axis">The axis around which the vectors are rotated.</param>
+    /// <returns>The angle (in degrees).</returns>
+    static FLAXENGINE_API T SignedAngle(const Vector3Base& from, const Vector3Base& to, const Vector3Base& axis);
 
     /// <summary>
     /// Snaps the input position onto the grid.

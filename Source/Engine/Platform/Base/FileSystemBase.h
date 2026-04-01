@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -284,6 +284,6 @@ public:
     /// <returns>Relative path</returns>
     static String ConvertAbsolutePathToRelative(const String& basePath, const String& path);
 
-private:
     static bool DirectoryCopyHelper(const String& dst, const String& src, bool withSubDirectories);
+    static bool PathFilterHelper(const char* path, const char* searchPattern);
 };

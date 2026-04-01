@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -8,6 +8,11 @@
 #include "Engine/Core/Math/Viewport.h"
 #include "PixelFormat.h"
 #include "Config.h"
+
+#if PLATFORM_WIN32
+// Fix nasty Win32 define garbage
+#undef MemoryBarrier
+#endif
 
 class GPUConstantBuffer;
 class GPUShaderProgramCS;
@@ -20,6 +25,9 @@ class GPUResource;
 class GPUResourceView;
 class GPUTextureView;
 class GPUBufferView;
+class GPUVertexLayout;
+struct GPUPass;
+enum class GPUResourceAccess;
 
 // Gets the GPU texture view. Checks if pointer is not null and texture has one or more mip levels loaded.
 #define GET_TEXTURE_VIEW_SAFE(t) (t && t->ResidentMipLevels() > 0 ? t->View() : nullptr)
@@ -147,6 +155,11 @@ public:
     /// </summary>
     virtual void FrameEnd();
 
+    /// <summary>
+    /// Called after performing final swapchain presentation and submitting all GPU commands.
+    /// </summary>
+    virtual void OnPresent();
+
 public:
 #if GPU_ALLOW_PROFILE_EVENTS
     /// <summary>
@@ -173,8 +186,10 @@ public:
 
     /// <summary>
     /// Determines whether depth buffer is binded to the pipeline.
+    /// [Deprecated in v1.10]
     /// </summary>
     /// <returns><c>true</c> if  depth buffer is binded; otherwise, <c>false</c>.</returns>
+    DEPRECATED("IsDepthBufferBinded has been deprecated and will be removed in future")
     virtual bool IsDepthBufferBinded() = 0;
 
 public:
@@ -408,7 +423,8 @@ public:
     /// </summary>
     /// <param name="vertexBuffers">The array of vertex buffers to use.</param>
     /// <param name="vertexBuffersOffsets">The optional array of byte offsets from the vertex buffers begins. Can be used to offset the vertex data when reusing the same buffer allocation for multiple geometry objects.</param>
-    API_FUNCTION() virtual void BindVB(const Span<GPUBuffer*>& vertexBuffers, const uint32* vertexBuffersOffsets = nullptr) = 0;
+    /// <param name="vertexLayout">The optional vertex layout to use when passing data from vertex buffers to the vertex shader. If null, layout will be automatically extracted from vertex buffers combined.</param>
+    API_FUNCTION() virtual void BindVB(const Span<GPUBuffer*>& vertexBuffers, const uint32* vertexBuffersOffsets = nullptr, GPUVertexLayout* vertexLayout = nullptr) = 0;
 
     /// <summary>
     /// Binds the index buffer to the pipeline.
@@ -601,8 +617,17 @@ public:
 
     /// <summary>
     /// Clears the context state.
+    /// [Deprecated in v1.12]
     /// </summary>
-    API_FUNCTION() virtual void ClearState() = 0;
+    API_FUNCTION() DEPRECATED("Use ResetState instead") void ClearState()
+    {
+        ResetState();
+    }
+
+    /// <summary>
+    /// Resets the context state.
+    /// </summary>
+    API_FUNCTION() virtual void ResetState() = 0;
 
     /// <summary>
     /// Flushes the internal cached context state with a command buffer.
@@ -623,4 +648,24 @@ public:
     /// Forces graphics backend to rebind descriptors after command list was used by external graphics library.
     /// </summary>
     virtual void ForceRebindDescriptors();
+
+protected:
+    friend GPUPass;
+    int32 _pass = 0;
+
+public:
+    // Performs resource state transition into a specific access (mask).
+    virtual void Transition(GPUResource* resource, GPUResourceAccess access)
+    {
+    }
+
+    // Inserts a global memory barrier on data copies between resources.
+    virtual void MemoryBarrier()
+    {
+    }
+
+    // Begins or ends unordered access resource overlap region that allows running different compute shader dispatches simultaneously.
+    virtual void OverlapUA(bool end)
+    {
+    }
 };

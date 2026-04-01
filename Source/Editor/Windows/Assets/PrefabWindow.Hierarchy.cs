@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -32,16 +32,16 @@ namespace FlaxEditor.Windows.Assets
             }
 
             /// <inheritdoc />
-            public override void Spawn(Actor actor, Actor parent)
+            public override void Spawn(Actor actor, Actor parent, int orderInParent = -1)
             {
-                _window.Spawn(actor, parent);
+                _window.Spawn(actor, parent, orderInParent);
             }
 
             /// <inheritdoc />
             public override Undo Undo => _window.Undo;
 
             /// <inheritdoc />
-            public override List<SceneGraphNode> Selection => _window.Selection;
+            public override ISceneEditingContext SceneContext => _window;
         }
 
         /// <summary>
@@ -56,6 +56,7 @@ namespace FlaxEditor.Windows.Assets
             public PrefabTree()
             : base(true)
             {
+                DrawRootTreeLine = false;
             }
         }
 
@@ -252,6 +253,10 @@ namespace FlaxEditor.Windows.Assets
 
             public override void OnDestroy()
             {
+                if (IsDisposing)
+                    return;
+                base.OnDestroy();
+
                 _window = null;
                 _dragAssets = null;
                 _dragActorType = null;
@@ -259,8 +264,6 @@ namespace FlaxEditor.Windows.Assets
                 _dragScriptItems = null;
                 _dragHandlers?.Clear();
                 _dragHandlers = null;
-
-                base.OnDestroy();
             }
         }
 
@@ -428,6 +431,12 @@ namespace FlaxEditor.Windows.Assets
         }
 
         /// <inheritdoc />
+        public void DeleteSelection()
+        {
+            Delete();
+        }
+
+        /// <inheritdoc />
         public void FocusSelection()
         {
             _viewport.FocusSelection();
@@ -484,13 +493,19 @@ namespace FlaxEditor.Windows.Assets
         /// </summary>
         /// <param name="actor">The actor.</param>
         /// <param name="parent">The parent.</param>
-        public void Spawn(Actor actor, Actor parent)
+        /// <param name="orderInParent">The order of the actor under the parent.</param>
+        /// <param name="autoSelect">True if automatically select the spawned actor, otherwise false.</param>
+        public void Spawn(Actor actor, Actor parent, int orderInParent = -1, bool autoSelect = true)
         {
             if (actor == null)
                 throw new ArgumentNullException(nameof(actor));
 
             // Link it
             actor.Parent = parent ?? throw new ArgumentNullException(nameof(parent));
+
+            // Set order in parent
+            if (orderInParent != -1)
+                actor.OrderInParent = orderInParent;
 
             // Peek spawned node
             var actorNode = SceneGraphFactory.FindNode(actor.ID) as ActorNode ?? SceneGraphFactory.BuildActorNode(actor);
@@ -506,8 +521,11 @@ namespace FlaxEditor.Windows.Assets
             // Create undo action
             var action = new CustomDeleteActorsAction(new List<SceneGraphNode>(1) { actorNode }, true);
             Undo.AddAction(action);
-            Focus();
-            Select(actorNode);
+            if (autoSelect)
+            {
+                Focus();
+                Select(actorNode);
+            }
         }
 
         private void OnTreeRightClick(TreeNode node, Float2 location)

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -11,7 +11,7 @@
 /// Renders model on the screen.
 /// </summary>
 API_CLASS(Attributes="ActorContextMenu(\"New/Model\"), ActorToolbox(\"Visuals\")")
-class FLAXENGINE_API StaticModel : public ModelInstanceActor
+class FLAXENGINE_API StaticModel : public ModelInstanceActor, IAssetReference
 {
     DECLARE_SCENE_OBJECT(StaticModel);
 private:
@@ -23,6 +23,7 @@ private:
     bool _vertexColorsDirty;
     byte _vertexColorsCount;
     int8 _sortOrder;
+    DrawPass _drawModes = DrawPass::Default;
     Array<Color32> _vertexColorsData[MODEL_MAX_LODS];
     GPUBuffer* _vertexColorsBuffer[MODEL_MAX_LODS];
     Model* _residencyChangedModel = nullptr;
@@ -39,12 +40,6 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorOrder(20), DefaultValue(null), EditorDisplay(\"Model\")")
     AssetReference<Model> Model;
-
-    /// <summary>
-    /// The draw passes to use for rendering this object.
-    /// </summary>
-    API_FIELD(Attributes="EditorOrder(15), DefaultValue(DrawPass.Default), EditorDisplay(\"Model\")")
-    DrawPass DrawModes = DrawPass::Default;
 
     /// <summary>
     /// The baked lightmap entry.
@@ -73,6 +68,17 @@ public:
     /// Sets the model bounds scale. It is useful when using Position Offset to animate the vertices of the object outside of its bounds.
     /// </summary>
     API_PROPERTY() void SetBoundsScale(float value);
+
+    /// <summary>
+    /// Gets the draw passes to use for rendering this object.
+    /// </summary>
+    API_PROPERTY(Attributes="EditorOrder(15), DefaultValue(DrawPass.Default), EditorDisplay(\"Model\")")
+    DrawPass GetDrawModes() const;
+
+    /// <summary>
+    /// Sets the draw passes to use for rendering this object.
+    /// </summary>
+    API_PROPERTY() void SetDrawModes(DrawPass value);
 
     /// <summary>
     /// Gets the model Level Of Detail bias value. Allows to increase or decrease rendered model quality.
@@ -154,10 +160,13 @@ public:
     API_FUNCTION() void RemoveVertexColors();
 
 private:
-    void OnModelChanged();
-    void OnModelLoaded();
     void OnModelResidencyChanged();
     void FlushVertexColors();
+
+    // [IAssetReference]
+    void OnAssetChanged(Asset* asset, void* caller) override;
+    void OnAssetLoaded(Asset* asset, void* caller) override;
+    void OnAssetUnloaded(Asset* asset, void* caller) override;
 
 public:
     // [ModelInstanceActor]
@@ -171,7 +180,8 @@ public:
     MaterialBase* GetMaterial(int32 entryIndex) override;
     bool IntersectsEntry(int32 entryIndex, const Ray& ray, Real& distance, Vector3& normal) override;
     bool IntersectsEntry(const Ray& ray, Real& distance, Vector3& normal, int32& entryIndex) override;
-    bool GetMeshData(const MeshReference& mesh, MeshBufferType type, BytesContainer& result, int32& count) const override;
+    bool GetMeshData(const MeshReference& ref, MeshBufferType type, BytesContainer& result, int32& count, GPUVertexLayout** layout) const override;
+    MeshBase* GetMesh(const MeshReference& ref) const override;
     MeshDeformation* GetMeshDeformation() const override;
     void UpdateBounds() override;
 

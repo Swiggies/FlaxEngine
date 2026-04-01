@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "RenderTools.h"
 #include "PixelFormatExtensions.h"
@@ -548,6 +548,13 @@ void RenderTools::ComputeCascadeUpdateFrequency(int32 cascadeIndex, int32 cascad
     }
 }
 
+bool RenderTools::ShouldUpdateCascade(int32 frameIndex, int32 cascadeIndex, int32 cascadeCount, int32 updateMaxCountPerFrame, bool updateForce)
+{
+    int32 updateFrequency, updatePhrase;
+    ComputeCascadeUpdateFrequency(cascadeIndex, cascadeCount, updateFrequency, updatePhrase, updateMaxCountPerFrame);
+    return (frameIndex % updateFrequency == updatePhrase) || updateForce;
+}
+
 float RenderTools::ComputeTemporalTime()
 {
     const float time = Time::Draw.UnscaledTime.GetTotalSeconds();
@@ -557,6 +564,26 @@ float RenderTools::ComputeTemporalTime()
 }
 
 void RenderTools::CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal)
+{
+    // [Deprecated in v1.10]
+    Float3 n;
+    Float4 t;
+    CalculateTangentFrame(n, t, normal);
+    resultNormal = FloatR10G10B10A2(n, 0);
+    resultTangent = FloatR10G10B10A2(t);
+}
+
+void RenderTools::CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal, const Float3& tangent)
+{
+    // [Deprecated in v1.10]
+    Float3 n;
+    Float4 t;
+    CalculateTangentFrame(n, t, normal, tangent);
+    resultNormal = FloatR10G10B10A2(n, 0);
+    resultTangent = FloatR10G10B10A2(t);
+}
+
+void RenderTools::CalculateTangentFrame(Float3& resultNormal, Float4& resultTangent, const Float3& normal)
 {
     // Calculate tangent
     const Float3 c1 = Float3::Cross(normal, Float3::UnitZ);
@@ -568,19 +595,19 @@ void RenderTools::CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10
     const byte sign = static_cast<byte>(Float3::Dot(Float3::Cross(bitangent, normal), tangent) < 0.0f ? 1 : 0);
 
     // Set tangent frame
-    resultNormal = Float1010102(normal * 0.5f + 0.5f, 0);
-    resultTangent = Float1010102(tangent * 0.5f + 0.5f, sign);
+    resultNormal = normal * 0.5f + 0.5f;
+    resultTangent = Float4(tangent * 0.5f + 0.5f, sign);
 }
 
-void RenderTools::CalculateTangentFrame(FloatR10G10B10A2& resultNormal, FloatR10G10B10A2& resultTangent, const Float3& normal, const Float3& tangent)
+void RenderTools::CalculateTangentFrame(Float3& resultNormal, Float4& resultTangent, const Float3& normal, const Float3& tangent)
 {
     // Calculate bitangent sign
     const Float3 bitangent = Float3::Normalize(Float3::Cross(normal, tangent));
     const byte sign = static_cast<byte>(Float3::Dot(Float3::Cross(bitangent, normal), tangent) < 0.0f ? 1 : 0);
 
     // Set tangent frame
-    resultNormal = Float1010102(normal * 0.5f + 0.5f, 0);
-    resultTangent = Float1010102(tangent * 0.5f + 0.5f, sign);
+    resultNormal = normal * 0.5f + 0.5f;
+    resultTangent = Float4(tangent * 0.5f + 0.5f, sign);
 }
 
 void RenderTools::ComputeSphereModelDrawMatrix(const RenderView& view, const Float3& position, float radius, Matrix& resultWorld, bool& resultIsViewInside)
@@ -598,6 +625,40 @@ void RenderTools::ComputeSphereModelDrawMatrix(const RenderView& view, const Flo
 
     // Check if view is inside the sphere
     resultIsViewInside = Float3::DistanceSquared(view.Position, position) < Math::Square(radius * 1.1f); // Manually tweaked bias
+}
+
+Float3 RenderTools::GetColorQuantizationError(PixelFormat format)
+{
+    Float3 mantissaBits;
+    switch (format)
+    {
+    case PixelFormat::R11G11B10_Float:
+        mantissaBits = Float3(6, 6, 5);
+        break;
+    case PixelFormat::R10G10B10A2_UNorm:
+        mantissaBits = Float3(10, 10, 10);
+        break;
+    case PixelFormat::R16G16B16A16_Float:
+        mantissaBits = Float3(16, 16, 16);
+        break;
+    case PixelFormat::R32G32B32A32_Float:
+        mantissaBits = Float3(23, 23, 23);
+        break;
+    case PixelFormat::R9G9B9E5_SharedExp:
+        mantissaBits = Float3(5, 6, 5);
+        break;
+    case PixelFormat::R8G8B8A8_UNorm:
+    case PixelFormat::B8G8R8A8_UNorm:
+        mantissaBits = Float3(8, 8, 8);
+        break;
+    default:
+        return Float3::Zero;
+    }
+    return {
+        Math::Pow(0.5f, mantissaBits.X),
+        Math::Pow(0.5f, mantissaBits.Y),
+        Math::Pow(0.5f, mantissaBits.Z)
+    };
 }
 
 int32 MipLevelsCount(int32 width)
@@ -639,21 +700,4 @@ int32 MipLevelsCount(int32 width, int32 height, int32 depth)
         result++;
     }
     return result;
-}
-
-void MeshBase::SetMaterialSlotIndex(int32 value)
-{
-    if (value < 0 || value >= _model->MaterialSlots.Count())
-    {
-        LOG(Warning, "Cannot set mesh material slot to {0} while model has {1} slots.", value, _model->MaterialSlots.Count());
-        return;
-    }
-
-    _materialSlotIndex = value;
-}
-
-void MeshBase::SetBounds(const BoundingBox& box)
-{
-    _box = box;
-    BoundingSphere::FromBox(box, _sphere);
 }

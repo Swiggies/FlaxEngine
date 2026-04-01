@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "AnimationGraph.h"
 #if USE_EDITOR
@@ -9,6 +9,7 @@
 #include "Engine/Core/Types/DataContainer.h"
 #include "Engine/Serialization/MemoryReadStream.h"
 #include "Engine/Serialization/MemoryWriteStream.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Content/Factories/BinaryAssetFactory.h"
 #include "Engine/Animations/Animations.h"
 #include "Engine/Threading/Threading.h"
@@ -25,7 +26,7 @@ AnimationGraph::AnimationGraph(const SpawnParams& params, const AssetInfo* info)
 
 Asset::LoadResult AnimationGraph::load()
 {
-    ConcurrentSystemLocker::WriteScope systemScope(Animations::SystemLocker);
+    PROFILE_MEM(AnimationsData);
 
     // Get stream with graph data
     const auto surfaceChunk = GetChunk(0);
@@ -51,7 +52,7 @@ Asset::LoadResult AnimationGraph::load()
 
 void AnimationGraph::unload(bool isReloading)
 {
-    ConcurrentSystemLocker::WriteScope systemScope(Animations::SystemLocker);
+    ScopeWriteLock systemScope(Animations::SystemLocker);
     Graph.Clear();
 }
 
@@ -83,7 +84,7 @@ bool AnimationGraph::InitAsAnimation(SkinnedModel* baseModel, Animation* anim, b
         Log::ArgumentNullException();
         return true;
     }
-    ConcurrentSystemLocker::WriteScope systemScope(Animations::SystemLocker);
+    PROFILE_MEM(AnimationsData);
 
     // Create Graph data
     MemoryWriteStream writeStream(512);
@@ -128,11 +129,11 @@ bool AnimationGraph::InitAsAnimation(SkinnedModel* baseModel, Animation* anim, b
 
     // Load Graph data (with initialization)
     ScopeLock lock(Locker);
-    MemoryReadStream readStream(writeStream.GetHandle(), writeStream.GetPosition());
+    MemoryReadStream readStream(ToSpan(writeStream));
     return Graph.Load(&readStream, USE_EDITOR);
 }
 
-BytesContainer AnimationGraph::LoadSurface()
+BytesContainer AnimationGraph::LoadSurface() const
 {
     if (!IsVirtual() && WaitForLoaded())
         return BytesContainer();
@@ -145,7 +146,7 @@ BytesContainer AnimationGraph::LoadSurface()
         if (!Graph.Save(&stream, USE_EDITOR))
         {
             BytesContainer result;
-            result.Copy(stream.GetHandle(), stream.GetPosition());
+            result.Copy(ToSpan(stream));
             return result;
         }
     }
@@ -165,19 +166,10 @@ BytesContainer AnimationGraph::LoadSurface()
 
 #if USE_EDITOR
 
-bool AnimationGraph::SaveSurface(BytesContainer& data)
+bool AnimationGraph::SaveSurface(const BytesContainer& data)
 {
-    // Wait for asset to be loaded or don't if last load failed
-    if (LastLoadFailed())
-    {
-        LOG(Warning, "Saving asset that failed to load.");
-    }
-    else if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave())
         return true;
-    }
-    ConcurrentSystemLocker::WriteScope systemScope(Animations::SystemLocker);
     ScopeLock lock(Locker);
 
     if (IsVirtual())
@@ -211,7 +203,7 @@ void AnimationGraph::FindDependencies(AnimGraphBase* graph)
 {
     for (const auto& node : graph->Nodes)
     {
-        if (node.Type == GRAPH_NODE_MAKE_TYPE(9, 24))
+        if (node.Type == GRAPH_NODE_MAKE_TYPE(9, 24) && node.Assets.Count() > 0)
         {
             const auto function = node.Assets[0].As<AnimationGraphFunction>();
             if (function)
@@ -231,6 +223,19 @@ void AnimationGraph::GetReferences(Array<Guid>& assets, Array<String>& files) co
 {
     BinaryAsset::GetReferences(assets, files);
     Graph.GetReferences(assets);
+}
+
+bool AnimationGraph::Save(const StringView& path)
+{
+    if (OnCheckSave(path))
+        return true;
+    ScopeLock lock(Locker);
+    MemoryWriteStream writeStream;
+    if (Graph.Save(&writeStream, true))
+        return true;
+    BytesContainer data;
+    data.Link(ToSpan(writeStream));
+    return SaveSurface(data);
 }
 
 #endif

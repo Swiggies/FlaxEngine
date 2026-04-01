@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -48,9 +48,7 @@ public:
     static String CompactShaderPath(StringView path);
 
 private:
-
-    static ShaderCompiler* CreateCompiler(ShaderProfile profile);
-    static ShaderCompiler* RequestCompiler(ShaderProfile profile);
+    static ShaderCompiler* RequestCompiler(ShaderProfile profile, PlatformType platform);
     static void FreeCompiler(ShaderCompiler* compiler);
 };
 

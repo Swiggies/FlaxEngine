@@ -1,9 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "NavMeshData.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Serialization/WriteStream.h"
 #include "Engine/Serialization/MemoryReadStream.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 
 void NavMeshData::Save(WriteStream& stream)
 {
@@ -47,6 +48,7 @@ bool NavMeshData::Load(BytesContainer& data, bool copyData)
         return true;
     }
     MemoryReadStream stream(data.Get(), data.Length());
+    PROFILE_MEM(Navigation);
 
     // Read header
     const auto header = stream.Move<NavMeshDataHeader>();
@@ -80,7 +82,7 @@ bool NavMeshData::Load(BytesContainer& data, bool copyData)
         tile.Layer = tileHeader->Layer;
 
         // Read tile data
-        const auto tileData = stream.Move<byte>(tileHeader->DataSize);
+        const auto* tileData = (const byte*)stream.Move(tileHeader->DataSize);
         if (copyData)
             tile.Data.Copy(tileData, tileHeader->DataSize);
         else

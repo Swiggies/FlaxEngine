@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.IO;
 using System.Xml;
@@ -58,11 +58,8 @@ namespace FlaxEditor.Windows.Assets
                 {
                     var window = ((TexturePropertiesProxy)Values[0])._window;
                     var texture = window?.Asset;
-                    if (texture == null || !texture.IsLoaded)
-                    {
-                        layout.Label("Loading...", TextAlignment.Center);
+                    if (Utilities.Utils.OnAssetProperties(layout, texture))
                         return;
-                    }
 
                     // Texture info
                     var general = layout.Group("General");
@@ -146,7 +143,8 @@ namespace FlaxEditor.Windows.Assets
                     base.Initialize(layout);
 
                     // Creates the import path UI
-                    Utilities.Utils.CreateImportPathUI(layout, proxy._window.Item as BinaryAssetItem);
+                    var group = layout.Group("Import Path");
+                    Utilities.Utils.CreateImportPathUI(group, proxy._window.Item as BinaryAssetItem);
 
                     // Reimport
                     layout.Space(5);
@@ -187,11 +185,13 @@ namespace FlaxEditor.Windows.Assets
             /// <inheritdoc />
             public override void OnDestroy()
             {
+                if (IsDisposing)
+                    return;
+                base.OnDestroy();
+
                 Presenter.Deselect();
                 Presenter = null;
                 Proxy = null;
-
-                base.OnDestroy();
             }
         }
 

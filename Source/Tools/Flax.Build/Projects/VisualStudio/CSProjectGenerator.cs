@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -26,7 +26,7 @@ namespace Flax.Build.Projects.VisualStudio
         public override TargetType? Type => TargetType.DotNet;
 
         /// <inheritdoc />
-        public override void GenerateProject(Project project, string solutionPath)
+        public override void GenerateProject(Project project, string solutionPath, bool isMainProject)
         {
             var csProjectFileContent = new StringBuilder();
 
@@ -50,7 +50,9 @@ namespace Flax.Build.Projects.VisualStudio
                 projectTypes = ProjectTypeGuids.ToOption(ProjectTypeGuids.FlaxVS) + ';' + projectTypes;
 
             // Try to reuse the existing project guid from solution file
-            vsProject.ProjectGuid = GetProjectGuid(solutionPath, vsProject.Name);
+            vsProject.ProjectGuid = GetProjectGuid(vsProject.Path, vsProject.Name);
+            if (vsProject.ProjectGuid == Guid.Empty)
+                vsProject.ProjectGuid = GetProjectGuid(solutionPath, vsProject.Name);
             if (vsProject.ProjectGuid == Guid.Empty)
                 vsProject.ProjectGuid = Guid.NewGuid();
 
@@ -173,6 +175,19 @@ namespace Flax.Build.Projects.VisualStudio
                 csProjectFileContent.AppendLine(string.Format("    <DocumentationFile>{0}\\{1}.CSharp.xml</DocumentationFile>", outputPath, project.BaseName));
                 csProjectFileContent.AppendLine("    <UseVSHostingProcess>true</UseVSHostingProcess>");
                 csProjectFileContent.AppendLine("  </PropertyGroup>");
+            }
+
+            // Nuget
+            if (project.CSharp.NugetPackageReferences.Any())
+            {
+                csProjectFileContent.AppendLine("  <ItemGroup>");
+            
+                foreach (var reference in project.CSharp.NugetPackageReferences)
+                {
+                    csProjectFileContent.AppendLine(string.Format("    <PackageReference Include=\"{0}\" Version=\"{1}\" />", reference.Name, reference.Version));
+                }
+
+                csProjectFileContent.AppendLine("  </ItemGroup>");
             }
 
             // References

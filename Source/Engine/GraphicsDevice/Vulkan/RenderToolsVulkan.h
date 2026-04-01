@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -11,22 +11,16 @@
 
 #if GRAPHICS_API_VULKAN
 
-#if GPU_ENABLE_ASSERTION
-
-// Vulkan results validation
-#define VALIDATE_VULKAN_RESULT(x) { VkResult result = x; if (result != VK_SUCCESS) RenderToolsVulkan::ValidateVkResult(result, __FILE__, __LINE__); }
+#define VALIDATE_VULKAN_RESULT(x) { VkResult result = x; if (result != VK_SUCCESS) RenderToolsVulkan::LogVkResult(result, __FILE__, __LINE__, true); }
 #define LOG_VULKAN_RESULT(result) if (result != VK_SUCCESS) RenderToolsVulkan::LogVkResult(result, __FILE__, __LINE__)
 #define LOG_VULKAN_RESULT_WITH_RETURN(result) if (result != VK_SUCCESS) { RenderToolsVulkan::LogVkResult(result, __FILE__, __LINE__); return true; }
+#if GPU_ENABLE_ASSERTION
 #define VK_SET_DEBUG_NAME(device, handle, type, name) RenderToolsVulkan::SetObjectName(device->Device, (uint64)handle, type, name)
-
 #else
-
-#define VALIDATE_VULKAN_RESULT(x) x
-#define LOG_VULKAN_RESULT(result) if (result != VK_SUCCESS) RenderToolsVulkan::LogVkResult(result)
-#define LOG_VULKAN_RESULT_WITH_RETURN(result) if (result != VK_SUCCESS) { RenderToolsVulkan::LogVkResult(result); return true; }
 #define VK_SET_DEBUG_NAME(device, handle, type, name)
-
 #endif
+
+enum class GPUResourceAccess;
 
 /// <summary>
 /// Set of utilities for rendering on Vulkan platform.
@@ -46,9 +40,10 @@ public:
 #endif
 
     static String GetVkErrorString(VkResult result);
-    static void ValidateVkResult(VkResult result, const char* file, uint32 line);
-    static void LogVkResult(VkResult result, const char* file, uint32 line);
-    static void LogVkResult(VkResult result);
+    static void LogVkResult(VkResult result, const char* file = nullptr, uint32 line = 0, bool fatal = false);
+
+    static VkAccessFlags GetAccess(GPUResourceAccess access);
+    static VkImageLayout GetImageLayout(GPUResourceAccess access);
 
     static inline VkPipelineStageFlags GetBufferBarrierFlags(VkAccessFlags accessFlags)
     {
@@ -77,6 +72,9 @@ public:
         case VK_ACCESS_SHADER_WRITE_BIT:
             stageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
             break;
+        case VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT:
+            stageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            break;
         case VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT:
         case VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT:
             stageFlags = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
@@ -94,7 +92,7 @@ public:
         switch (layout)
         {
         case VK_IMAGE_LAYOUT_UNDEFINED:
-            accessFlags = 0;
+            accessFlags = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
             stageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
             break;
         case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
@@ -102,7 +100,7 @@ public:
             stageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
             break;
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
-            accessFlags = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            accessFlags = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
             stageFlags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
             break;
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
@@ -116,12 +114,12 @@ public:
             stageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
             break;
         case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-            accessFlags = 0;
+            accessFlags = VK_ACCESS_NONE;
             stageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
             break;
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
             accessFlags = VK_ACCESS_SHADER_READ_BIT;
-            stageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            stageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
             break;
         case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
         case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -73,7 +73,7 @@ namespace FlaxEngine
 #if FLAX_EDITOR
     [System.ComponentModel.TypeConverter(typeof(TypeConverters.Vector3Converter))]
 #endif
-    public unsafe partial struct Vector3 : IEquatable<Vector3>, IFormattable
+    public unsafe partial struct Vector3 : IEquatable<Vector3>, IFormattable, Json.ICustomValueEquals
     {
         private static readonly string _formatString = "X:{0:F2} Y:{1:F2} Z:{2:F2}";
 
@@ -1044,6 +1044,33 @@ namespace FlaxEngine
         }
 
         /// <summary>
+        /// Performs a spherical linear interpolation between two vectors.
+        /// </summary>
+        /// <param name="start">Start vector.</param>
+        /// <param name="end">End vector.</param>
+        /// <param name="amount">Value between 0 and 1 indicating the weight of <paramref name="end" />.</param>
+        /// <param name="result">When the method completes, contains the linear interpolation of the two vectors.</param>
+        public static void Slerp(ref Vector3 start, ref Vector3 end, float amount, out Vector3 result)
+        {
+            var dot = Mathr.Clamp(Dot(start, end), -1.0f, 1.0f);
+            var theta = Mathr.Acos(dot) * amount;
+            Vector3 relativeVector = (end - start * dot).Normalized;
+            result = ((start * Mathr.Cos(theta)) + (relativeVector * Mathr.Sin(theta)));
+        }
+
+        /// <summary>
+        /// Performs a spherical linear interpolation between two vectors.
+        /// </summary>
+        /// <param name="start">Start vector.</param>
+        /// <param name="end">End vector.</param>
+        /// <param name="amount">Value between 0 and 1 indicating the weight of <paramref name="end" />.</param>
+        public static Vector3 Slerp(Vector3 start, Vector3 end, float amount)
+        {
+            Slerp(ref start, ref end, amount, out var result);
+            return result;
+        }
+
+        /// <summary>
         /// Performs a gradual change of a vector towards a specified target over time
         /// </summary>
         /// <param name="current">Current vector.</param>
@@ -1345,7 +1372,7 @@ namespace FlaxEngine
         }
 
         /// <summary>
-        /// Calculates the angle (in degrees) between <paramref name="from"/> and <paramref name="to"/>. This is always the smallest value.
+        /// Calculates the angle (in degrees) between <paramref name="from"/> and <paramref name="to"/> vectors. This is always the smallest value.
         /// </summary>
         /// <param name="from">The first vector.</param>
         /// <param name="to">The second vector.</param>
@@ -1356,6 +1383,21 @@ namespace FlaxEngine
             if (Mathr.Abs(dot) > (1.0f - Mathr.Epsilon))
                 return dot > 0.0f ? 0.0f : 180.0f;
             return (Real)Math.Acos(dot) * Mathr.RadiansToDegrees;
+        }
+
+        /// <summary>
+        /// Calculates the signed angle (in degrees) between <paramref name="from"/> and <paramref name="to"/> vectors. This is always the smallest value. The sign of the result depends on: the order of input vectors, and the direction of the <paramref name="axis"/> vector.
+        /// </summary>
+        /// <param name="from">The first vector.</param>
+        /// <param name="to">The second vector.</param>
+        /// <param name="axis">The axis around which the vectors are rotated.</param>
+        /// <returns>The angle (in degrees).</returns>
+        public static Real SignedAngle(Vector3 from, Vector3 to, Vector3 axis)
+        {
+            Real angle = Angle(from, to);
+            Vector3 cross = Cross(from, to);
+            Real sign = Mathr.Sign(axis.X * cross.X + axis.Y * cross.Y + axis.Z * cross.Z);
+            return angle * sign;
         }
 
         /// <summary>
@@ -1995,7 +2037,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(Vector3 left, Vector3 right)
         {
-            return Mathr.NearEqual(left.X, right.X) && Mathr.NearEqual(left.Y, right.Y) && Mathr.NearEqual(left.Z, right.Z);
+            return left.Equals(ref right);
         }
 
         /// <summary>
@@ -2007,7 +2049,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator !=(Vector3 left, Vector3 right)
         {
-            return !Mathr.NearEqual(left.X, right.X) || !Mathr.NearEqual(left.Y, right.Y) || !Mathr.NearEqual(left.Z, right.Z);
+            return !left.Equals(ref right);
         }
 
         /// <summary>
@@ -2118,6 +2160,13 @@ namespace FlaxEngine
             }
         }
 
+        /// <inheritdoc />
+        public bool ValueEquals(object other)
+        {
+            var o = (Vector3)other;
+            return Equals(ref o);
+        }
+
         /// <summary>
         /// Determines whether the specified <see cref="Vector3" /> is equal to this instance.
         /// </summary>
@@ -2126,7 +2175,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ref Vector3 other)
         {
-            return Mathr.NearEqual(other.X, X) && Mathr.NearEqual(other.Y, Y) && Mathr.NearEqual(other.Z, Z);
+            return X == other.X && Y == other.Y && Z == other.Z;
         }
 
         /// <summary>
@@ -2137,7 +2186,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(Vector3 other)
         {
-            return Mathr.NearEqual(other.X, X) && Mathr.NearEqual(other.Y, Y) && Mathr.NearEqual(other.Z, Z);
+            return Equals(ref other);
         }
 
         /// <summary>
@@ -2147,7 +2196,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public override bool Equals(object value)
         {
-            return value is Vector3 other && Mathr.NearEqual(other.X, X) && Mathr.NearEqual(other.Y, Y) && Mathr.NearEqual(other.Z, Z);
+            return value is Vector3 other && Equals(ref other);
         }
     }
 }

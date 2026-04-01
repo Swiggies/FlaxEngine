@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Content.Thumbnails;
@@ -130,6 +130,11 @@ namespace FlaxEditor.Content
             eyeAdaptation.Mode = EyeAdaptationMode.None;
             eyeAdaptation.OverrideFlags |= EyeAdaptationSettingsOverride.Mode;
             preview.PostFxVolume.EyeAdaptation = eyeAdaptation;
+
+            var antiAliasing = preview.PostFxVolume.AntiAliasing;
+            antiAliasing.Mode = AntialiasingMode.FastApproximateAntialiasing;
+            antiAliasing.OverrideFlags |= AntiAliasingSettingsOverride.Mode;
+            preview.PostFxVolume.AntiAliasing = antiAliasing;
         }
     }
 }

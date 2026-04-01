@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "JsonAsset.h"
 #if USE_EDITOR
@@ -20,6 +20,7 @@
 #include "Engine/Core/Cache.h"
 #include "Engine/Debug/Exceptions/JsonParseException.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Scripting/Scripting.h"
 #include "Engine/Scripting/ManagedCLR/MClass.h"
 #include "Engine/Scripting/ManagedCLR/MField.h"
@@ -39,6 +40,7 @@ String JsonAssetBase::GetData() const
     if (Data == nullptr)
         return String::Empty;
     PROFILE_CPU_NAMED("JsonAsset.GetData");
+    PROFILE_MEM(ContentAssets);
     rapidjson_flax::StringBuffer buffer;
     OnGetData(buffer);
     return String((const char*)buffer.GetString(), (int32)buffer.GetSize());
@@ -49,6 +51,7 @@ void JsonAssetBase::SetData(const StringView& value)
     if (!IsLoaded())
         return;
     PROFILE_CPU_NAMED("JsonAsset.SetData");
+    PROFILE_MEM(ContentAssets);
     const StringAnsi dataJson(value);
     ScopeLock lock(Locker);
     const StringView dataTypeName = DataTypeName;
@@ -60,6 +63,7 @@ void JsonAssetBase::SetData(const StringView& value)
 
 bool JsonAssetBase::Init(const StringView& dataTypeName, const StringAnsiView& dataJson)
 {
+    PROFILE_MEM(ContentAssets);
     unload(true);
     DataTypeName = dataTypeName;
     DataEngineBuild = FLAXENGINE_VERSION_BUILD;
@@ -87,7 +91,7 @@ void JsonAssetBase::OnGetData(rapidjson_flax::StringBuffer& buffer) const
     Data->Accept(writerObj.GetWriter());
 }
 
-const String& JsonAssetBase::GetPath() const
+StringView JsonAssetBase::GetPath() const
 {
 #if USE_EDITOR
     return _path;
@@ -161,28 +165,22 @@ void JsonAssetBase::GetReferences(const StringAnsiView& json, Array<Guid>& asset
     FindIds(document, assets, files);
 }
 
-bool JsonAssetBase::Save(const StringView& path) const
+bool JsonAssetBase::Save(const StringView& path)
 {
-    // Validate state
-    if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave(path))
         return true;
-    }
-    if (IsVirtual() && path.IsEmpty())
-    {
-        LOG(Error, "To save virtual asset asset you need to specify the target asset path location.");
-        return true;
-    }
+    PROFILE_CPU();
     ScopeLock lock(Locker);
 
     // Serialize to json to the buffer
     rapidjson_flax::StringBuffer buffer;
     PrettyJsonWriter writerObj(buffer);
-    Save(writerObj);
+    _isResaving = true;
+    saveInternal(writerObj);
+    _isResaving = false;
 
     // Save json to file
-    if (File::WriteAllBytes(path.HasChars() ? path : StringView(GetPath()), (byte*)buffer.GetString(), (int32)buffer.GetSize()))
+    if (File::WriteAllBytes(path.HasChars() ? path : GetPath(), (byte*)buffer.GetString(), (int32)buffer.GetSize()))
     {
         LOG(Error, "Cannot save \'{0}\'", ToString());
         return true;
@@ -193,12 +191,14 @@ bool JsonAssetBase::Save(const StringView& path) const
 
 bool JsonAssetBase::Save(JsonWriter& writer) const
 {
-    // Validate state
-    if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave())
         return true;
-    }
+    
+    return saveInternal(writer);
+}
+
+bool JsonAssetBase::saveInternal(JsonWriter& writer) const
+{
     ScopeLock lock(Locker);
 
     writer.StartObject();
@@ -243,6 +243,7 @@ Asset::LoadResult JsonAssetBase::loadAsset()
 {
     if (IsVirtual() || _isVirtualDocument)
         return LoadResult::Ok;
+    PROFILE_MEM(ContentAssets);
 
     // Load data (raw json file in editor, cooked asset in build game)
 #if USE_EDITOR
@@ -309,6 +310,7 @@ Asset::LoadResult JsonAssetBase::loadAsset()
 
 void JsonAssetBase::unload(bool isReloading)
 {
+    PROFILE_MEM(ContentAssets);
     ISerializable::SerializeDocument tmp;
     Document.Swap(tmp);
     Data = nullptr;
@@ -346,6 +348,61 @@ uint64 JsonAsset::GetMemoryUsage() const
         result += InstanceType.GetType().Size;
     Locker.Unlock();
     return result;
+}
+
+void JsonAsset::OnGetData(rapidjson_flax::StringBuffer& buffer) const
+{
+    if (Instance && InstanceType && _isResaving)
+    {
+        // Serialize instance object that was loaded (from potentially deprecated data, serialize method is always up to date)
+        const ScriptingType& type = InstanceType.GetType();
+        PrettyJsonWriter writer(buffer);
+        bool got = false;
+        switch (type.Type)
+        {
+        case ScriptingTypes::Class:
+        case ScriptingTypes::Structure:
+        {
+            const ScriptingType::InterfaceImplementation* interface = type.GetInterface(ISerializable::TypeInitializer);
+            writer.StartObject();
+            ((ISerializable*)((byte*)Instance + interface->VTableOffset))->Serialize(writer, nullptr);
+            got = true;
+            break;
+        }
+        case ScriptingTypes::Script:
+        {
+            writer.StartObject();
+            ToInterface<ISerializable>((ScriptingObject*)Instance)->Serialize(writer, nullptr);
+            got = true;
+            break;
+        }
+        }
+        if (got)
+        {
+            writer.EndObject();
+
+            // Parse json document (CreateInstance uses it to spawn object)
+            auto* self = const_cast<JsonAsset*>(this);
+            {
+                PROFILE_CPU_NAMED("Json.Parse");
+                self->Document.Parse(buffer.GetString(), buffer.GetSize());
+            }
+            if (self->Document.HasParseError())
+            {
+                self->Data = nullptr;
+                Log::JsonParseException(Document.GetParseError(), Document.GetErrorOffset());
+            }
+            else
+            {
+                self->Data = &self->Document;
+                self->DataEngineBuild = FLAXENGINE_VERSION_BUILD;
+            }
+
+            return;
+        }
+    }
+
+    JsonAssetBase::OnGetData(buffer);
 }
 
 Asset::LoadResult JsonAsset::loadAsset()
@@ -387,6 +444,7 @@ void JsonAsset::onLoaded_MainThread()
     JsonAssetBase::onLoaded_MainThread();
 
     // Special case for Settings assets to flush them after edited and saved in Editor
+    // TODO: add interface for custom JsonAsset interaction of the instance class (eg. OnJsonLoaded, or similar to C# like OnDeserialized from Newtonsoft.Json)
     const StringAsANSI<> dataTypeNameAnsi(DataTypeName.Get(), DataTypeName.Length());
     const auto typeHandle = Scripting::FindScriptingType(StringAnsiView(dataTypeNameAnsi.Get(), DataTypeName.Length()));
     if (Instance && typeHandle && typeHandle.IsSubclassOf(SettingsBase::TypeInitializer) && _isAfterReload)
@@ -401,6 +459,7 @@ bool JsonAsset::CreateInstance()
     ScopeLock lock(Locker);
     if (Instance)
         return false;
+    PROFILE_MEM(ContentAssets);
 
     // Try to scripting type for this data
     const StringAsANSI<> dataTypeNameAnsi(DataTypeName.Get(), DataTypeName.Length());

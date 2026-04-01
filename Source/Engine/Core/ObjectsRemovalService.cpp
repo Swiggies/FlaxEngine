@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ObjectsRemovalService.h"
 #include "Utilities.h"
@@ -19,7 +19,7 @@ namespace
     CriticalSection PoolLocker;
     double LastUpdate;
     float LastUpdateGameTime;
-    Dictionary<Object*, float> Pool(8192);
+    Dictionary<Object*, float> Pool;
     uint64 PoolCounter = 0;
 }
 
@@ -114,6 +114,7 @@ void ObjectsRemovalService::Flush(float dt, float gameDelta)
 
 bool ObjectsRemoval::Init()
 {
+    Pool.EnsureCapacity(8192);
     LastUpdate = Platform::GetTimeSeconds();
     LastUpdateGameTime = 0;
     return false;
@@ -154,9 +155,9 @@ void ObjectsRemoval::Dispose()
 
 Object::~Object()
 {
-#if BUILD_DEBUG
+#if BUILD_DEBUG && 0
     // Prevent removing object that is still reverenced by the removal service
-    ASSERT(!ObjectsRemovalService::IsInPool(this));
+    //ASSERT(!ObjectsRemovalService::IsInPool(this));
 #endif
 }
 

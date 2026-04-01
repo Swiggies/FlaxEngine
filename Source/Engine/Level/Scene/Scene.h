@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -19,6 +19,7 @@ API_CLASS() class FLAXENGINE_API Scene : public Actor
 {
     friend class Level;
     friend class ReloadScriptsAction;
+    friend class SceneLoader;
     DECLARE_SCENE_OBJECT(Scene);
 
     /// <summary>

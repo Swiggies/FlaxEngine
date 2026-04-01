@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_WINDOWS
 
@@ -11,13 +11,14 @@
 #include "Engine/Platform/MemoryStats.h"
 #include "Engine/Platform/BatteryInfo.h"
 #include "Engine/Platform/Base/PlatformUtils.h"
-#include "Engine/Engine/Globals.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Core/Types/Version.h"
 #include "Engine/Core/Collections/Dictionary.h"
 #include "Engine/Core/Collections/Array.h"
 #include "Engine/Platform/MessageBox.h"
 #include "Engine/Engine/Engine.h"
 #include "Engine/Engine/CommandLine.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 #include "../Win32/IncludeWindowsHeaders.h"
 #include <VersionHelpers.h>
 #include <ShellAPI.h>
@@ -41,17 +42,17 @@ void* WindowsPlatform::Instance = nullptr;
 extern "C" {
 static HANDLE dbgHelpLock;
 
-void DbgHelpInit()
+void FlaxDbgHelpInit()
 {
     dbgHelpLock = CreateMutexW(nullptr, FALSE, nullptr);
 }
 
-void DbgHelpLock()
+void FlaxDbgHelpLock()
 {
     WaitForSingleObject(dbgHelpLock, INFINITE);
 }
 
-void DbgHelpUnlock()
+void FlaxDbgHelpUnlock()
 {
     ReleaseMutex(dbgHelpLock);
 }
@@ -256,6 +257,37 @@ void GetWindowsVersion(String& windowsName, int32& versionMajor, int32& versionM
     RegCloseKey(hKey);
 }
 
+#if PLATFORM_ARCH_X86 || PLATFORM_ARCH_X64
+
+struct CPUBrand
+{
+    char Buffer[0x40];
+
+    CPUBrand()
+    {
+        Buffer[0] = 0;
+        int32 cpuInfo[4];
+        __cpuid(cpuInfo, 0x80000000);
+        if (cpuInfo[0] >= 0x80000004)
+        {
+            // Get name
+            for (uint32 i = 0; i < 3; i++)
+            {
+                __cpuid(cpuInfo, 0x80000002 + i);
+                memcpy(Buffer + i * sizeof(cpuInfo), cpuInfo, sizeof(cpuInfo));
+            }
+
+            // Trim ending whitespaces
+            int32 size = StringUtils::Length(Buffer);
+            while (size > 1 && Buffer[size - 1] == ' ')
+                size--;
+            Buffer[size] = 0;
+        }
+    }
+};
+
+#endif
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     // Find window to process that message
@@ -282,7 +314,7 @@ long __stdcall WindowsPlatform::SehExceptionHandler(EXCEPTION_POINTERS* ep)
     }
 
     // Skip if engine already crashed
-    if (Globals::FatalErrorOccurred)
+    if (Engine::FatalError != FatalErrorType::None)
         return EXCEPTION_CONTINUE_SEARCH;
 
     // Get exception info
@@ -326,7 +358,7 @@ long __stdcall WindowsPlatform::SehExceptionHandler(EXCEPTION_POINTERS* ep)
     }
 
     // Crash engine
-    Platform::Fatal(errorMsg.Get(), ep);
+    Platform::Fatal(errorMsg.Get(), ep, FatalErrorType::Exception);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -511,10 +543,70 @@ void WindowsPlatform::ReleaseMutex()
     }
 }
 
+void CheckInstructionSet()
+{
+#if PLATFORM_ARCH_X86 || PLATFORM_ARCH_X64
+    // Check the minimum vector instruction set support
+    int32 cpuInfo[4] = { -1 };
+    __cpuid(cpuInfo, 0);
+    int32 cpuInfoSize = cpuInfo[0];
+    __cpuid(cpuInfo, 1);
+    bool SSE2 = cpuInfo[3] & (1u << 26);
+    bool SSE3 = cpuInfo[2] & (1u << 0);
+    bool SSE41 = cpuInfo[2] & (1u << 19);
+    bool SSE42 = cpuInfo[2] & (1u << 20);
+    bool AVX = cpuInfo[2] & (1u << 28);
+    bool POPCNT = cpuInfo[2] & (1u << 23);
+    bool AVX2 = false;
+    if (cpuInfoSize >= 7)
+    {
+        __cpuid(cpuInfo, 7);
+        AVX2 = cpuInfo[1] & (1u << 5) && (_xgetbv(0) & 6) == 6;
+    }
+    const Char* missingFeature = nullptr;
+#if defined(__AVX__)
+    if (!AVX)
+        missingFeature = TEXT("AVX");
+#endif
+#if defined(__AVX2__)
+    if (!AVX2)
+        missingFeature = TEXT("AVX2");
+#endif
+#if PLATFORM_SIMD_SSE2
+    if (!SSE2)
+        missingFeature = TEXT("SSE2");
+#endif
+#if PLATFORM_SIMD_SSE3
+    if (!SSE3)
+        missingFeature = TEXT("SSE3");
+#endif
+#if PLATFORM_SIMD_SSE4_1
+    if (!SSE41)
+        missingFeature = TEXT("SSE4.1");
+#endif
+#if PLATFORM_SIMD_SSE4_2
+    if (!SSE42)
+        missingFeature = TEXT("SSE4.2");
+    if (!POPCNT)
+        missingFeature = TEXT("POPCNT");
+#endif
+    if (missingFeature)
+    {
+        // Not supported CPU
+        CPUBrand cpu;
+        Platform::Error(String::Format(TEXT("Cannot start program due to lack of CPU feature {}.\n\n{}"), missingFeature, String(cpu.Buffer)));
+        exit(-1);
+    }
+#endif
+}
+PRAGMA_ENABLE_OPTIMIZATION;
+
 void WindowsPlatform::PreInit(void* hInstance)
 {
     ASSERT(hInstance);
     Instance = hInstance;
+
+    CheckInstructionSet();
 
     // Disable the process from being showing "ghosted" while not responding messages during slow tasks
     DisableProcessWindowsGhosting();
@@ -543,7 +635,7 @@ void WindowsPlatform::PreInit(void* hInstance)
 
 #if CRASH_LOG_ENABLE
     TCHAR buffer[MAX_PATH] = { 0 };
-    DbgHelpLock();
+    FlaxDbgHelpLock();
     if (::GetModuleFileNameW(::GetModuleHandleW(nullptr), buffer, MAX_PATH))
         SymbolsPath.Add(StringUtils::GetDirectoryName(buffer));
     if (::GetEnvironmentVariableW(TEXT("_NT_SYMBOL_PATH"), buffer, MAX_PATH))
@@ -552,17 +644,11 @@ void WindowsPlatform::PreInit(void* hInstance)
     options |= SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_DEFERRED_LOADS | SYMOPT_EXACT_SYMBOLS;
     SymSetOptions(options);
     OnSymbolsPathModified();
-    DbgHelpUnlock();
+    FlaxDbgHelpUnlock();
 #endif
 
+    // Get system version
     GetWindowsVersion(WindowsName, VersionMajor, VersionMinor, VersionBuild);
-
-    // Validate platform
-    if (VersionMajor < 6)
-    {
-        Error(TEXT("Not supported operating system version."));
-        exit(-1);
-    }
 }
 
 bool WindowsPlatform::IsWindows10()
@@ -616,7 +702,7 @@ bool WindowsPlatform::Init()
         return true;
 
     // Init console output (engine is linked with /SUBSYSTEM:WINDOWS so it lacks of proper console output on Windows)
-    if (CommandLine::Options.Std)
+    if (CommandLine::Options.Std.IsTrue())
     {
         // Attaches output of application to parent console, returns true if running in console-mode
         // [Reference: https://www.tillett.info/2013/05/13/how-to-create-a-windows-program-that-works-as-both-as-a-gui-and-console-application]
@@ -637,12 +723,32 @@ bool WindowsPlatform::Init()
         }
     }
 
-    // Check if can run Engine on current platform (requires Windows Vista SP1 or above)
-    if (!IsWindowsVistaSP1OrGreater() && !IsWindowsServer())
+    // Check if can run Engine on current platform
+#if WINVER >= 0x0A00
+    if (VersionMajor < 10 && !IsWindowsServer())
     {
-        Platform::Fatal(TEXT("Flax Engine requires Windows Vista SP1 or higher."));
+        Platform::Fatal(TEXT("Flax Engine requires Windows 10 or higher."));
         return true;
     }
+#elif WINVER >= 0x0603
+    if ((VersionMajor < 8 || (VersionMajor == 8 && VersionMinor == 0)) && !IsWindowsServer())
+    {
+        Platform::Fatal(TEXT("Flax Engine requires Windows 8.1 or higher."));
+        return true;
+    }
+#elif WINVER >= 0x0602
+    if (VersionMajor < 8 && !IsWindowsServer())
+    {
+        Platform::Fatal(TEXT("Flax Engine requires Windows 8 or higher."));
+        return true;
+    }
+#else
+    if (VersionMajor < 7 && !IsWindowsServer())
+    {
+        Platform::Fatal(TEXT("Flax Engine requires Windows 7 or higher."));
+        return true;
+    }
+#endif
 
     // Set the lowest possible timer resolution
     const HMODULE ntdll = LoadLibraryW(L"ntdll.dll");
@@ -690,6 +796,12 @@ void WindowsPlatform::LogInfo()
 {
     Win32Platform::LogInfo();
 
+#if PLATFORM_ARCH_X86 || PLATFORM_ARCH_X64
+    // Log CPU brand
+    CPUBrand cpu;
+    LOG(Info, "CPU: {0}", String(cpu.Buffer));
+#endif
+
     LOG(Info, "Microsoft {0} {1}-bit ({2}.{3}.{4})", WindowsName, Platform::Is64BitPlatform() ? TEXT("64") : TEXT("32"), VersionMajor, VersionMinor, VersionBuild);
 
     // Check minimum amount of RAM
@@ -728,7 +840,7 @@ void WindowsPlatform::BeforeExit()
 void WindowsPlatform::Exit()
 {
 #if CRASH_LOG_ENABLE
-    DbgHelpLock();
+    FlaxDbgHelpLock();
 #if !TRACY_ENABLE
     if (SymInitialized)
     {
@@ -737,7 +849,7 @@ void WindowsPlatform::Exit()
     }
 #endif
     SymbolsPath.Resize(0);
-    DbgHelpUnlock();
+    FlaxDbgHelpUnlock();
 #endif
 
     // Unregister app class
@@ -791,6 +903,16 @@ void WindowsPlatform::SetHighDpiAwarenessEnabled(bool enable)
     }
     SystemDpi = CalculateDpi(shCoreDll);
     ::FreeLibrary(shCoreDll);
+}
+
+String WindowsPlatform::GetSystemName()
+{
+    return WindowsName;
+}
+
+Version WindowsPlatform::GetSystemVersion()
+{
+    return Version(VersionMajor, VersionMinor, VersionBuild);
 }
 
 BatteryInfo WindowsPlatform::GetBatteryInfo()
@@ -1005,8 +1127,10 @@ void ReadPipe(HANDLE pipe, Array<char>& rawData, Array<Char>& logData, LogType l
             int32 tmp;
             StringUtils::ConvertANSI2UTF16(rawData.Get(), logData.Get(), rawData.Count(), tmp);
             logData.Last() = '\0';
+#if LOG_ENABLE
             if (settings.LogOutput)
                 Log::Logger::Write(logType, StringView(logData.Get(), rawData.Count()));
+#endif
             if (settings.SaveOutput)
                 settings.Output.Add(logData.Get(), rawData.Count());
         }
@@ -1194,6 +1318,8 @@ Window* WindowsPlatform::CreateWindow(const CreateWindowSettings& settings)
 void* WindowsPlatform::LoadLibrary(const Char* filename)
 {
     ASSERT(filename);
+    PROFILE_CPU();
+    ZoneText(filename, StringUtils::Length(filename));
 
     // Add folder to search path to load dependency libraries
     StringView folder = StringUtils::GetDirectoryName(filename);
@@ -1227,14 +1353,14 @@ void* WindowsPlatform::LoadLibrary(const Char* filename)
 
 #if CRASH_LOG_ENABLE
     // Refresh modules info during next stack trace collecting to have valid debug symbols information
-    DbgHelpLock();
+    FlaxDbgHelpLock();
     if (folder.HasChars() && !SymbolsPath.Contains(folder))
     {
         SymbolsPath.Add(folder);
         SymbolsPath.Last().Replace('/', '\\');
         OnSymbolsPathModified();
     }
-    DbgHelpUnlock();
+    FlaxDbgHelpUnlock();
 #endif
 
     return handle;
@@ -1245,7 +1371,7 @@ void* WindowsPlatform::LoadLibrary(const Char* filename)
 Array<PlatformBase::StackFrame> WindowsPlatform::GetStackFrames(int32 skipCount, int32 maxDepth, void* context)
 {
     Array<StackFrame> result;
-    DbgHelpLock();
+    FlaxDbgHelpLock();
 
     // Initialize
     HANDLE process = GetCurrentProcess();
@@ -1377,7 +1503,7 @@ Array<PlatformBase::StackFrame> WindowsPlatform::GetStackFrames(int32 skipCount,
         }
     }
 
-    DbgHelpUnlock();
+    FlaxDbgHelpUnlock();
     return result;
 }
 

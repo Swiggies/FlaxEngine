@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "GPUDeviceVulkan.h"
 #include "Engine/Core/Types/BaseTypes.h"
 #include "Engine/Core/Collections/Array.h"
+#include <ThirdParty/tracy/tracy/TracyVulkan.hpp>
 
 #if GRAPHICS_API_VULKAN
 
@@ -42,6 +43,8 @@ private:
     FenceVulkan* _fence;
 #if GPU_ALLOW_PROFILE_EVENTS
     int32 _eventsBegin = 0;
+    struct TracyZone { byte Data[TracyVulkanZoneSize]; };
+    Array<TracyZone, InlinedAllocation<32>> _tracyZones;
 #endif
 
     // The latest value when command buffer was submitted.
@@ -129,10 +132,11 @@ public:
     }
 
 #if GPU_ALLOW_PROFILE_EVENTS
-    void BeginEvent(const Char* name);
+    void BeginEvent(const Char* name, void* tracyContext);
     void EndEvent();
 #endif
 
+    void Wait(float timeoutSeconds = VULKAN_WAIT_TIMEOUT);
     void RefreshFenceStatus();
 };
 
@@ -203,7 +207,6 @@ public:
 
 public:
     void SubmitActiveCmdBuffer(SemaphoreVulkan* signalSemaphore = nullptr);
-    void WaitForCmdBuffer(CmdBufferVulkan* cmdBuffer, float timeInSecondsToWait = 1.0f);
     void RefreshFenceStatus(CmdBufferVulkan* skipCmdBuffer = nullptr)
     {
         _pool.RefreshFenceStatus(skipCmdBuffer);

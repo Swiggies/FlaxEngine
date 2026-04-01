@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -145,7 +145,7 @@ namespace FlaxEditor.Content.GUI
             set
             {
                 value = Mathf.Clamp(value, 0.3f, 3.0f);
-                if (!Mathf.NearEqual(value, _viewScale))
+                if (value != _viewScale)
                 {
                     _viewScale = value;
                     ViewScaleChanged?.Invoke();

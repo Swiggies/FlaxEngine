@@ -1,9 +1,12 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "SceneObject.h"
 #include "Engine/Core/Collections/Dictionary.h"
+#if USE_EDITOR
+#include "Engine/Core/Collections/HashSet.h"
+#endif
 #include "Engine/Platform/CriticalSection.h"
 #include "Engine/Threading/ThreadLocal.h"
 
@@ -13,6 +16,13 @@
 class FLAXENGINE_API SceneObjectsFactory
 {
 public:
+    struct NestedPrefabInstance
+    {
+        Prefab* Prefab;
+        Guid RootObjectId;
+        Dictionary<Guid, Guid> IdsMapping;
+    };
+
     struct PrefabInstance
     {
         int32 StatIndex;
@@ -21,6 +31,8 @@ public:
         Prefab* Prefab;
         bool FixRootParent = false;
         Dictionary<Guid, Guid> IdsMapping;
+        Array<NestedPrefabInstance> Nested;
+        Dictionary<Guid, int32> ObjectToNested;
     };
 
     struct Context
@@ -31,6 +43,9 @@ public:
         Dictionary<Guid, int32> ObjectToInstance;
         CriticalSection Locker;
         ThreadLocal<ISerializeModifier*> Modifiers;
+#if USE_EDITOR
+        HashSet<Prefab*> DeprecatedPrefabs;
+#endif
 
         Context(ISerializeModifier* modifier);
         ~Context();
@@ -130,5 +145,5 @@ public:
 
 private:
     static void SynchronizeNewPrefabInstances(Context& context, PrefabSyncData& data, Prefab* prefab, Actor* actor, const Guid& actorPrefabObjectId, int32 i, const ISerializable::DeserializeStream& stream);
-    static void SynchronizeNewPrefabInstance(Context& context, PrefabSyncData& data, Prefab* prefab, Actor* actor, const Guid& prefabObjectId);
+    static void SynchronizeNewPrefabInstance(Context& context, PrefabSyncData& data, Prefab* prefab, Actor* actor, const Guid& prefabObjectId, const Guid& nestedInstanceId);
 };

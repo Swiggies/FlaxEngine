@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -78,6 +78,10 @@ namespace Flax.Build
             {
                 options.CompileEnv.PreprocessorDefinitions.Add("USE_LARGE_WORLDS");
                 options.ScriptingAPI.Defines.Add("USE_LARGE_WORLDS");
+            }
+            if (!EngineConfiguration.UseLogInRelease && !IsEditor)
+            {
+                options.CompileEnv.PreprocessorDefinitions.Add("LOG_ENABLE=0");
             }
 
             // Add include paths for this and all referenced projects sources

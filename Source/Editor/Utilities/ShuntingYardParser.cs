@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -444,6 +444,9 @@ namespace FlaxEditor.Utilities
         /// <returns>The result value.</returns>
         public static double Parse(string text)
         {
+            // Hack to allow parsing numbers while using "_" as a separator (like this: 1_000)
+            text = text.Replace("_", string.Empty);
+
             var tokens = Tokenize(text);
             var rpn = OrderTokens(tokens);
             return EvaluateRPN(rpn);

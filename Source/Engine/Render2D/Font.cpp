@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Font.h"
 #include "FontAsset.h"
@@ -119,7 +119,7 @@ void Font::Invalidate()
     _characters.Clear();
 }
 
-void Font::ProcessText(const StringView& text, Array<FontLineCache>& outputLines, const TextLayoutOptions& layout)
+void Font::ProcessText(const StringView& text, Array<FontLineCache, InlinedAllocation<8>>& outputLines, const TextLayoutOptions& layout)
 {
     int32 textLength = text.Length();
     if (textLength == 0)
@@ -311,7 +311,7 @@ Float2 Font::MeasureText(const StringView& text, const TextLayoutOptions& layout
         return Float2::Zero;
 
     // Process text
-    Array<FontLineCache> lines;
+    Array<FontLineCache, InlinedAllocation<8>> lines;
     ProcessText(text, lines, layout);
 
     // Calculate bounds
@@ -332,7 +332,7 @@ int32 Font::HitTestText(const StringView& text, const Float2& location, const Te
         return 0;
 
     // Process text
-    Array<FontLineCache> lines;
+    Array<FontLineCache, InlinedAllocation<8>> lines;
     ProcessText(text, lines, layout);
     ASSERT(lines.HasItems());
     float scale = layout.Scale / FontManager::FontScale;
@@ -388,11 +388,14 @@ int32 Font::HitTestText(const StringView& text, const Float2& location, const Te
     if (dst < smallestDst)
     {
         // Pointer is behind the last character in the line
-        smallestIndex = line.LastCharIndex;
+        if (text[line.LastCharIndex] == '\n' && lineIndex != lines.Count() - 1)
+            smallestIndex = line.LastCharIndex;
+        else
+            smallestIndex = line.LastCharIndex + 1;
 
         // Fix for last line
-        if (lineIndex == lines.Count() - 1)
-            smallestIndex++;
+        //if (lineIndex == lines.Count() - 1)
+        //    smallestIndex++;
     }
 
     return smallestIndex;
@@ -417,7 +420,7 @@ Float2 Font::GetCharPosition(const StringView& text, int32 index, const TextLayo
     }
 
     // Process text
-    Array<FontLineCache> lines;
+    Array<FontLineCache, InlinedAllocation<8>> lines;
     ProcessText(text, lines, layout);
     ASSERT(lines.HasItems());
     float scale = layout.Scale / FontManager::FontScale;

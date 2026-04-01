@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -30,22 +30,6 @@ public:
     ParticleEffectParameter()
         : ScriptingObject(SpawnParams(Guid::New(), TypeInitializer))
     {
-    }
-
-    ParticleEffectParameter(const ParticleEffectParameter& other)
-        : ParticleEffectParameter()
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-    }
-
-    ParticleEffectParameter& operator=(const ParticleEffectParameter& other)
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-        return *this;
     }
 
     /// <summary>
@@ -134,7 +118,7 @@ public:
 /// The particle system instance that plays the particles simulation in the game.
 /// </summary>
 API_CLASS(Attributes="ActorContextMenu(\"New/Visuals/Particle Effect\"), ActorToolbox(\"Visuals\")")
-class FLAXENGINE_API ParticleEffect : public Actor
+class FLAXENGINE_API ParticleEffect : public Actor, IAssetReference
 {
     DECLARE_SCENE_OBJECT(ParticleEffect);
 public:
@@ -186,6 +170,9 @@ private:
     Array<ParameterOverride> _parametersOverrides; // Cached parameter modifications to be applied to the parameters
     bool _isPlaying = false;
     bool _isStopped = false;
+#if USE_EDITOR
+    Array<AssetReference<ParticleEmitter>> _cachedEmitters;
+#endif
 
 public:
     /// <summary>
@@ -259,6 +246,13 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorDisplay(\"Particle Effect\"), EditorOrder(80), DefaultValue(0)")
     int8 SortOrder = 0;
+
+#if USE_EDITOR
+    /// <summary>
+    /// If checked, the particle emitter debug shapes will be shawn during debug drawing. This includes particle spawn location shapes display.
+    /// </summary>
+    API_FIELD(Attributes = "EditorDisplay(\"Particle Effect\"), EditorOrder(200)") bool ShowDebugDraw = false;
+#endif
 
 public:
     /// <summary>
@@ -401,15 +395,24 @@ private:
 #endif
     void CacheModifiedParameters();
     void ApplyModifiedParameters();
-    void OnParticleSystemModified();
-    void OnParticleSystemLoaded();
+#if USE_EDITOR
+    void OnParticleEmittersClear();
+    void OnParticleEmitterLoaded();
+#endif
+
+    // [IAssetReference]
+    void OnAssetChanged(Asset* asset, void* caller) override;
+    void OnAssetLoaded(Asset* asset, void* caller) override;
+    void OnAssetUnloaded(Asset* asset, void* caller) override;
 
 public:
     // [Actor]
     bool HasContentLoaded() const override;
     void Draw(RenderContext& renderContext) override;
+    void Draw(RenderContextBatch& renderContextBatch) override;
 #if USE_EDITOR
     void OnDebugDrawSelected() override;
+    void OnDebugDraw() override;
 #endif
     void OnLayerChanged() override;
     void Serialize(SerializeStream& stream, const void* otherObj) override;

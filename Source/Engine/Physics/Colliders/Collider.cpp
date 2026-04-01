@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Collider.h"
 #include "Engine/Core/Log.h"
@@ -20,10 +20,8 @@ Collider::Collider(const SpawnParams& params)
     , _staticActor(nullptr)
     , _cachedScale(1.0f)
     , _contactOffset(2.0f)
+    , Material(this)
 {
-    Material.Loaded.Bind<Collider, &Collider::OnMaterialChanged>(this);
-    Material.Unload.Bind<Collider, &Collider::OnMaterialChanged>(this);
-    Material.Changed.Bind<Collider, &Collider::OnMaterialChanged>(this);
 }
 
 void* Collider::GetPhysicsShape() const
@@ -49,11 +47,11 @@ void Collider::SetIsTrigger(bool value)
 
 void Collider::SetCenter(const Vector3& value)
 {
-    if (Vector3::NearEqual(value, _center))
+    if (value == _center)
         return;
     _center = value;
     if (_staticActor)
-        PhysicsBackend::SetShapeLocalPose(_shape, _center, Quaternion::Identity);
+        PhysicsBackend::SetShapeLocalPose(_shape, _center * GetScale(), Quaternion::Identity);
     else if (const RigidBody* rigidBody = GetAttachedRigidBody())
         PhysicsBackend::SetShapeLocalPose(_shape, (_localTransform.Translation + _localTransform.Orientation * _center) * rigidBody->GetScale(), _localTransform.Orientation);
     UpdateBounds();
@@ -62,7 +60,7 @@ void Collider::SetCenter(const Vector3& value)
 void Collider::SetContactOffset(float value)
 {
     value = Math::Clamp(value, 0.0f, 100.0f);
-    if (Math::NearEqual(value, _contactOffset))
+    if (value == _contactOffset)
         return;
     _contactOffset = value;
     if (_shape)
@@ -147,7 +145,7 @@ void Collider::OnEnable()
     if (EnumHasAnyFlags(_staticFlags, StaticFlags::Navigation) && !_isTrigger)
         GetScene()->Navigation.Actors.Add(this);
 #if USE_EDITOR
-    GetSceneRendering()->AddPhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+    GetSceneRendering()->AddPhysicsDebug(this);
 #endif
 
     PhysicsColliderActor::OnEnable();
@@ -160,7 +158,7 @@ void Collider::OnDisable()
     if (EnumHasAnyFlags(_staticFlags, StaticFlags::Navigation) && !_isTrigger)
         GetScene()->Navigation.Actors.Remove(this);
 #if USE_EDITOR
-    GetSceneRendering()->RemovePhysicsDebug<Collider, &Collider::DrawPhysicsDebug>(this);
+    GetSceneRendering()->RemovePhysicsDebug(this);
 #endif
 }
 
@@ -196,7 +194,6 @@ void Collider::UpdateLayerBits()
     // Own layer mask
     const uint32 mask1 = Physics::LayerMasks[GetLayer()];
 
-    ASSERT(_shape);
     PhysicsBackend::SetShapeFilterMask(_shape, mask0, mask1);
 }
 
@@ -205,13 +202,20 @@ void Collider::CreateShape()
     ASSERT(_shape == nullptr);
 
     // Setup shape geometry
-    _cachedScale = GetScale();
+    _cachedScale = GetScale().GetAbsolute().MaxValue();
     CollisionShape shape;
     GetGeometry(shape);
 
     // Create shape
     const bool isTrigger = _isTrigger && CanBeTrigger();
     _shape = PhysicsBackend::CreateShape(this, shape, Material, IsActiveInHierarchy(), isTrigger);
+    if (!_shape)
+    {
+        LOG(Error, "Failed to create physics shape for actor '{}'", GetNamePath());
+        if (shape.Type == CollisionShape::Types::ConvexMesh && Float3(shape.ConvexMesh.Scale).MinValue() <= 0)
+            LOG(Warning, "Convex Mesh colliders cannot have negative scale");
+        return;
+    }
     PhysicsBackend::SetShapeContactOffset(_shape, _contactOffset);
     UpdateLayerBits();
 }
@@ -222,7 +226,7 @@ void Collider::UpdateGeometry()
         return;
 
     // Setup shape geometry
-    _cachedScale = GetScale();
+    _cachedScale = GetScale().GetAbsolute().MaxValue();
     CollisionShape shape;
     GetGeometry(shape);
 
@@ -246,7 +250,11 @@ void Collider::UpdateGeometry()
         if (actor)
         {
             const auto rigidBody = dynamic_cast<RigidBody*>(GetParent());
-            if (_staticActor != nullptr || (rigidBody && CanAttach(rigidBody)))
+            if (rigidBody && CanAttach(rigidBody))
+            {
+                Attach(rigidBody);
+            }
+            else if (_staticActor != nullptr)
             {
                 PhysicsBackend::AttachShape(_shape, actor);
             }
@@ -271,7 +279,7 @@ void Collider::CreateStaticActor()
     _staticActor = PhysicsBackend::CreateRigidStaticActor(nullptr, _transform.Translation, _transform.Orientation, scene);
 
     // Reset local pos of the shape and link it to the actor
-    PhysicsBackend::SetShapeLocalPose(_shape, _center, Quaternion::Identity);
+    PhysicsBackend::SetShapeLocalPose(_shape, _center * GetScale(), Quaternion::Identity);
     PhysicsBackend::AttachShape(_shape, _staticActor);
 
     PhysicsBackend::AddSceneActor(scene, _staticActor);
@@ -286,39 +294,26 @@ void Collider::RemoveStaticActor()
     _staticActor = nullptr;
 }
 
-#if USE_EDITOR
-
-void Collider::DrawPhysicsDebug(RenderView& view)
-{
-}
-
-#endif
-
-void Collider::OnMaterialChanged()
-{
-    // Update the shape material
-    if (_shape)
-        PhysicsBackend::SetShapeMaterial(_shape, Material);
-}
-
 void Collider::BeginPlay(SceneBeginData* data)
 {
     // Check if has no shape created (it means no rigidbody requested it but also collider may be spawned at runtime)
     if (_shape == nullptr)
     {
         CreateShape();
-
-        // Check if parent is a rigidbody
-        const auto rigidBody = dynamic_cast<RigidBody*>(GetParent());
-        if (rigidBody && CanAttach(rigidBody))
+        if (_shape)
         {
-            // Attach to the rigidbody
-            Attach(rigidBody);
-        }
-        else
-        {
-            // Be a static collider
-            CreateStaticActor();
+            // Check if parent is a rigidbody
+            const auto rigidBody = dynamic_cast<RigidBody*>(GetParent());
+            if (rigidBody && CanAttach(rigidBody))
+            {
+                // Attach to the rigidbody
+                Attach(rigidBody);
+            }
+            else
+            {
+                // Be a static collider
+                CreateStaticActor();
+            }
         }
     }
 
@@ -427,8 +422,8 @@ void Collider::OnTransformChanged()
         }
     }
 
-    const Float3 scale = GetScale();
-    if (!Float3::NearEqual(_cachedScale, scale))
+    const float scale = GetScale().GetAbsolute().MaxValue();
+    if (_cachedScale != scale)
         UpdateGeometry();
     UpdateBounds();
 }
@@ -465,4 +460,21 @@ void Collider::OnPhysicsSceneChanged(PhysicsScene* previous)
         void* scene = GetPhysicsScene()->GetPhysicsScene();
         PhysicsBackend::AddSceneActor(scene, _staticActor);
     }
+}
+
+void Collider::OnAssetChanged(Asset* asset, void* caller)
+{
+    // Update the shape material
+    if (_shape && caller == &Material)
+        PhysicsBackend::SetShapeMaterial(_shape, Material);
+}
+
+void Collider::OnAssetLoaded(Asset* asset, void* caller)
+{
+    Collider::OnAssetChanged(asset, caller);
+}
+
+void Collider::OnAssetUnloaded(Asset* asset, void* caller)
+{
+    Collider::OnAssetChanged(asset, caller);
 }

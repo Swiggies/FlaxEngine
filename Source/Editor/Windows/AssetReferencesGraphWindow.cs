@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -140,13 +140,14 @@ namespace FlaxEditor.Windows
         }
 
         private string _cacheFolder;
-        private Guid _assetId;
+        private AssetItem _item;
         private Surface _surface;
         private Label _loadingLabel;
         private CancellationTokenSource _token;
         private Task _task;
         private const float MarginX = 200;
         private const float MarginY = 50;
+        private string _tempFolder;
 
         // Async task data
         private float _progress;
@@ -162,12 +163,13 @@ namespace FlaxEditor.Windows
         public AssetReferencesGraphWindow(Editor editor, AssetItem assetItem)
         : base(editor, false, ScrollBars.None)
         {
-            Title = assetItem.ShortName + " References";
+            _item = assetItem;
+            Title = _item.ShortName + " References";
 
+            _tempFolder = StringUtils.NormalizePath(Path.GetDirectoryName(Globals.TemporaryFolder));
             _cacheFolder = Path.Combine(Globals.ProjectCacheFolder, "References");
             if (!Directory.Exists(_cacheFolder))
                 Directory.CreateDirectory(_cacheFolder);
-            _assetId = assetItem.ID;
             _surface = new Surface(this)
             {
                 AnchorPreset = AnchorPresets.StretchAll,
@@ -192,7 +194,13 @@ namespace FlaxEditor.Windows
             _nodesAssets.Add(assetId);
             var node = new AssetNode((uint)_nodes.Count + 1, _surface.Context, GraphNodes[0], GraphGroups[0], assetId);
             _nodes.Add(node);
+
             return node;
+        }
+
+        private bool CheckSkipAsset(Asset asset)
+        {
+            return asset == null || asset.IsVirtual || asset.Path.StartsWith(_tempFolder);
         }
 
         private unsafe void SearchRefs(Guid assetId)
@@ -236,7 +244,7 @@ namespace FlaxEditor.Windows
             var asset = obj as Asset;
             if (!asset)
                 asset = FlaxEngine.Content.LoadAsync<Asset>(assetId);
-            if (asset == null || asset.IsVirtual)
+            if (CheckSkipAsset(asset))
                 return;
             while (asset && !asset.IsLoaded && !asset.LastLoadFailed)
             {
@@ -300,9 +308,11 @@ namespace FlaxEditor.Windows
                 if (!(obj is Asset) && !(obj is Scene))
                 {
                     var asset = FlaxEngine.Content.LoadAsync<Asset>(assetRef);
-                    if (asset == null || asset.IsVirtual)
+                    if (CheckSkipAsset(asset))
                         continue;
                 }
+                else if (obj is Asset asset && CheckSkipAsset(asset))
+                    continue;
 
                 // Skip nodes that were already added to the graph
                 if (_nodesAssets.Contains(assetRef))
@@ -383,8 +393,7 @@ namespace FlaxEditor.Windows
             _nodesAssets = new HashSet<Guid>();
             var searchLevel = 4; // TODO: make it as an option (somewhere in window UI)
             // TODO: add option to filter assets by type (eg. show only textures as leaf nodes)
-            var assetNode = SpawnNode(_assetId);
-            // TODO: add some outline or tint color to the main node
+            var assetNode = SpawnNode(_item.ID);
             BuildGraph(assetNode, searchLevel, false);
             ArrangeGraph(assetNode, false);
             BuildGraph(assetNode, searchLevel, true);
@@ -392,6 +401,10 @@ namespace FlaxEditor.Windows
             if (_token.IsCancellationRequested)
                 return;
             _progress = 100.0f;
+
+            var commentRect = assetNode.EditorBounds;
+            commentRect.Expand(80f);
+            _surface.Context.CreateComment(ref commentRect, _item.ShortName, Color.Green);
 
             // Update UI
             FlaxEngine.Scripting.InvokeOnUpdate(() =>

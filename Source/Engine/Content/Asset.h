@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -17,6 +17,20 @@
 	const String& GetTypeName() const override { return type::TypeName; } \
 	public: \
 	explicit type(const SpawnParams& params, const AssetInfo* info)
+
+// Utility interface for objects that reference asset and want to get notified about asset reference changes.
+class FLAXENGINE_API IAssetReference
+{
+public:
+    virtual ~IAssetReference() = default;
+
+    // Asset reference got changed.
+    virtual void OnAssetChanged(Asset* asset, void* caller) = 0;
+    // Asset got loaded.
+    virtual void OnAssetLoaded(Asset* asset, void* caller) = 0;
+    // Asset gets unloaded.
+    virtual void OnAssetUnloaded(Asset* asset, void* caller) = 0;
+};
 
 /// <summary>
 /// Asset objects base class.
@@ -48,6 +62,9 @@ protected:
     int8 _deleteFileOnUnload : 1; // Indicates that asset source file should be removed on asset unload
     int8 _isVirtual : 1; // Indicates that asset is pure virtual (generated or temporary, has no storage so won't be saved)
 
+    HashSet<IAssetReference*> _references;
+    CriticalSection _referencesLocker; // TODO: convert into a single interlocked exchange for the current thread owning lock
+
 public:
     /// <summary>
     /// Initializes a new instance of the <see cref="Asset"/> class.
@@ -75,7 +92,7 @@ public:
     EventType OnUnloaded;
 
     /// <summary>
-    /// General purpose mutex for an asset object. Should guard most of asset functionalities to be secure.
+    /// General purpose mutex for an asset object. Should guard most of the asset functionalities to be secure.
     /// </summary>
     CriticalSection Locker;
 
@@ -88,24 +105,28 @@ public:
     /// <summary>
     /// Adds reference to that asset.
     /// </summary>
-    FORCE_INLINE void AddReference()
-    {
-        Platform::InterlockedIncrement(&_refCount);
-    }
+    void AddReference();
+
+    /// <summary>
+    /// Adds reference to that asset.
+    /// </summary>
+    void AddReference(IAssetReference* ref, bool week = false);
 
     /// <summary>
     /// Removes reference from that asset.
     /// </summary>
-    FORCE_INLINE void RemoveReference()
-    {
-        Platform::InterlockedDecrement(&_refCount);
-    }
+    void RemoveReference();
+
+    /// <summary>
+    /// Removes reference from that asset.
+    /// </summary>
+    void RemoveReference(IAssetReference* ref, bool week = false);
 
 public:
     /// <summary>
     /// Gets the path to the asset storage file. In Editor, it reflects the actual file, in cooked Game, it fakes the Editor path to be informative for developers.
     /// </summary>
-    API_PROPERTY() virtual const String& GetPath() const = 0;
+    API_PROPERTY() virtual StringView GetPath() const = 0;
 
     /// <summary>
     /// Gets the asset type name.
@@ -209,6 +230,13 @@ public:
     /// </remarks>
     /// <returns>The collection of the asset ids referenced by this asset.</returns>
     API_FUNCTION() Array<Guid, HeapAllocation> GetReferences() const;
+
+    /// <summary>
+    /// Saves this asset to the file. Supported only in Editor.
+    /// </summary>
+    /// <param name="path">The custom asset path to use for the saving. Use empty value to save this asset to its own storage location. Can be used to duplicate asset. Must be specified when saving virtual asset.</param>
+    /// <returns>True when cannot save data, otherwise false.</returns>
+    API_FUNCTION(Sealed) virtual bool Save(const StringView& path = StringView::Empty);
 #endif
 
     /// <summary>
@@ -253,8 +281,13 @@ protected:
     virtual void onLoaded_MainThread();
     virtual void onUnload_MainThread();
 #if USE_EDITOR
+    bool OnCheckSave(const StringView& path = StringView::Empty) const;
     virtual void onRename(const StringView& newPath) = 0;
 #endif
+
+    // Utilities to ensure specific engine systems are initialized before loading asset (eg. assets can be loaded during engine startup).
+    static bool WaitForInitGraphics();
+    static bool WaitForInitPhysics();
 
 public:
     // [ManagedScriptingObject]

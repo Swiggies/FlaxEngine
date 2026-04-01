@@ -1,10 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Scripting/ScriptingType.h"
 #include "Engine/Core/Delegate.h"
-#include "Engine/Threading/ConcurrentSystemLocker.h"
 
 class TaskGraphSystem;
 class AnimatedModel;
@@ -23,7 +22,7 @@ API_CLASS(Static) class FLAXENGINE_API Animations
     API_FIELD(ReadOnly) static TaskGraphSystem* System;
 
     // Data access locker for animations data.
-    static ConcurrentSystemLocker SystemLocker;
+    static ReadWriteLock SystemLocker;
 
 #if USE_EDITOR
     // Data wrapper for the debug flow information.

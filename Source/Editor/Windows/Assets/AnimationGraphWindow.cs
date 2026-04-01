@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -99,7 +99,14 @@ namespace FlaxEditor.Windows.Assets
                 Window = window;
                 var surfaceParam = window.Surface.GetParameter(BaseModelId);
                 if (surfaceParam != null)
-                    BaseModel = FlaxEngine.Content.LoadAsync<SkinnedModel>((Guid)surfaceParam.Value);
+                {
+                    if (surfaceParam.Value is Guid asGuid)
+                        BaseModel = FlaxEngine.Content.LoadAsync<SkinnedModel>(asGuid);
+                    else if (surfaceParam.Value is SkinnedModel asModel)
+                        BaseModel = asModel;
+                    else
+                        BaseModel = null;
+                }
                 else
                     BaseModel = window.PreviewActor.GetParameterValue(BaseModelId) as SkinnedModel;
             }
@@ -149,6 +156,10 @@ namespace FlaxEditor.Windows.Assets
                                                         (instance, parameter, tag) => ((AnimationGraphWindow)instance).PreviewActor.GetParameterValue(parameter.Identifier),
                                                         (instance, value, parameter, tag) => ((AnimationGraphWindow)instance).PreviewActor.SetParameterValue(parameter.Identifier, value),
                                                         Values);
+
+                    // Parameters will always have one element
+                    if (parameters.Length < 2)
+                        layout.Label("No parameters", TextAlignment.Center);
                 }
             }
         }
@@ -367,6 +378,9 @@ namespace FlaxEditor.Windows.Assets
             // Update navbar
             _surface.UpdateNavigationBar(_navigationBar, _toolstrip);
 
+            // Show whole model
+            _preview.ResetCamera();
+
             return false;
         }
 
@@ -408,8 +422,24 @@ namespace FlaxEditor.Windows.Assets
         /// <inheritdoc />
         public override unsafe void OnUpdate()
         {
-            // Extract animations playback state from the events tracing
+            // Auto-attach preview
             var debugActor = _debugPicker.Value as AnimatedModel;
+            if (!debugActor && Editor.IsPlayMode && Editor.Options.Options.General.AutoAttachDebugPreviewActor)
+            {
+                var animationGraph = OriginalAsset;
+                var animatedModels = Level.GetActors<AnimatedModel>();
+                foreach (var animatedModel in animatedModels)
+                {
+                    if (animatedModel.AnimationGraph == animationGraph &&
+                        animatedModel.IsActiveInHierarchy)
+                    {
+                        _debugPicker.Value = animatedModel;
+                        break;
+                    }
+                }
+            }
+
+            // Extract animations playback state from the events tracing
             if (debugActor == null)
                 debugActor = _preview.PreviewActor;
             if (debugActor != null)
@@ -433,6 +463,16 @@ namespace FlaxEditor.Windows.Assets
                 _debugFlows.Clear();
             }
 
+            // Update preview values when debugging specific instance
+            if (debugActor != null && debugActor != _preview.PreviewActor)
+            {
+                var parameters = debugActor.Parameters;
+                foreach (var p in parameters)
+                {
+                    _preview.PreviewActor.SetParameterValue(p.Identifier, p.Value);
+                }
+            }
+
             _showNodesButton.Checked = _preview.ShowNodes;
         }
 
@@ -441,6 +481,7 @@ namespace FlaxEditor.Windows.Assets
         {
             if (IsDisposing)
                 return;
+            base.OnDestroy();
             Animations.DebugFlow -= OnDebugFlow;
 
             _properties = null;
@@ -448,8 +489,6 @@ namespace FlaxEditor.Windows.Assets
             _debugPicker = null;
             _showNodesButton = null;
             _previewTab = null;
-
-            base.OnDestroy();
         }
 
         /// <inheritdoc />

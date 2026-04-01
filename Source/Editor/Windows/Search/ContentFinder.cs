@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Collections.Generic;
 using FlaxEditor.Content;
@@ -42,6 +42,7 @@ namespace FlaxEditor.Windows.Search
                 if (value == _selectedItem || (value != null && !_matchedItems.Contains(value)))
                     return;
 
+                // Restore the previous selected item to the non-selected color
                 if (_selectedItem != null)
                 {
                     _selectedItem.BackgroundColor = Color.Transparent;
@@ -54,6 +55,7 @@ namespace FlaxEditor.Windows.Search
                     _selectedItem.BackgroundColor = Style.Current.BackgroundSelected;
                     if (_matchedItems.Count > VisibleItemCount)
                     {
+                        _selectedItem.Focus();
                         _resultPanel.ScrollViewTo(_selectedItem, true);
                     }
                 }
@@ -155,13 +157,14 @@ namespace FlaxEditor.Windows.Search
         }
 
         /// <inheritdoc />
-        public override void Show(Control parent, Float2 location)
+        public override void Show(Control parent, Float2 location, ContextMenuDirection? direction = null)
         {
-            base.Show(parent, location);
+            base.Show(parent, location, direction);
 
             // Setup
             _resultPanel.ScrollViewTo(Float2.Zero);
-            _searchBox.Text = string.Empty;
+            // Select the text in the search bar so that the user can just start typing
+            _searchBox.SelectAll();
             _searchBox.Focus();
         }
 
@@ -179,39 +182,17 @@ namespace FlaxEditor.Windows.Search
             switch (key)
             {
             case KeyboardKeys.ArrowDown:
-            {
-                if (_matchedItems.Count == 0)
-                    return true;
-                int currentPos;
-                if (_selectedItem != null)
-                {
-                    currentPos = _matchedItems.IndexOf(_selectedItem) + 1;
-                    if (currentPos >= _matchedItems.Count)
-                        currentPos--;
-                }
-                else
-                {
-                    currentPos = 0;
-                }
-                SelectedItem = _matchedItems[currentPos];
-                return true;
-            }
             case KeyboardKeys.ArrowUp:
             {
                 if (_matchedItems.Count == 0)
                     return true;
-                int currentPos;
-                if (_selectedItem != null)
-                {
-                    currentPos = _matchedItems.IndexOf(_selectedItem) - 1;
-                    if (currentPos < 0)
-                        currentPos = 0;
-                }
-                else
-                {
-                    currentPos = 0;
-                }
-                SelectedItem = _matchedItems[currentPos];
+
+                var focusedIndex = _matchedItems.IndexOf(_selectedItem);
+                int delta = key == KeyboardKeys.ArrowDown ? -1 : 1;
+                int nextIndex = Mathf.Wrap(focusedIndex - delta, 0, _matchedItems.Count - 1);
+                var nextItem = _matchedItems[nextIndex];
+
+                SelectedItem = nextItem;
                 return true;
             }
             case KeyboardKeys.Return:
@@ -232,6 +213,17 @@ namespace FlaxEditor.Windows.Search
             {
                 Hide();
                 return true;
+            }
+            case KeyboardKeys.Backspace:
+            { 
+                // Alow the user to quickly focus the searchbar
+                if (_searchBox != null && !_searchBox.IsFocused)
+                {
+                    _searchBox.Focus();
+                    _searchBox.SelectAll();
+                    return true;
+                }
+                break;
             }
             }
 

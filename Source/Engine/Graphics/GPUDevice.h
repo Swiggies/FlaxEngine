@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -23,6 +23,7 @@ class GPUBuffer;
 class GPUSampler;
 class GPUPipelineState;
 class GPUConstantBuffer;
+class GPUVertexLayout;
 class GPUTasksContext;
 class GPUTasksExecutor;
 class GPUSwapChain;
@@ -53,7 +54,40 @@ public:
     };
 
     /// <summary>
-    /// Describes a video output display mode.
+    /// Describes a video output display (monitor).
+    /// </summary>
+    API_STRUCT() struct VideoOutput
+    {
+        DECLARE_SCRIPTING_TYPE_NO_SPAWN(VideoOutputMode);
+
+        /// <summary>
+        /// The display name.
+        /// </summary>
+        API_FIELD() String Name;
+
+        /// <summary>
+        /// The native screen resolution width (in pixel).
+        /// </summary>
+        API_FIELD() uint32 Width = 0;
+
+        /// <summary>
+        /// The native screen resolution height (in pixel).
+        /// </summary>
+        API_FIELD() uint32 Height = 0;
+
+        /// <summary>
+        /// The maximum screen refresh rate (in hertz).
+        /// </summary>
+        API_FIELD() float RefreshRate = 0;
+
+        /// <summary>
+        /// Flag that indicates that monitor supports displaying High Dynamic Range colors.
+        /// </summary>
+        API_FIELD() bool HDR = false;
+    };
+
+    /// <summary>
+    /// Describes a video output display mode (monitor screen mode).
     /// </summary>
     API_STRUCT() struct VideoOutputMode
     {
@@ -72,7 +106,12 @@ public:
         /// <summary>
         /// The screen refresh rate (in hertz).
         /// </summary>
-        API_FIELD() uint32 RefreshRate;
+        API_FIELD() float RefreshRate;
+
+        /// <summary>
+        /// The index of the VideoOutput from the device monitors list.
+        /// </summary>
+        API_FIELD() int32 VideoOutputIndex;
     };
 
     /// <summary>
@@ -95,6 +134,8 @@ protected:
     PrivateData* _res;
     Array<GPUResource*> _resources;
     CriticalSection _resourcesLock;
+
+    void OnRequestingExit();
 
 protected:
     /// <summary>
@@ -130,6 +171,11 @@ public:
     /// The GPU limits.
     /// </summary>
     API_FIELD(ReadOnly) GPULimits Limits;
+
+    /// <summary>
+    /// The available video outputs (monitors).
+    /// </summary>
+    API_FIELD(ReadOnly) Array<VideoOutput> VideoOutputs;
 
     /// <summary>
     /// The available video output modes.
@@ -233,7 +279,7 @@ public:
     /// <summary>
     /// Gets the list with all active GPU resources.
     /// </summary>
-    API_PROPERTY() Array<GPUResource*> GetResources() const;
+    Array<GPUResource*> GetResources() const;
 
     /// <summary>
     /// Gets the GPU asynchronous work manager.
@@ -397,6 +443,13 @@ public:
     API_FUNCTION() virtual GPUSampler* CreateSampler() = 0;
 
     /// <summary>
+    /// Creates the vertex buffer layout.
+    /// </summary>
+    /// <returns>The vertex buffer layout.</returns>
+    API_FUNCTION() virtual GPUVertexLayout* CreateVertexLayout(const Array<struct VertexElement, FixedAllocation<GPU_MAX_VS_ELEMENTS>>& elements, bool explicitOffsets = false) = 0;
+    typedef Array<VertexElement, FixedAllocation<GPU_MAX_VS_ELEMENTS>> VertexElements;
+
+    /// <summary>
     /// Creates the native window swap chain.
     /// </summary>
     /// <param name="window">The output window.</param>
@@ -422,6 +475,12 @@ public:
     /// </summary>
     /// <returns>The GPU tasks executor.</returns>
     virtual GPUTasksExecutor* CreateTasksExecutor();
+
+private:
+    // Internal bindings
+#if !COMPILE_WITHOUT_CSHARP
+    API_FUNCTION(NoProxy) void* GetResourcesInternal();
+#endif
 };
 
 /// <summary>

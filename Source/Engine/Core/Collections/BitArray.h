@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -34,7 +34,7 @@ private:
 
 public:
     /// <summary>
-    /// Initializes a new instance of the <see cref="BitArray"/> class.
+    /// Initializes an empty <see cref="BitArray"/> without reserving any space.
     /// </summary>
     FORCE_INLINE BitArray()
         : _count(0)
@@ -43,9 +43,9 @@ public:
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BitArray"/> class.
+    /// Initializes <see cref="BitArray"/> by reserving space.
     /// </summary>
-    /// <param name="capacity">The initial capacity.</param>
+    /// <param name="capacity">The number of elements that can be added without a need to allocate more memory.</param>
     explicit BitArray(const int32 capacity)
         : _count(0)
         , _capacity(capacity)
@@ -55,7 +55,7 @@ public:
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="BitArray"/> class.
+    /// Initializes <see cref="BitArray"/> by copying the elements from the other collection.
     /// </summary>
     /// <param name="other">The other collection to copy.</param>
     BitArray(const BitArray& other) noexcept
@@ -209,8 +209,8 @@ public:
     bool Get(const int32 index) const
     {
         ASSERT(index >= 0 && index < _count);
-        const ItemType offset = index / sizeof(ItemType);
-        const ItemType bitMask = (ItemType)(int32)(1 << (index & ((int32)sizeof(ItemType) - 1)));
+        const ItemType offset = index / 64;
+        const ItemType bitMask = 1ull << (index & 63ull);
         const ItemType item = ((ItemType*)_allocation.Get())[offset];
         return (item & bitMask) != 0;
     }
@@ -223,13 +223,13 @@ public:
     void Set(const int32 index, const bool value)
     {
         ASSERT(index >= 0 && index < _count);
-        const ItemType offset = index / sizeof(ItemType);
-        const ItemType bitMask = (ItemType)(int32)(1 << (index & ((int32)sizeof(ItemType) - 1)));
+        const ItemType offset = index / 64;
+        const ItemType bitMask = 1ull << (index & 63ull);
         ItemType& item = ((ItemType*)_allocation.Get())[offset];
         if (value)
-            item |= bitMask;
+            item |= bitMask; // Set the bit
         else
-            item &= ~bitMask;  // Clear the bit
+            item &= ~bitMask; // Unset the bit
     }
 
 public:

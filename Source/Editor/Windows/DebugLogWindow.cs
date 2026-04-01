@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -125,7 +125,12 @@ namespace FlaxEditor.Windows
 
                 // Background
                 if (_window._selected == this)
-                    Render2D.FillRectangle(clientRect, IsFocused ? style.BackgroundSelected : style.LightBackground);
+                {
+                    Render2D.FillRectangle(clientRect, style.LightBackground);
+                    // Small rectangle to signal that entry is selected
+                    Rectangle selectionHighlightRect = clientRect with { Width = 5 };
+                    Render2D.FillRectangle(selectionHighlightRect, style.BackgroundSelected);
+                }
                 else if (IsMouseOver)
                     Render2D.FillRectangle(clientRect, style.BackgroundHighlighted);
                 else if (index % 2 == 0)
@@ -134,18 +139,19 @@ namespace FlaxEditor.Windows
                 var color = Group == LogGroup.Error ? _window._colorError : (Group == LogGroup.Warning ? _window._colorWarning : _window._colorInfo);
 
                 // Icon
-                Render2D.DrawSprite(Icon, new Rectangle(5, 0, 32, 32), color);
+                Render2D.DrawSprite(Icon, new Rectangle(8, 0, 32, 32), color);
 
                 // Title
-                var textRect = new Rectangle(38, 2, clientRect.Width - 40, clientRect.Height - 10);
+                var textRect = new Rectangle(43, 2, clientRect.Width - 40, clientRect.Height - 10);
                 Render2D.PushClip(ref clientRect);
+                bool coloredText = _window._colorDebugLogText;
                 if (LogCount == 1)
                 {
-                    Render2D.DrawText(style.FontMedium, Desc.Title, textRect, color);
+                    Render2D.DrawText(style.FontMedium, Desc.Title, textRect, coloredText ? color : style.Foreground);
                 }
                 else if (LogCount > 1)
                 {
-                    Render2D.DrawText(style.FontMedium, $"{Desc.Title} ({LogCount})", textRect, color);
+                    Render2D.DrawText(style.FontMedium, $"{Desc.Title} ({LogCount})", textRect, coloredText ? color : style.Foreground);
                 }
                 Render2D.PopClip();
             }
@@ -311,6 +317,7 @@ namespace FlaxEditor.Windows
         private Color _colorInfo;
         private Color _colorWarning;
         private Color _colorError;
+        private bool _colorDebugLogText;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DebugLogWindow"/> class.
@@ -328,12 +335,12 @@ namespace FlaxEditor.Windows
             {
                 Parent = this,
             };
-            toolstrip.AddButton("Clear", Clear).LinkTooltip("Clears all log entries");
+            toolstrip.AddButton("Clear", Clear).LinkTooltip("Clears all log entries.");
             _clearOnPlayButton = (ToolStripButton)toolstrip.AddButton("Clear on Play", () =>
             {
                 editor.Options.Options.Interface.DebugLogClearOnPlay = _clearOnPlayButton.Checked;
                 editor.Options.Apply(editor.Options.Options);
-            }).SetAutoCheck(true).LinkTooltip("Clears all log entries on enter playmode");
+            }).SetAutoCheck(true).LinkTooltip("Clears all log entries on enter playmode.");
             _collapseLogsButton = (ToolStripButton)toolstrip.AddButton("Collapse", () =>
             {
                 editor.Options.Options.Interface.DebugLogCollapse = _collapseLogsButton.Checked;
@@ -343,26 +350,14 @@ namespace FlaxEditor.Windows
             {
                 editor.Options.Options.Interface.DebugLogPauseOnError = _pauseOnErrorButton.Checked;
                 editor.Options.Apply(editor.Options.Options);
-            }).SetAutoCheck(true).LinkTooltip("Performs auto pause on error");
+            }).SetAutoCheck(true).LinkTooltip("Performs auto pause on error.");
             toolstrip.AddSeparator();
-            _groupButtons[0] = (ToolStripButton)toolstrip.AddButton(editor.Icons.Error32, () =>
-            {
-                UpdateLogTypeVisibility(LogGroup.Error, _groupButtons[0].Checked);
-                editor.Options.Options.Interface.DebugLogShowErrorMessages = _groupButtons[0].Checked;
-                editor.Options.Apply(editor.Options.Options);
-            }).SetAutoCheck(true).LinkTooltip("Shows/hides error messages");
-            _groupButtons[1] = (ToolStripButton)toolstrip.AddButton(editor.Icons.Warning32, () =>
-            {
-                UpdateLogTypeVisibility(LogGroup.Warning, _groupButtons[1].Checked);
-                editor.Options.Options.Interface.DebugLogShowWarningMessages = _groupButtons[1].Checked;
-                editor.Options.Apply(editor.Options.Options);
-            }).SetAutoCheck(true).LinkTooltip("Shows/hides warning messages");
-            _groupButtons[2] = (ToolStripButton)toolstrip.AddButton(editor.Icons.Info32, () =>
-            {
-                UpdateLogTypeVisibility(LogGroup.Info, _groupButtons[2].Checked);
-                editor.Options.Options.Interface.DebugLogShowInfoMessages = _groupButtons[2].Checked;
-                editor.Options.Apply(editor.Options.Options);
-            }).SetAutoCheck(true).LinkTooltip("Shows/hides info messages");
+            _groupButtons[0] = (ToolStripButton)toolstrip.AddButton(editor.Icons.Error32, () => { OnGroupButtonPressed(0); })
+                                                         .SetAutoCheck(true).LinkTooltip("Shows/hides error messages.");
+            _groupButtons[1] = (ToolStripButton)toolstrip.AddButton(editor.Icons.Warning32, () => { OnGroupButtonPressed(1); })
+                                                         .SetAutoCheck(true).LinkTooltip("Shows/hides warning messages.");
+            _groupButtons[2] = (ToolStripButton)toolstrip.AddButton(editor.Icons.Info32, () => { OnGroupButtonPressed(2); })
+                                                         .SetAutoCheck(true).LinkTooltip("Shows/hides info messages.");
             UpdateCount();
 
             // Split panel
@@ -384,12 +379,14 @@ namespace FlaxEditor.Windows
                 VerticalAlignment = TextAlignment.Near,
                 HorizontalAlignment = TextAlignment.Near,
                 Offsets = Margin.Zero,
+                Pivot = Float2.Zero,
             };
 
             // Entries panel
             _entriesPanel = new VerticalPanel
             {
                 AnchorPreset = AnchorPresets.HorizontalStretchTop,
+                Pivot = Float2.Zero,
                 Offsets = Margin.Zero,
                 IsScrollable = true,
                 Parent = _split.Panel1,
@@ -409,6 +406,27 @@ namespace FlaxEditor.Windows
             OnEditorOptionsChanged(Editor.Options.Options);
         }
 
+        private void OnGroupButtonPressed(int index)
+        {
+            UpdateLogTypeVisibility((LogGroup)index, _groupButtons[index].Checked);
+            if (Input.GetKey(KeyboardKeys.Shift))
+            {
+                for (int i = 0; i < (int)LogGroup.Max; i++)
+                {
+                    if (i == index)
+                        continue;
+                    _groupButtons[i].Checked = !_groupButtons[index].Checked;
+                    UpdateLogTypeVisibility((LogGroup)i, _groupButtons[i].Checked);
+                }
+            }
+
+            var options = Editor.Options.Options.Interface;
+            options.DebugLogShowErrorMessages = _groupButtons[0].Checked;
+            options.DebugLogShowWarningMessages = _groupButtons[1].Checked;
+            options.DebugLogShowInfoMessages = _groupButtons[2].Checked;
+            Editor.Options.Apply(Editor.Options.Options);
+        }
+
         private void OnEditorOptionsChanged(EditorOptions options)
         {
             _timestampsFormats = options.Interface.DebugLogTimestampsFormat;
@@ -418,9 +436,10 @@ namespace FlaxEditor.Windows
             _groupButtons[0].Checked = options.Interface.DebugLogShowErrorMessages;
             _groupButtons[1].Checked = options.Interface.DebugLogShowWarningMessages;
             _groupButtons[2].Checked = options.Interface.DebugLogShowInfoMessages;
-            _colorInfo = options.Interface.OutputLogTextColor;
-            _colorWarning = options.Interface.OutputLogWarningTextColor;
-            _colorError = options.Interface.OutputLogErrorTextColor;
+            _colorInfo = options.Visual.LogInfoColor;
+            _colorWarning = options.Visual.LogWarningColor;
+            _colorError = options.Visual.LogErrorColor;
+            _colorDebugLogText = options.Visual.ColorDebugLogText;
         }
 
         /// <summary>
@@ -428,6 +447,10 @@ namespace FlaxEditor.Windows
         /// </summary>
         public void Clear()
         {
+            lock (_locker)
+            {
+                _pendingEntries.Clear();
+            }
             if (_entriesPanel == null)
                 return;
             RemoveEntries();
@@ -445,15 +468,9 @@ namespace FlaxEditor.Windows
             // Create new entry
             switch (_timestampsFormats)
             {
-            case InterfaceOptions.TimestampsFormats.Utc:
-                desc.Title = $"[{DateTime.UtcNow}] {desc.Title}";
-                break;
-            case InterfaceOptions.TimestampsFormats.LocalTime:
-                desc.Title = $"[{DateTime.Now}] {desc.Title}";
-                break;
-            case InterfaceOptions.TimestampsFormats.TimeSinceStartup:
-                desc.Title = string.Format("[{0:g}] ", TimeSpan.FromSeconds(Time.TimeSinceStartup)) + desc.Title;
-                break;
+            case InterfaceOptions.TimestampsFormats.Utc: desc.Title = $"[{DateTime.UtcNow}] {desc.Title}"; break;
+            case InterfaceOptions.TimestampsFormats.LocalTime: desc.Title = $"[{DateTime.Now}] {desc.Title}"; break;
+            case InterfaceOptions.TimestampsFormats.TimeSinceStartup: desc.Title = string.Format("[{0:g}] ", TimeSpan.FromSeconds(Time.TimeSinceStartup)) + desc.Title; break;
             }
             var newEntry = new LogEntry(this, ref desc);
 
@@ -478,6 +495,7 @@ namespace FlaxEditor.Windows
             // Pause on Error (we should do it as fast as possible)
             if (newEntry.Group == LogGroup.Error && _pauseOnErrorButton.Checked && Editor.StateMachine.CurrentState == Editor.StateMachine.PlayingState)
             {
+                Editor.Log("Pause Play mode on error (toggle this behaviour in the Debug Log panel)");
                 Editor.Simulation.RequestPausePlay();
             }
         }
@@ -706,13 +724,13 @@ namespace FlaxEditor.Windows
                     // Scroll to the new entry (if any added to view)
                     if (scrollView && anyVisible)
                     {
-                        panelScroll.ScrollViewTo(newEntry);
+                        panelScroll.ScrollViewTo(newEntry, true);
 
                         bool scrollViewNew = (panelScroll.VScrollBar.Maximum - panelScroll.VScrollBar.TargetValue) < LogEntry.DefaultHeight * 1.5f;
                         if (scrollViewNew != scrollView)
                         {
                             // Make sure scrolling doesn't stop in case too many entries were added at once
-                            panelScroll.ScrollViewTo(new Float2(float.MaxValue, float.MaxValue));
+                            panelScroll.ScrollViewTo(new Float2(float.MaxValue, float.MaxValue), true);
                         }
                     }
                 }
@@ -722,10 +740,10 @@ namespace FlaxEditor.Windows
         }
 
         /// <inheritdoc />
-        public override void OnPlayBegin()
+        public override void OnPlayBeginning()
         {
             // Clear on Play
-            if (_clearOnPlayButton.Checked)
+            if (Editor.Options.Options.Interface.DebugLogClearOnPlay)
             {
                 Clear();
             }

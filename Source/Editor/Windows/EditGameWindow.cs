@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -130,7 +130,7 @@ namespace FlaxEditor.Windows
         /// <summary>
         /// The viewport control.
         /// </summary>
-        public readonly MainEditorGizmoViewport Viewport;
+        public new readonly MainEditorGizmoViewport Viewport;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="EditGameWindow"/> class.
@@ -140,6 +140,7 @@ namespace FlaxEditor.Windows
         : base(editor, true, ScrollBars.None)
         {
             Title = "Editor";
+            Icon = editor.Icons.Grid32;
 
             // Create viewport
             Viewport = new MainEditorGizmoViewport(editor)
@@ -256,7 +257,7 @@ namespace FlaxEditor.Windows
         private void UpdateCameraPreview()
         {
             // Disable rendering preview during GI baking
-            if (Editor.StateMachine.CurrentState.IsPerformanceHeavy)
+            if (Editor == null || Editor.StateMachine.CurrentState.IsPerformanceHeavy)
             {
                 HideAllCameraPreviews();
                 return;
@@ -406,6 +407,14 @@ namespace FlaxEditor.Windows
         }
 
         /// <inheritdoc />
+        protected override void OnSizeChanged()
+        {
+            base.OnSizeChanged();
+
+            UpdateCameraPreview();
+        }
+
+        /// <inheritdoc />
         public override void OnDestroy()
         {
             HideAllCameraPreviews();
@@ -428,6 +437,7 @@ namespace FlaxEditor.Windows
             writer.WriteAttributeString("FarPlane", Viewport.FarPlane.ToString());
             writer.WriteAttributeString("FieldOfView", Viewport.FieldOfView.ToString());
             writer.WriteAttributeString("MovementSpeed", Viewport.MovementSpeed.ToString());
+            writer.WriteAttributeString("ViewportIconsScale", ViewportIconsRenderer.Scale.ToString());
             writer.WriteAttributeString("OrthographicScale", Viewport.OrthographicScale.ToString());
             writer.WriteAttributeString("UseOrthographicProjection", Viewport.UseOrthographicProjection.ToString());
             writer.WriteAttributeString("ViewFlags", ((ulong)Viewport.Task.View.Flags).ToString());
@@ -438,31 +448,24 @@ namespace FlaxEditor.Windows
         {
             if (bool.TryParse(node.GetAttribute("GridEnabled"), out bool value1))
                 Viewport.Grid.Enabled = value1;
-
             if (bool.TryParse(node.GetAttribute("ShowFpsCounter"), out value1))
                 Viewport.ShowFpsCounter = value1;
-
             if (bool.TryParse(node.GetAttribute("ShowNavigation"), out value1))
                 Viewport.ShowNavigation = value1;
-
             if (float.TryParse(node.GetAttribute("NearPlane"), out float value2))
                 Viewport.NearPlane = value2;
-
             if (float.TryParse(node.GetAttribute("FarPlane"), out value2))
                 Viewport.FarPlane = value2;
-
             if (float.TryParse(node.GetAttribute("FieldOfView"), out value2))
                 Viewport.FieldOfView = value2;
-
             if (float.TryParse(node.GetAttribute("MovementSpeed"), out value2))
                 Viewport.MovementSpeed = value2;
-
+            if (float.TryParse(node.GetAttribute("ViewportIconsScale"), out value2))
+                ViewportIconsRenderer.Scale = value2;
             if (float.TryParse(node.GetAttribute("OrthographicScale"), out value2))
                 Viewport.OrthographicScale = value2;
-
             if (bool.TryParse(node.GetAttribute("UseOrthographicProjection"), out value1))
                 Viewport.UseOrthographicProjection = value1;
-
             if (ulong.TryParse(node.GetAttribute("ViewFlags"), out ulong value3))
                 Viewport.Task.ViewFlags = (ViewFlags)value3;
 

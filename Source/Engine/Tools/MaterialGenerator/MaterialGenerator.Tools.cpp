@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_MATERIAL_GRAPH
 
@@ -48,10 +48,8 @@ void MaterialGenerator::ProcessGroupTools(Box* box, Node* node, Value& value)
     }
     // Time
     case 3:
-    {
-        value = getTime;
+        value = box->ID == 1 ? getScaledTime : getTime;
         break;
-    }
     // Panner
     case 6:
     {

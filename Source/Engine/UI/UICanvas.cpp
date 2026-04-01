@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "UICanvas.h"
 #include "Engine/Scripting/ManagedCLR/MException.h"
@@ -6,6 +6,7 @@
 #include "Engine/Scripting/ManagedCLR/MClass.h"
 #include "Engine/Scripting/ManagedCLR/MUtils.h"
 #include "Engine/Serialization/Serialization.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 
 #if COMPILE_WITHOUT_CSHARP
 #define UICANVAS_INVOKE(event)
@@ -23,11 +24,12 @@ MMethod* UICanvas_EndPlay = nullptr;
 MMethod* UICanvas_ParentChanged = nullptr;
 
 #define UICANVAS_INVOKE(event) \
-    auto instance = GetManagedInstance(); \
-    if (instance) \
+    auto* managed = GetManagedInstance(); \
+    if (managed) \
     { \
+        PROFILE_MEM(UI); \
 	    MObject* exception = nullptr; \
-	    UICanvas_##event->Invoke(instance, nullptr, &exception); \
+	    UICanvas_##event->Invoke(managed, nullptr, &exception); \
 	    if (exception) \
 	    { \
 		    MException ex(exception); \
@@ -77,6 +79,7 @@ void UICanvas::Serialize(SerializeStream& stream, const void* otherObj)
     SERIALIZE_GET_OTHER_OBJ(UICanvas);
 
 #if !COMPILE_WITHOUT_CSHARP
+    PROFILE_MEM(UI);
     stream.JKEY("V");
     void* params[1];
     params[0] = other ? other->GetOrCreateManagedInstance() : nullptr;
@@ -109,6 +112,7 @@ void UICanvas::Deserialize(DeserializeStream& stream, ISerializeModifier* modifi
     const auto dataMember = stream.FindMember("V");
     if (dataMember != stream.MemberEnd())
     {
+        PROFILE_MEM(UI);
         rapidjson_flax::StringBuffer buffer;
         rapidjson_flax::Writer<rapidjson_flax::StringBuffer> writer(buffer);
         dataMember->value.Accept(writer);

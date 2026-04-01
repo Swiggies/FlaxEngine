@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -213,6 +213,11 @@ public:
     String ToString() const
     {
         return String(_data.Get(), _data.Count());
+    }
+
+    StringAnsi ToStringAnsi() const
+    {
+        return StringAnsi(_data.Get(), _data.Count());
     }
 
     StringView ToStringView() const;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ParticleEmitterGraph.CPU.h"
 #include "Engine/Core/Collections/Sorting.h"
@@ -7,6 +7,7 @@
 #include "Engine/Particles/ParticleEffect.h"
 #include "Engine/Engine/Time.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Debug/DebugDraw.h"
 
 ThreadLocal<ParticleEmitterGraphCPUContext*> ParticleEmitterGraphCPUExecutor::Context;
 
@@ -223,7 +224,7 @@ bool ParticleEmitterGraphCPUExecutor::ComputeBounds(ParticleEmitter* emitter, Pa
 #endif
         }
 #endif
-        ASSERT(!isnan(sphere.Radius) && !isinf(sphere.Radius) && !sphere.Center.IsNanOrInfinity());
+        CHECK_RETURN(!isnan(sphere.Radius) && !isinf(sphere.Radius) && !sphere.Center.IsNanOrInfinity(), false);
 
         // Expand sphere based on the render modules rules (sprite or mesh size)
         for (int32 moduleIndex = 0; moduleIndex < emitter->Graph.RenderModules.Count(); moduleIndex++)
@@ -244,7 +245,7 @@ bool ParticleEmitterGraphCPUExecutor::ComputeBounds(ParticleEmitter* emitter, Pa
                         Vector2::Max(*((Vector2*)spriteSize), maxSpriteSize, maxSpriteSize);
                         spriteSize += stride;
                     }
-                    ASSERT(!maxSpriteSize.IsNanOrInfinity());
+                    CHECK_RETURN(!maxSpriteSize.IsNanOrInfinity(), false);
 
                     // Enlarge the emitter bounds sphere
                     sphere.Radius += maxSpriteSize.MaxValue();
@@ -267,7 +268,7 @@ bool ParticleEmitterGraphCPUExecutor::ComputeBounds(ParticleEmitter* emitter, Pa
                     if (radius > maxRadius)
                         maxRadius = radius;
                 }
-                ASSERT(!isnan(maxRadius) && !isinf(maxRadius));
+                CHECK_RETURN(!isnan(maxRadius) && !isinf(maxRadius), false);
 
                 // Enlarge the emitter bounds sphere
                 sphere.Radius += maxRadius;
@@ -315,7 +316,7 @@ bool ParticleEmitterGraphCPUExecutor::ComputeBounds(ParticleEmitter* emitter, Pa
                         maxRibbonWidth = Math::Max(*((float*)ribbonWidth), maxRibbonWidth);
                         ribbonWidth += stride;
                     }
-                    ASSERT(!isnan(maxRibbonWidth) && !isinf(maxRibbonWidth));
+                    CHECK_RETURN(!isnan(maxRibbonWidth) && !isinf(maxRibbonWidth), false);
 
                     // Enlarge the emitter bounds sphere
                     sphere.Radius += maxRibbonWidth * 0.5f;
@@ -335,7 +336,7 @@ bool ParticleEmitterGraphCPUExecutor::ComputeBounds(ParticleEmitter* emitter, Pa
                         maxRadius = Math::Max(*((float*)radius), maxRadius);
                         radius += stride;
                     }
-                    ASSERT(!isnan(maxRadius) && !isinf(maxRadius));
+                    CHECK_RETURN(!isnan(maxRadius) && !isinf(maxRadius), false);
                 }
                 else
                 {
@@ -422,6 +423,23 @@ void ParticleEmitterGraphCPUExecutor::Draw(ParticleEmitter* emitter, ParticleEff
         }
     }
 }
+
+#if USE_EDITOR
+
+void ParticleEmitterGraphCPUExecutor::DrawDebug(ParticleEmitter* emitter, ParticleEffect* effect, ParticleEmitterInstance& data)
+{
+    // Prepare graph data
+    Init(emitter, effect, data);
+    Transform transform = emitter->SimulationSpace == ParticlesSimulationSpace::Local ? effect->GetTransform() : Transform::Identity;
+
+    // Draw modules
+    for (auto module : emitter->Graph.SpawnModules)
+        DebugDrawModule(module, transform);
+    for (auto module : emitter->Graph.InitModules)
+        DebugDrawModule(module, transform);
+}
+
+#endif
 
 void ParticleEmitterGraphCPUExecutor::Update(ParticleEmitter* emitter, ParticleEffect* effect, ParticleEmitterInstance& data, float dt, bool canSpawn)
 {

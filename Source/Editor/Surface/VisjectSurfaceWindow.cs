@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -586,16 +586,8 @@ namespace FlaxEditor.Surface
                 layout.Label("No parameters");
                 return;
             }
-            if (asset.LastLoadFailed)
-            {
-                layout.Label("Failed to load asset");
+            if (Utilities.Utils.OnAssetProperties(layout, asset))
                 return;
-            }
-            if (!asset.IsLoaded)
-            {
-                layout.Label("Loading...", TextAlignment.Center);
-                return;
-            }
             var parameters = window.VisjectSurface.Parameters;
             CustomEditors.Editors.GenericEditor.OnGroupsBegin();
             for (int i = 0; i < parameters.Count; i++)
@@ -716,10 +708,28 @@ namespace FlaxEditor.Surface
         {
             var index = (int)label.Tag;
             menu.AddSeparator();
+            menu.AddButton("Copy name", () => Clipboard.Text = ((IVisjectSurfaceWindow)Values[0]).VisjectSurface.Parameters[index].Name);
+            // TODO: move 'Copy all names' to context menu of the Properties category (as it's not item-specific)
+            menu.AddButton("Copy all names", CopyAllParameterNamesAsConstantCSharpCode);
+            menu.AddSeparator();
             menu.AddButton("Rename", () => StartParameterRenaming(index, label));
             menu.AddButton("Edit attributes...", () => EditAttributesParameter(index, label));
             menu.AddButton("Delete", () => DeleteParameter(index));
             OnParamContextMenu(index, menu);
+        }
+
+        private void CopyAllParameterNamesAsConstantCSharpCode()
+        {
+            string allParamNames = "";
+            foreach (var param in ((IVisjectSurfaceWindow)Values[0]).VisjectSurface.Parameters)
+            {
+                string cleanParamName = param.Name.Replace(" ", "");
+                // Filter out headers and other non-parameter entries that can be present in the parameters list
+                if (string.IsNullOrEmpty(cleanParamName))
+                    continue;
+                allParamNames += $"private const string {cleanParamName}ParameterName = \"{param.Name}\";\n";
+            }
+            Clipboard.Text = allParamNames;
         }
 
         private void StartParameterRenaming(int index, Control label)

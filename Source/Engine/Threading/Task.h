@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -62,6 +62,11 @@ protected:
     /// The task to start after finish.
     /// </summary>
     Task* _continueWith = nullptr;
+
+    /// <summary>
+    /// The task that's starts removal chain, used to sync whole task chain lifetime.
+    /// </summary>
+    Task* _rootForRemoval = nullptr;
 
     void SetState(TaskState state)
     {
@@ -187,15 +192,18 @@ public:
     /// <param name="tasks">The tasks list to wait for.</param>
     /// <param name="timeoutMilliseconds">The maximum amount of milliseconds to wait for the task to finish it's job. Timeout smaller/equal 0 will result in infinite waiting.</param>
     /// <returns>True if any task failed or has been canceled or has timeout, otherwise false.</returns>
+    static bool WaitAll(const Span<Task*>& tasks, double timeoutMilliseconds = -1);
+
+    /// <summary>
+    /// Waits for all the tasks from the list.
+    /// </summary>
+    /// <param name="tasks">The tasks list to wait for.</param>
+    /// <param name="timeoutMilliseconds">The maximum amount of milliseconds to wait for the task to finish it's job. Timeout smaller/equal 0 will result in infinite waiting.</param>
+    /// <returns>True if any task failed or has been canceled or has timeout, otherwise false.</returns>
     template<class T = Task, typename AllocationType = HeapAllocation>
-    static bool WaitAll(Array<T*, AllocationType>& tasks, double timeoutMilliseconds = -1)
+    static bool WaitAll(const Array<T*, AllocationType>& tasks, double timeoutMilliseconds = -1)
     {
-        for (int32 i = 0; i < tasks.Count(); i++)
-        {
-            if (tasks[i]->Wait())
-                return true;
-        }
-        return false;
+        return WaitAll(ToSpan(tasks), timeoutMilliseconds);
     }
 
 public:

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_WINDOWS || PLATFORM_LINUX || PLATFORM_MAC
 
@@ -40,14 +40,14 @@ void TestsRunnerService::Update()
         return;
 
     // Runs tests
-    Log::Logger::WriteFloor();
+    LOG_FLOOR();
     LOG(Info, "Running Flax Tests...");
     const int result = Catch::Session().run();
     if (result == 0)
-        LOG(Info, "Result: {0}", result);
+        LOG(Info, "Flax Tests result: {0}", result);
     else
-        LOG(Error, "Result: {0}", result);
-    Log::Logger::WriteFloor();
+        LOG(Error, "Flax Tests result: {0}", result);
+    LOG_FLOOR();
     Engine::RequestExit(result);
 }
 

@@ -1,9 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ManagedDictionary.h"
 
 #if USE_CSHARP
-Dictionary<ManagedDictionary::KeyValueType, MTypeObject*> ManagedDictionary::CachedDictionaryTypes;
+Dictionary<ManagedDictionary::KeyValueType, MTypeObject*> ManagedDictionary::CachedTypes;
 #if !USE_MONO_AOT
 ManagedDictionary::MakeGenericTypeThunk ManagedDictionary::MakeGenericType;
 ManagedDictionary::CreateInstanceThunk ManagedDictionary::CreateInstance;

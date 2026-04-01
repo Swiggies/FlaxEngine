@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -48,6 +48,12 @@ API_STRUCT() struct ActionConfig
     /// </summary>
     API_FIELD(Attributes="EditorOrder(40)")
     InputGamepadIndex Gamepad;
+
+    /// <summary>
+    /// Threshold for non-binary value inputs such as gamepad stick position to decide if action was triggered. Can be sued to activate action only if input value is higher than specified number.
+    /// </summary>
+    API_FIELD(Attributes = "EditorOrder(50)")
+    float DeadZone = 0.5f;
 };
 
 /// <summary>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -14,14 +14,13 @@ class GPUPipelineState;
 /// <summary>
 /// Sky actor renders atmosphere around the scene with fog and sky.
 /// </summary>
-API_CLASS(Attributes="ActorContextMenu(\"New/Visuals/Sky\"), ActorToolbox(\"Visuals\")")
+API_CLASS(Attributes="ActorContextMenu(\"New/Visuals/Sky/Sky\"), ActorToolbox(\"Visuals\")")
 class FLAXENGINE_API Sky : public Actor, public IAtmosphericFogRenderer, public ISkyRenderer
 {
     DECLARE_SCENE_OBJECT(Sky);
 private:
     AssetReference<Shader> _shader;
-    GPUPipelineState* _psSky;
-    GPUPipelineState* _psFog;
+    GPUPipelineState* _psSky = nullptr;
     int32 _sceneRenderingKey = -1;
 
 public:
@@ -57,7 +56,6 @@ private:
     void OnShaderReloading(Asset* obj)
     {
         _psSky = nullptr;
-        _psFog = nullptr;
     }
 #endif
     void InitConfig(ShaderAtmosphericFogData& config) const;

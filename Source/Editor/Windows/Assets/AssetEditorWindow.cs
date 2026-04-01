@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Content;
@@ -53,11 +53,13 @@ namespace FlaxEditor.Windows.Assets
             {
                 Parent = this
             };
-            _toolstrip.AddButton(editor.Icons.Search64, () => Editor.Windows.ContentWin.Select(_item)).LinkTooltip("Show and select in Content Window");
+            _toolstrip.AddButton(editor.Icons.Search64, () => Editor.Windows.ContentWin.Select(_item)).LinkTooltip("Show and select in Content Window.");
 
             InputActions.Add(options => options.Save, Save);
 
             UpdateTitle();
+
+            ScriptsBuilder.ScriptsReloadBegin += OnScriptsReloadBegin;
         }
 
         /// <summary>
@@ -139,6 +141,8 @@ namespace FlaxEditor.Windows.Assets
         /// <inheritdoc />
         protected override void OnClose()
         {
+            ScriptsBuilder.ScriptsReloadBegin -= OnScriptsReloadBegin;
+
             if (_item != null)
             {
                 // Ensure to remove linkage to the item
@@ -151,6 +155,8 @@ namespace FlaxEditor.Windows.Assets
         /// <inheritdoc />
         public override void OnDestroy()
         {
+            ScriptsBuilder.ScriptsReloadBegin -= OnScriptsReloadBegin;
+
             if (_item != null)
             {
                 // Ensure to remove linkage to the item
@@ -158,6 +164,21 @@ namespace FlaxEditor.Windows.Assets
             }
 
             base.OnDestroy();
+        }
+
+        /// <inheritdoc />
+        protected virtual void OnScriptsReloadBegin()
+        {
+            if (!IsHidden)
+            {
+                if (IsEdited && _item != null)
+                {
+                    Editor.Log($"Auto-saving local changes to asset '{_item.Path}' before reloading code");
+                    Save();
+                }
+                Editor.Instance.Windows.AddToRestore(this);
+                Close();
+            }
         }
 
         #region IEditable Implementation
@@ -504,6 +525,16 @@ namespace FlaxEditor.Windows.Assets
             _item.RefreshThumbnail();
 
             return false;
+        }
+
+        /// <summary>
+        /// Loads the asset from the original location to reflect the state (eg. after original asset reimport).
+        /// </summary>
+        protected virtual void LoadFromOriginal()
+        {
+            _asset = LoadAsset();
+            OnAssetLoaded();
+            ClearEditedFlag();
         }
 
         /// <inheritdoc />

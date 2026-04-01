@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.ComponentModel;
 using FlaxEngine;
@@ -82,6 +82,13 @@ namespace FlaxEditor.Options
         public float TransformGizmoOpacity { get; set; } = 1f;
 
         /// <summary>
+        /// Gets or set a value indicating how bright the transform gizmo is when it is disabled, for example when one of the selected actors is static in play mode. Use a value of 0 to make the gizmo fully gray. Value over 1 will result in the gizmo emitting light.
+        /// </summary>
+        [DefaultValue(0.25f), Range(0f, 5f)]
+        [EditorDisplay("Transform Gizmo", "Disabled Gizmo Brightness"), EditorOrder(212)]
+        public float TransformGizmoBrightnessDisabled { get; set; } = 0.25f;
+
+        /// <summary>
         /// Gets or sets a value indicating whether enable MSAA for DebugDraw primitives rendering. Helps with pixel aliasing but reduces performance.
         /// </summary>
         [DefaultValue(true)]
@@ -94,5 +101,33 @@ namespace FlaxEditor.Options
         [DefaultValue(true)]
         [EditorDisplay("Preview"), EditorOrder(1000)]
         public bool EnableParticlesPreview { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets the output log text color.
+        /// </summary>
+        [DefaultValue(typeof(Color), "1,1,1,1")]
+        [EditorDisplay("Log", "Info Color"), EditorOrder(1500), Tooltip("The color used for info messages in the Debug and Output Log.")]
+        public Color LogInfoColor { get; set; } = Color.White;
+
+        /// <summary>
+        /// Gets or sets the output log text color for warnings
+        /// </summary>
+        [DefaultValue(typeof(Color), "1,1,0,1")]
+        [EditorDisplay("Log", "Warning Color"), EditorOrder(1501), Tooltip("The color used for warnings in the Debug and Output Log.")]
+        public Color LogWarningColor { get; set; } = Color.Yellow;
+
+        /// <summary>
+        /// Gets or sets the output log text color for errors
+        /// </summary>
+        [DefaultValue(typeof(Color), "1,0,0,1")]
+        [EditorDisplay("Log", "Error Color"), EditorOrder(1502), Tooltip("The color used for errors in the Debug and Output Log.")]
+        public Color LogErrorColor { get; set; } = Color.Red;
+
+        /// <summary>
+        /// Gets or sets a value wether the Debug Log entry text color should use the set color.
+        /// </summary>
+        [DefaultValue(true)]
+        [EditorDisplay("Log", "Color Debug Log Text"), EditorOrder(1503), Tooltip("Wether to use the set colors in the text of a Debug Log entry.")]
+        public bool ColorDebugLogText = true;
     }
 }

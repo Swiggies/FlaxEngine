@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "CodeEditor.h"
 #include "CodeEditors/SystemDefaultCodeEditor.h"
@@ -13,6 +13,7 @@
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Platform/Thread.h"
 #include "Engine/Threading/IRunnable.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 
 void OnAsyncBegin(Thread* thread);
 void OnAsyncEnd();
@@ -138,6 +139,34 @@ CodeEditor* CodeEditingManager::GetCodeEditor(CodeEditorTypes editorType)
     return nullptr;
 }
 
+String CodeEditingManager::GetName(CodeEditorTypes editorType)
+{
+    const auto editor = GetCodeEditor(editorType);
+    if (editor)
+    {
+        return editor->GetName();
+    }
+    else
+    {
+        LOG(Warning, "Missing code editor type {0}", (int32)editorType);
+        return String::Empty;
+    }
+}
+
+String CodeEditingManager::GetGenerateProjectCustomArgs(CodeEditorTypes editorType)
+{
+    const auto editor = GetCodeEditor(editorType);
+    if (editor)
+    {
+        return editor->GetGenerateProjectCustomArgs();
+    }
+    else
+    {
+        LOG(Warning, "Missing code editor type {0}", (int32)editorType);
+        return String::Empty;
+    }
+}
+
 void CodeEditingManager::OpenFile(CodeEditorTypes editorType, const String& path, int32 line)
 {
     const auto editor = GetCodeEditor(editorType);
@@ -232,6 +261,8 @@ void OnAsyncEnd()
 
 bool CodeEditingManagerService::Init()
 {
+    PROFILE_MEM(Editor);
+
     // Try get editors
 #if USE_VISUAL_STUDIO_DTE
     VisualStudioEditor::FindEditors(&CodeEditors);

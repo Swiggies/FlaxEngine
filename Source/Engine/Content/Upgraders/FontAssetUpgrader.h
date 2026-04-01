@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -14,59 +14,34 @@
 class FontAssetUpgrader : public BinaryAssetUpgrader
 {
 public:
-    /// <summary>
-    /// Initializes a new instance of the <see cref="FontAssetUpgrader"/> class.
-    /// </summary>
     FontAssetUpgrader()
     {
-        static const Upgrader upgraders[] =
+        const Upgrader upgraders[] =
         {
-            { 1, 2, &Upgrade_1_To_2 },
-            { 2, 3, &Upgrade_2_To_3 },
+            { 3, 4, &Upgrade_3_To_4 },
         };
         setup(upgraders, ARRAY_COUNT(upgraders));
     }
 
 private:
-    // ============================================
-    //                  Version 1:
-    // Designed: long time ago in a galaxy far far away
-    // Custom Data: not used
-    // Chunk 0: Header
-    // Chunk 1: Font File data
-    // ============================================
-    //                  Version 2:
-    // Designed: 4/20/2017
-    // Custom Data: not used
-    // Chunk 0: Font File data
-    // ============================================
-    //                  Version 3:
-    // Designed: 10/24/2019
-    // Custom Data: Header1
-    // Chunk 0: Font File data
-    // ============================================
-
-    typedef FontOptions Header1;
-
-    static bool Upgrade_1_To_2(AssetMigrationContext& context)
+    struct FontOptionsOld
     {
-        ASSERT(context.Input.SerializedVersion == 1 && context.Output.SerializedVersion == 2);
+        FontHinting Hinting;
+        FontFlags Flags;
+    };
 
-        if (context.AllocateChunk(0))
-            return true;
-        context.Output.Header.Chunks[0]->Data.Copy(context.Input.Header.Chunks[1]->Data);
-
-        return false;
-    }
-
-    static bool Upgrade_2_To_3(AssetMigrationContext& context)
+    static bool Upgrade_3_To_4(AssetMigrationContext& context)
     {
-        ASSERT(context.Input.SerializedVersion == 2 && context.Output.SerializedVersion == 3);
+        ASSERT(context.Input.SerializedVersion == 3 && context.Output.SerializedVersion == 4);
 
-        Header1 header;
-        header.Hinting = FontHinting::Default;
-        header.Flags = FontFlags::AntiAliasing;
-        context.Output.CustomData.Copy(&header);
+        FontOptionsOld optionsOld;
+        Platform::MemoryCopy(&optionsOld, context.Input.CustomData.Get(), sizeof(FontOptionsOld));
+
+        FontOptions options;
+        options.Hinting = optionsOld.Hinting;
+        options.Flags = optionsOld.Flags;
+        options.RasterMode = FontRasterMode::Bitmap;
+        context.Output.CustomData.Copy(&options);
 
         return CopyChunk(context, 0);
     }

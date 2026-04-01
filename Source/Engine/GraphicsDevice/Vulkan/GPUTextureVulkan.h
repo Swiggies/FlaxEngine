@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -17,22 +17,6 @@ class GPUTextureViewVulkan : public GPUTextureView, public DescriptorOwnerResour
 public:
     GPUTextureViewVulkan()
     {
-    }
-
-    GPUTextureViewVulkan(const GPUTextureViewVulkan& other)
-        : GPUTextureViewVulkan()
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-    }
-
-    GPUTextureViewVulkan& operator=(const GPUTextureViewVulkan& other)
-    {
-#if !BUILD_RELEASE
-        CRASH; // Not used
-#endif
-        return *this;
     }
 
 #if !BUILD_RELEASE
@@ -61,7 +45,7 @@ public:
 #endif
 
 public:
-    void Init(GPUDeviceVulkan* device, ResourceOwnerVulkan* owner, VkImage image, int32 totalMipLevels, PixelFormat format, MSAALevel msaa, VkExtent3D extent, VkImageViewType viewType, int32 mipLevels = 1, int32 firstMipIndex = 0, int32 arraySize = 1, int32 firstArraySlice = 0, bool readOnlyDepth = false);
+    void Init(GPUDeviceVulkan* device, ResourceOwnerVulkan* owner, VkImage image, int32 totalMipLevels, PixelFormat format, MSAALevel msaa, VkExtent3D extent, VkImageViewType viewType, int32 mipLevels = 1, int32 firstMipIndex = 0, int32 arraySize = 1, int32 firstArraySlice = 0, bool readOnlyDepth = false, bool stencilView = false);
 
     VkImageView GetFramebufferView();
 
@@ -78,8 +62,8 @@ public:
     void DescriptorAsImage(GPUContextVulkan* context, VkImageView& imageView, VkImageLayout& layout) override;
     void DescriptorAsStorageImage(GPUContextVulkan* context, VkImageView& imageView, VkImageLayout& layout) override;
 #if !BUILD_RELEASE
-    bool HasSRV() const override { return ((GPUTexture*)_parent)->IsShaderResource(); }
-    bool HasUAV() const override { return ((GPUTexture*)_parent)->IsUnorderedAccess(); }
+    bool HasSRV() const override { return !_parent || ((GPUTexture*)_parent)->IsShaderResource(); }
+    bool HasUAV() const override { return !_parent || ((GPUTexture*)_parent)->IsUnorderedAccess(); }
 #endif
 };
 
@@ -95,6 +79,7 @@ private:
     GPUTextureViewVulkan _handleVolume;
     GPUTextureViewVulkan _handleUAV;
     GPUTextureViewVulkan _handleReadOnlyDepth;
+    GPUTextureViewVulkan _handleStencil;
     Array<GPUTextureViewVulkan> _handlesPerSlice; // [slice]
     Array<Array<GPUTextureViewVulkan>> _handlesPerMip; // [slice][mip]
 
@@ -155,6 +140,11 @@ public:
     {
         ASSERT(_desc.Flags & GPUTextureFlags::ReadOnlyDepthView);
         return (GPUTextureView*)&_handleReadOnlyDepth;
+    }
+    GPUTextureView* ViewStencil() const override
+    {
+        ASSERT(_desc.Flags & GPUTextureFlags::DepthStencil);
+        return (GPUTextureView*)&_handleStencil;
     }
     void* GetNativePtr() const override
     {

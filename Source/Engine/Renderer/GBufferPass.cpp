@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "GBufferPass.h"
 #include "RenderList.h"
@@ -19,6 +19,7 @@
 #include "Engine/Content/Content.h"
 #include "Engine/Content/Assets/Model.h"
 #include "Engine/Level/Actors/Decal.h"
+#include "Engine/Level/Actors/Sky.h"
 #include "Engine/Engine/Engine.h"
 
 GPU_CB_STRUCT(GBufferPassData {
@@ -157,6 +158,7 @@ void GBufferPass::Fill(RenderContext& renderContext, GPUTexture* lightBuffer)
         renderContext.Buffers->GBuffer3->View(),
     };
     renderContext.View.Pass = DrawPass::GBuffer;
+    context->SetViewportAndScissors(renderContext.Buffers->GetViewport());
 
     // Clear GBuffer
     {
@@ -416,8 +418,17 @@ void GBufferPass::DrawSky(RenderContext& renderContext, GPUContext* context)
 
     // Calculate sphere model transform to cover far plane
     Matrix m1, m2;
-    Matrix::Scaling(renderContext.View.Far / ((float)box.GetSize().Y * 0.5f) * 0.95f, m1); // Scale to fit whole view frustum
-    Matrix::CreateWorld(renderContext.View.Position, Float3::Up, Float3::Backward, m2); // Rotate sphere model
+    float size = renderContext.View.Far;
+    Float3 origin = renderContext.View.Position;
+    if (dynamic_cast<Sky*>(renderContext.List->Sky)) // TODO: refactor sky rendering (eg. let sky draw with custom projection)
+    {
+        BoundingSphere frustumBounds;
+        renderContext.View.CullingFrustum.GetSphere(frustumBounds);
+        origin = frustumBounds.Center;
+        size = frustumBounds.Radius;
+    }
+    Matrix::Scaling(size / ((float)box.GetSize().Y * 0.5f) * 0.95f, m1); // Scale to fit whole view frustum
+    Matrix::CreateWorld(origin, Float3::Up, Float3::Backward, m2); // Rotate sphere model
     m1 *= m2;
 
     // Draw sky
@@ -434,6 +445,7 @@ void GBufferPass::DrawDecals(RenderContext& renderContext, GPUTextureView* light
     PROFILE_GPU_CPU("Decals");
     auto context = GPUDevice::Instance->GetMainContext();
     auto buffers = renderContext.Buffers;
+    GPUTextureView* depthBuffer = EnumHasAnyFlags(buffers->DepthBuffer->Flags(), GPUTextureFlags::ReadOnlyDepthView) ? buffers->DepthBuffer->ViewReadOnlyDepth() : nullptr;
 
     // Sort decals from the lowest order to the highest order
     Sorting::QuickSort(decals.Get(), decals.Count(), &SortDecal);
@@ -484,22 +496,22 @@ void GBufferPass::DrawDecals(RenderContext& renderContext, GPUTextureView* light
                     count++;
                     targetBuffers[2] = buffers->GBuffer1->View();
                 }
-                context->SetRenderTarget(nullptr, ToSpan(targetBuffers, count));
+                context->SetRenderTarget(depthBuffer, ToSpan(targetBuffers, count));
                 break;
             }
             case MaterialDecalBlendingMode::Stain:
             {
-                context->SetRenderTarget(buffers->GBuffer0->View());
+                context->SetRenderTarget(depthBuffer, buffers->GBuffer0->View());
                 break;
             }
             case MaterialDecalBlendingMode::Normal:
             {
-                context->SetRenderTarget(buffers->GBuffer1->View());
+                context->SetRenderTarget(depthBuffer, buffers->GBuffer1->View());
                 break;
             }
             case MaterialDecalBlendingMode::Emissive:
             {
-                context->SetRenderTarget(lightBuffer);
+                context->SetRenderTarget(depthBuffer, lightBuffer);
                 break;
             }
             }
@@ -507,6 +519,7 @@ void GBufferPass::DrawDecals(RenderContext& renderContext, GPUTextureView* light
 
         // Draw decal
         drawCall.World = decal.World;
+        drawCall.SortKey = (uint64)decal.RenderLayersMask;
         decal.Material->Bind(bindParams);
         // TODO: use hardware instancing
         context->DrawIndexed(drawCall.Draw.IndicesCount);

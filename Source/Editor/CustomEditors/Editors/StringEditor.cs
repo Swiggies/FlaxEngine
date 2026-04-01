@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Linq;
 using FlaxEditor.CustomEditors.Elements;
@@ -35,7 +35,7 @@ namespace FlaxEditor.CustomEditors.Editors
             }
 
             _element = layout.TextBox(isMultiLine);
-            _defaultWatermarkColor = _element.TextBox.WatermarkTextColor;
+            _watermarkColor = _defaultWatermarkColor = _element.TextBox.WatermarkTextColor;
             if (watermarkAttribute is WatermarkAttribute watermark)
             {
                 _watermarkText = watermark.WatermarkText;

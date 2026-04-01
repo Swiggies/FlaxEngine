@@ -1,11 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #if PLATFORM_WIN32
 
 // Platform description
-#define PLATFORM_DESKTOP 1
 #if defined(WIN64) && defined(_M_X64)
 #define PLATFORM_64BITS 1
 #define PLATFORM_ARCH_X64 1

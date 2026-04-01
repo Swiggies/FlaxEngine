@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -264,6 +264,19 @@ namespace FlaxEditor.GUI
         public MainMenuButton AddButton(string text)
         {
             return AddChild(new MainMenuButton(text));
+        }
+
+        /// <summary>
+        /// Gets or adds a button.
+        /// </summary>
+        /// <param name="text">The button text</param>
+        /// <returns>The existing or created button control.</returns>
+        public MainMenuButton GetOrAddButton(string text)
+        {
+            MainMenuButton result = GetButton(text);
+            if (result == null)
+                result = AddButton(text);
+            return result;
         }
 
         /// <summary>

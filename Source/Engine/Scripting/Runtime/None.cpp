@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Engine/Scripting/Types.h"
 #if !USE_CSHARP
@@ -58,9 +58,13 @@ void MCore::UnloadEngine()
     MRootDomain = nullptr;
 }
 
+void MCore::CreateScriptingAssemblyLoadContext()
+{
+}
+
 #if USE_EDITOR
 
-void MCore::ReloadScriptingAssemblyLoadContext()
+void MCore::UnloadScriptingAssemblyLoadContext()
 {
 }
 
@@ -184,6 +188,11 @@ void MCore::GC::Collect(int32 generation, MGCCollectionMode collectionMode, bool
 int32 MCore::GC::MaxGeneration()
 {
     return 0;
+}
+
+void MCore::GC::MemoryInfo(int64& totalCommitted, int64& heapSize)
+{
+    totalCommitted = heapSize = 0;
 }
 
 void MCore::GC::WaitForPendingFinalizers()
@@ -354,7 +363,7 @@ MMethod* MClass::GetMethod(const char* name, int32 numParams) const
     return nullptr;
 }
 
-const Array<MMethod*>& MClass::GetMethods() const
+const Array<MMethod*, ArenaAllocation>& MClass::GetMethods() const
 {
     _hasCachedMethods = true;
     return _methods;
@@ -365,13 +374,13 @@ MField* MClass::GetField(const char* name) const
     return nullptr;
 }
 
-const Array<MField*>& MClass::GetFields() const
+const Array<MField*, ArenaAllocation>& MClass::GetFields() const
 {
     _hasCachedFields = true;
     return _fields;
 }
 
-const Array<MEvent*>& MClass::GetEvents() const
+const Array<MEvent*, ArenaAllocation>& MClass::GetEvents() const
 {
     _hasCachedEvents = true;
     return _events;
@@ -382,7 +391,7 @@ MProperty* MClass::GetProperty(const char* name) const
     return nullptr;
 }
 
-const Array<MProperty*>& MClass::GetProperties() const
+const Array<MProperty*, ArenaAllocation>& MClass::GetProperties() const
 {
     _hasCachedProperties = true;
     return _properties;
@@ -403,7 +412,7 @@ MObject* MClass::GetAttribute(const MClass* klass) const
     return nullptr;
 }
 
-const Array<MObject*>& MClass::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MClass::GetAttributes() const
 {
     _hasCachedAttributes = true;
     return _attributes;
@@ -445,7 +454,7 @@ MObject* MEvent::GetAttribute(const MClass* klass) const
     return nullptr;
 }
 
-const Array<MObject*>& MEvent::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MEvent::GetAttributes() const
 {
     return _attributes;
 }
@@ -497,7 +506,7 @@ MObject* MField::GetAttribute(const MClass* klass) const
     return nullptr;
 }
 
-const Array<MObject*>& MField::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MField::GetAttributes() const
 {
     return _attributes;
 }
@@ -552,7 +561,7 @@ MObject* MMethod::GetAttribute(const MClass* klass) const
     return nullptr;
 }
 
-const Array<MObject*>& MMethod::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MMethod::GetAttributes() const
 {
     return _attributes;
 }
@@ -599,7 +608,7 @@ MObject* MProperty::GetAttribute(const MClass* klass) const
     return nullptr;
 }
 
-const Array<MObject*>& MProperty::GetAttributes() const
+const Array<MObject*, ArenaAllocation>& MProperty::GetAttributes() const
 {
     return _attributes;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -63,6 +63,11 @@ API_ENUM(Namespace="FlaxEditor", Attributes="HideInEditor") enum class CodeEdito
     VS2022,
 
     /// <summary>
+    /// Visual Studio 2026
+    /// </summary>
+    VS2026,
+
+    /// <summary>
     /// Visual Studio Code
     /// </summary>
     VSCode,
@@ -104,8 +109,17 @@ public:
     /// <summary>
     /// Gets the name of the editor.
     /// </summary>
-    /// <returns>The name</returns>
+    /// <returns>The name.</returns>
     virtual String GetName() const = 0;
+
+    /// <summary>
+    /// Gets the custom arguments for the Flax.Build tool to add when generating project files for this code editor.
+    /// </summary>
+    /// <returns>The custom arguments to generate project files.</returns>
+    virtual String GetGenerateProjectCustomArgs() const
+    {
+        return String::Empty;
+    }
 
     /// <summary>
     /// Opens the file.
@@ -163,6 +177,20 @@ public:
     /// <param name="editorType">Type of the editor.</param>
     /// <returns>The editor object or null if not found.</returns>
     static CodeEditor* GetCodeEditor(CodeEditorTypes editorType);
+
+    /// <summary>
+    /// Gets the name of the editor.
+    /// </summary>
+    /// <param name="editorType">The code editor type.</param>
+    /// <returns>The name.</returns>
+    API_FUNCTION() static String GetName(CodeEditorTypes editorType);
+
+    /// <summary>
+    /// Gets the custom arguments for the Flax.Build tool to add when generating project files for this code editor.
+    /// </summary>
+    /// <param name="editorType">The code editor type.</param>
+    /// <returns>The custom arguments to generate project files.</returns>
+    API_FUNCTION() static String GetGenerateProjectCustomArgs(CodeEditorTypes editorType);
 
     /// <summary>
     /// Opens the file. Handles async opening.

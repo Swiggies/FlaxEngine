@@ -1,9 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Navigation.h"
 #include "NavigationSettings.h"
 #include "NavMeshRuntime.h"
 #include "NavMeshBuilder.h"
+#include "NavMesh.h"
 #include "Engine/Core/Config/GameSettings.h"
 #include "Engine/Content/Content.h"
 #include "Engine/Content/JsonAsset.h"
@@ -14,10 +15,10 @@
 #include "Engine/Level/Level.h"
 #include "Engine/Level/Scene/Scene.h"
 #endif
-#include "NavMesh.h"
-
+#include "Engine/Content/Deprecated.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Serialization/Serialization.h"
 #include <ThirdParty/recastnavigation/DetourNavMesh.h>
 #include <ThirdParty/recastnavigation/RecastAlloc.h>
@@ -93,6 +94,7 @@ NavMeshRuntime* NavMeshRuntime::Get(const NavMeshProperties& navMeshProperties, 
     if (!result && createIfMissing)
     {
         // Create a new navmesh
+        PROFILE_MEM(Navigation);
         result = New<NavMeshRuntime>(navMeshProperties);
         NavMeshes.Add(result);
     }
@@ -107,7 +109,7 @@ Color NavMeshRuntime::NavAreasColors[64];
 
 bool NavAgentProperties::operator==(const NavAgentProperties& other) const
 {
-    return Math::NearEqual(Radius, other.Radius) && Math::NearEqual(Height, other.Height) && Math::NearEqual(StepHeight, other.StepHeight) && Math::NearEqual(MaxSlopeAngle, other.MaxSlopeAngle) && Math::NearEqual(MaxSpeed, other.MaxSpeed) && Math::NearEqual(CrowdSeparationWeight, other.CrowdSeparationWeight);
+    return Radius == other.Radius && Height == other.Height && StepHeight == other.StepHeight && MaxSlopeAngle == other.MaxSlopeAngle && MaxSpeed == other.MaxSpeed && CrowdSeparationWeight == other.CrowdSeparationWeight;
 }
 
 bool NavAgentMask::IsAgentSupported(int32 agentIndex) const
@@ -148,12 +150,12 @@ bool NavAgentMask::operator==(const NavAgentMask& other) const
 
 bool NavAreaProperties::operator==(const NavAreaProperties& other) const
 {
-    return Name == other.Name && Id == other.Id && Math::NearEqual(Cost, other.Cost);
+    return Name == other.Name && Id == other.Id && Cost == other.Cost;
 }
 
 bool NavMeshProperties::operator==(const NavMeshProperties& other) const
 {
-    return Name == other.Name && Quaternion::NearEqual(Rotation, other.Rotation, 0.001f) && Agent == other.Agent && Vector3::NearEqual(DefaultQueryExtent, other.DefaultQueryExtent);
+    return Name == other.Name && Rotation == other.Rotation && Agent == other.Agent && DefaultQueryExtent == other.DefaultQueryExtent;
 }
 
 class NavigationService : public EngineService
@@ -178,16 +180,20 @@ NavigationService NavigationServiceInstance;
 
 void* dtAllocDefault(size_t size, dtAllocHint)
 {
+    PROFILE_MEM(NavigationMesh);
     return Allocator::Allocate(size);
 }
 
 void* rcAllocDefault(size_t size, rcAllocHint)
 {
+    PROFILE_MEM(Navigation);
     return Allocator::Allocate(size);
 }
 
 NavigationSettings::NavigationSettings()
 {
+    PROFILE_MEM(Navigation);
+
     // Init navmeshes
     NavMeshes.Resize(1);
     auto& navMesh = NavMeshes[0];
@@ -235,6 +241,28 @@ void NavigationSettings::Apply()
 #endif
 }
 
+#if USE_EDITOR
+
+void NavigationSettings::Serialize(SerializeStream& stream, const void* otherObj)
+{
+    SERIALIZE_GET_OTHER_OBJ(NavigationSettings);
+    SERIALIZE(AutoAddMissingNavMeshes);
+    SERIALIZE(AutoRemoveMissingNavMeshes);
+    SERIALIZE(CellHeight);
+    SERIALIZE(CellSize);
+    SERIALIZE(TileSize);
+    SERIALIZE(MinRegionArea);
+    SERIALIZE(MergeRegionArea);
+    SERIALIZE(MaxEdgeLen);
+    SERIALIZE(MaxEdgeError);
+    SERIALIZE(DetailSamplingDist);
+    SERIALIZE(MaxDetailSamplingError);
+    SERIALIZE(NavMeshes);
+    SERIALIZE(NavAreas);
+}
+
+#endif
+
 void NavigationSettings::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
 {
     DESERIALIZE(AutoAddMissingNavMeshes);
@@ -255,6 +283,7 @@ void NavigationSettings::Deserialize(DeserializeStream& stream, ISerializeModifi
     else
     {
         // [Deprecated on 12.01.2021, expires on 12.01.2022]
+        MARK_CONTENT_DEPRECATED();
         float WalkableRadius = 34.0f;
         float WalkableHeight = 144.0f;
         float WalkableMaxClimb = 35.0f;
@@ -352,30 +381,6 @@ bool Navigation::RayCast(const Vector3& startPosition, const Vector3& endPositio
         return false;
     return NavMeshes.First()->RayCast(startPosition, endPosition, hitInfo);
 }
-
-#if COMPILE_WITH_NAV_MESH_BUILDER
-
-bool Navigation::IsBuildingNavMesh()
-{
-    return NavMeshBuilder::IsBuildingNavMesh();
-}
-
-float Navigation::GetNavMeshBuildingProgress()
-{
-    return NavMeshBuilder::GetNavMeshBuildingProgress();
-}
-
-void Navigation::BuildNavMesh(Scene* scene, float timeoutMs)
-{
-    NavMeshBuilder::Build(scene, timeoutMs);
-}
-
-void Navigation::BuildNavMesh(Scene* scene, const BoundingBox& dirtyBounds, float timeoutMs)
-{
-    NavMeshBuilder::Build(scene, dirtyBounds, timeoutMs);
-}
-
-#endif
 
 #if COMPILE_WITH_DEBUG_DRAW
 

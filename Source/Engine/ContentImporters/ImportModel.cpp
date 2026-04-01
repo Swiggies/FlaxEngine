@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ImportModel.h"
 
@@ -19,12 +19,15 @@
 #include "Engine/Animations/AnimEvent.h"
 #include "Engine/Level/Actors/EmptyActor.h"
 #include "Engine/Level/Actors/StaticModel.h"
+#include "Engine/Level/Actors/AnimatedModel.h"
 #include "Engine/Level/Prefabs/Prefab.h"
 #include "Engine/Level/Prefabs/PrefabManager.h"
 #include "Engine/Level/Scripts/ModelPrefab.h"
 #include "Engine/Platform/FileSystem.h"
 #include "Engine/Utilities/RectPack.h"
+#include "Engine/Scripting/Scripting.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Editor/Utilities/EditorUtilities.h"
 #include "AssetsImportingManager.h"
 
 bool ImportModel::TryGetImportOptions(const StringView& path, Options& options)
@@ -54,11 +57,37 @@ bool ImportModel::TryGetImportOptions(const StringView& path, Options& options)
             }
         }
     }
+    else
+    {
+        // Try model prefab
+        String pathPrefab = String(StringUtils::GetPathWithoutExtension(path)) + DEFAULT_PREFAB_EXTENSION_DOT;
+        if (FileSystem::FileExists(pathPrefab))
+        {
+            auto prefab = Content::Load<Prefab>(pathPrefab);
+            if (prefab)
+            {
+                for (const auto& e : prefab->ObjectsDataCache)
+                {
+                    auto importOptionsMember = e.Value->FindMember("ImportOptions");
+                    if (importOptionsMember != e.Value->MemberEnd() && importOptionsMember->value.IsObject())
+                    {
+                        options.Deserialize(*(ISerializable::DeserializeStream*)&importOptionsMember->value, nullptr);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
     return false;
 }
 
 struct PrefabObject
 {
+    enum
+    {
+        Model,
+        SkinnedModel,
+    } Type;
     int32 NodeIndex;
     String Name;
     String AssetPath;
@@ -132,8 +161,10 @@ void RepackMeshLightmapUVs(ModelData& data)
                 {
                     Float2 uvOffset(entry.Slot->X * atlasSizeInv, entry.Slot->Y * atlasSizeInv);
                     Float2 uvScale(entry.Slot->Width * atlasSizeInv, entry.Slot->Height * atlasSizeInv);
-                    // TODO: SIMD
-                    for (auto& uv : entry.Mesh->LightmapUVs)
+                    if (entry.Mesh->LightmapUVsIndex == -1)
+                        continue;
+                    auto& lightmapUVs = entry.Mesh->UVs[entry.Mesh->LightmapUVsIndex];
+                    for (auto& uv : lightmapUVs)
                     {
                         uv = uv * uvScale + uvOffset;
                     }
@@ -167,6 +198,33 @@ void SetupMaterialSlots(ModelData& data, const Array<MaterialSlotEntry>& materia
 bool SortMeshGroups(IGrouping<StringView, MeshData*> const& i1, IGrouping<StringView, MeshData*> const& i2)
 {
     return i1.GetKey().Compare(i2.GetKey()) < 0;
+}
+
+void CloneObject(rapidjson_flax::StringBuffer& buffer, SceneObject* src, SceneObject* dst, bool stripName = false)
+{
+    // Serialize source
+    buffer.Clear();
+    CompactJsonWriter writer(buffer);
+    writer.StartObject();
+    const void* defaultInstance = src->GetType().GetDefaultInstance();
+    src->Serialize(writer, defaultInstance);
+    writer.EndObject();
+
+    // Parse json
+    rapidjson_flax::Document document;
+    document.Parse(buffer.GetString(), buffer.GetSize());
+
+    // Strip unwanted data
+    document.RemoveMember("ID");
+    document.RemoveMember("ParentID");
+    document.RemoveMember("PrefabID");
+    document.RemoveMember("PrefabObjectID");
+    if (stripName)
+        document.RemoveMember("Name");
+
+    // Deserialize destination
+    auto modifier = Cache::ISerializeModifier.Get();
+    dst->Deserialize(document, &*modifier);
 }
 
 CreateAssetResult ImportModel::Import(CreateAssetContext& context)
@@ -228,15 +286,21 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
         options.SplitObjects = false;
         options.ObjectIndex = -1;
 
-        // Import all of the objects recursive but use current model data to skip loading file again
+        // Import all the objects recursive but use current model data to skip loading file again
         options.Cached = &cached;
-        Function<bool(Options& splitOptions, const StringView& objectName, String& outputPath, MeshData* meshData)> splitImport = [&context, &autoImportOutput](Options& splitOptions, const StringView& objectName, String& outputPath, MeshData* meshData)
+        HashSet<String> objectNames;
+        Function<bool(Options& splitOptions, const StringView& objectName, String& outputPath, MeshData* meshData)> splitImport = [&context, &autoImportOutput, &objectNames](Options& splitOptions, const StringView& objectName, String& outputPath, MeshData* meshData)
         {
             // Recursive importing of the split object
             String postFix = objectName;
             const int32 splitPos = postFix.FindLast(TEXT('|'));
-            if (splitPos != -1)
+            if (splitPos != -1 && splitPos + 1 < postFix.Length())
                 postFix = postFix.Substring(splitPos + 1);
+            EditorUtilities::ValidatePathChars(postFix); // Ensure name is valid path
+            int32 duplicate = 0;
+            String postFixPre = postFix;
+            while (!objectNames.Add(postFix)) // Ensure name is unique
+                postFix = String::Format(TEXT("{} {}"), postFixPre, duplicate++);
             // TODO: check for name collisions with material/texture assets
             outputPath = autoImportOutput / String(StringUtils::GetFileNameWithoutExtension(context.TargetAssetPath)) + TEXT(" ") + postFix + TEXT(".flax");
             splitOptions.SubAssetFolder = TEXT(" "); // Use the same folder as asset as they all are imported to the subdir for the prefab (see SubAssetFolder usage above)
@@ -277,12 +341,24 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
             auto& group = meshesByName[groupIndex];
 
             // Cache object options (nested sub-object import removes the meshes)
-            prefabObject.NodeIndex = group.First()->NodeIndex;
-            prefabObject.Name = group.First()->Name;
+            MeshData* firstMesh = group.First();
+            prefabObject.NodeIndex = firstMesh->NodeIndex;
+            prefabObject.Name = firstMesh->Name;
 
-            splitOptions.Type = ModelTool::ModelType::Model;
+            // Detect model type
+            if ((firstMesh->BlendIndices.HasItems() && firstMesh->BlendWeights.HasItems()) || firstMesh->BlendShapes.HasItems())
+            {
+                splitOptions.Type = ModelTool::ModelType::SkinnedModel;
+                prefabObject.Type = PrefabObject::SkinnedModel;
+            }
+            else
+            {
+                splitOptions.Type = ModelTool::ModelType::Model;
+                prefabObject.Type = PrefabObject::Model;
+            }
+            
             splitOptions.ObjectIndex = groupIndex;
-            if (!splitImport(splitOptions, group.GetKey(), prefabObject.AssetPath, group.First()))
+            if (!splitImport(splitOptions, group.GetKey(), prefabObject.AssetPath, firstMesh))
             {
                 prefabObjects.Add(prefabObject);
             }
@@ -420,16 +496,23 @@ CreateAssetResult ImportModel::Import(CreateAssetContext& context)
     }
 
     // Check if restore local changes on asset reimport
+    constexpr bool RestoreModelOptionsOnReimport = true;
     constexpr bool RestoreAnimEventsOnReimport = true;
+    const bool restoreModelOptions = RestoreModelOptionsOnReimport && (options.Type == ModelTool::ModelType::Model || options.Type == ModelTool::ModelType::SkinnedModel);
     const bool restoreMaterials = options.RestoreMaterialsOnReimport && data->Materials.HasItems();
     const bool restoreAnimEvents = RestoreAnimEventsOnReimport && options.Type == ModelTool::ModelType::Animation && data->Animations.HasItems();
-    if ((restoreMaterials || restoreAnimEvents) && FileSystem::FileExists(context.TargetAssetPath))
+    if ((restoreModelOptions || restoreMaterials || restoreAnimEvents) && FileSystem::FileExists(context.TargetAssetPath))
     {
         AssetReference<Asset> asset = Content::LoadAsync<Asset>(context.TargetAssetPath);
         if (asset && !asset->WaitForLoaded())
         {
             auto* model = ScriptingObject::Cast<ModelBase>(asset);
             auto* animation = ScriptingObject::Cast<Animation>(asset);
+            if (restoreModelOptions && model)
+            {
+                // Copy general properties
+                data->MinScreenSize = model->MinScreenSize;
+            }
             if (restoreMaterials && model)
             {
                 // Copy material settings
@@ -540,40 +623,31 @@ CreateAssetResult ImportModel::Create(CreateAssetContext& context)
     return CreateModel(context, modelData);
 }
 
-CreateAssetResult ImportModel::CreateModel(CreateAssetContext& context, ModelData& modelData, const Options* options)
+CreateAssetResult ImportModel::CreateModel(CreateAssetContext& context, const ModelData& modelData, const Options* options)
 {
     PROFILE_CPU();
     IMPORT_SETUP(Model, Model::SerializedVersion);
+    static_assert(Model::SerializedVersion == 30, "Update code.");
 
     // Save model header
     MemoryWriteStream stream(4096);
-    if (modelData.Pack2ModelHeader(&stream))
+    if (Model::SaveHeader(stream, modelData))
         return CreateAssetResult::Error;
     if (context.AllocateChunk(0))
         return CreateAssetResult::CannotAllocateChunk;
-    context.Data.Header.Chunks[0]->Data.Copy(stream.GetHandle(), stream.GetPosition());
+    context.Data.Header.Chunks[0]->Data.Copy(ToSpan(stream));
 
     // Pack model LODs data
-    const auto lodCount = modelData.GetLODsCount();
+    const auto lodCount = modelData.LODs.Count();
     for (int32 lodIndex = 0; lodIndex < lodCount; lodIndex++)
     {
         stream.SetPosition(0);
-
-        // Pack meshes
-        auto& meshes = modelData.LODs[lodIndex].Meshes;
-        for (int32 meshIndex = 0; meshIndex < meshes.Count(); meshIndex++)
-        {
-            if (meshes[meshIndex]->Pack2Model(&stream))
-            {
-                LOG(Warning, "Cannot pack mesh.");
-                return CreateAssetResult::Error;
-            }
-        }
-
-        const int32 chunkIndex = lodIndex + 1;
+        if (Model::SaveLOD(stream, modelData, lodIndex))
+            return CreateAssetResult::Error;
+        const int32 chunkIndex = MODEL_LOD_TO_CHUNK_INDEX(lodIndex);
         if (context.AllocateChunk(chunkIndex))
             return CreateAssetResult::CannotAllocateChunk;
-        context.Data.Header.Chunks[chunkIndex]->Data.Copy(stream.GetHandle(), stream.GetPosition());
+        context.Data.Header.Chunks[chunkIndex]->Data.Copy(ToSpan(stream));
     }
 
     // Generate SDF
@@ -584,59 +658,48 @@ CreateAssetResult ImportModel::CreateModel(CreateAssetContext& context, ModelDat
         {
             if (context.AllocateChunk(15))
                 return CreateAssetResult::CannotAllocateChunk;
-            context.Data.Header.Chunks[15]->Data.Copy(stream.GetHandle(), stream.GetPosition());
+            context.Data.Header.Chunks[15]->Data.Copy(ToSpan(stream));
         }
     }
 
     return CreateAssetResult::Ok;
 }
 
-CreateAssetResult ImportModel::CreateSkinnedModel(CreateAssetContext& context, ModelData& modelData, const Options* options)
+CreateAssetResult ImportModel::CreateSkinnedModel(CreateAssetContext& context, const ModelData& modelData, const Options* options)
 {
     PROFILE_CPU();
     IMPORT_SETUP(SkinnedModel, SkinnedModel::SerializedVersion);
+    static_assert(SkinnedModel::SerializedVersion == 30, "Update code.");
 
     // Save skinned model header
     MemoryWriteStream stream(4096);
-    if (modelData.Pack2SkinnedModelHeader(&stream))
+    if (SkinnedModel::SaveHeader(stream, modelData))
         return CreateAssetResult::Error;
     if (context.AllocateChunk(0))
         return CreateAssetResult::CannotAllocateChunk;
-    context.Data.Header.Chunks[0]->Data.Copy(stream.GetHandle(), stream.GetPosition());
+    context.Data.Header.Chunks[0]->Data.Copy(ToSpan(stream));
 
     // Pack model LODs data
-    const auto lodCount = modelData.GetLODsCount();
+    const auto lodCount = modelData.LODs.Count();
     for (int32 lodIndex = 0; lodIndex < lodCount; lodIndex++)
     {
         stream.SetPosition(0);
-
-        // Mesh Data Version
-        stream.WriteByte(1);
-
-        // Pack meshes
-        auto& meshes = modelData.LODs[lodIndex].Meshes;
-        for (int32 meshIndex = 0; meshIndex < meshes.Count(); meshIndex++)
-        {
-            if (meshes[meshIndex]->Pack2SkinnedModel(&stream))
-            {
-                LOG(Warning, "Cannot pack mesh.");
-                return CreateAssetResult::Error;
-            }
-        }
-
-        const int32 chunkIndex = lodIndex + 1;
+        if (SkinnedModel::SaveLOD(stream, modelData, lodIndex, SkinnedModel::SaveMesh))
+            return CreateAssetResult::Error;
+        const int32 chunkIndex = MODEL_LOD_TO_CHUNK_INDEX(lodIndex);
         if (context.AllocateChunk(chunkIndex))
             return CreateAssetResult::CannotAllocateChunk;
-        context.Data.Header.Chunks[chunkIndex]->Data.Copy(stream.GetHandle(), stream.GetPosition());
+        context.Data.Header.Chunks[chunkIndex]->Data.Copy(ToSpan(stream));
     }
 
     return CreateAssetResult::Ok;
 }
 
-CreateAssetResult ImportModel::CreateAnimation(CreateAssetContext& context, ModelData& modelData, const Options* options)
+CreateAssetResult ImportModel::CreateAnimation(CreateAssetContext& context, const ModelData& modelData, const Options* options)
 {
     PROFILE_CPU();
     IMPORT_SETUP(Animation, Animation::SerializedVersion);
+    static_assert(Animation::SerializedVersion == 1, "Update code.");
 
     // Save animation data
     MemoryWriteStream stream(8182);
@@ -651,16 +714,16 @@ CreateAssetResult ImportModel::CreateAnimation(CreateAssetContext& context, Mode
                 animIndex = i;
         }
     }
-    if (modelData.Pack2AnimationHeader(&stream, animIndex))
+    if (Animation::SaveHeader(modelData, stream, animIndex))
         return CreateAssetResult::Error;
     if (context.AllocateChunk(0))
         return CreateAssetResult::CannotAllocateChunk;
-    context.Data.Header.Chunks[0]->Data.Copy(stream.GetHandle(), stream.GetPosition());
+    context.Data.Header.Chunks[0]->Data.Copy(ToSpan(stream));
 
     return CreateAssetResult::Ok;
 }
 
-CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelData& data, const Options& options, const Array<PrefabObject>& prefabObjects)
+CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, const ModelData& data, const Options& options, const Array<PrefabObject>& prefabObjects)
 {
     PROFILE_CPU();
     if (data.Nodes.Count() == 0)
@@ -677,6 +740,8 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
 
     // Create prefab structure
     Dictionary<int32, Actor*> nodeToActor;
+    Dictionary<Guid, SceneObject*> newPrefabObjects; // Maps prefab object id to the restored and linked object
+    rapidjson_flax::StringBuffer jsonBuffer;
     Array<Actor*> nodeActors;
     Actor* rootActor = nullptr;
     for (int32 nodeIndex = 0; nodeIndex < data.Nodes.Count(); nodeIndex++)
@@ -687,24 +752,38 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
         nodeActors.Clear();
         for (const PrefabObject& e : prefabObjects)
         {
-            if (e.NodeIndex == nodeIndex)
+            if (e.NodeIndex != nodeIndex)
+                continue;
+            Actor* a = nullptr;
+            switch (e.Type)
+            {
+            case PrefabObject::Model:
             {
                 auto* actor = New<StaticModel>();
-                actor->SetName(e.Name);
                 if (auto* model = Content::LoadAsync<Model>(e.AssetPath))
-                {
                     actor->Model = model;
-                }
-                nodeActors.Add(actor);
+                a = actor;
+                break;
             }
+            case PrefabObject::SkinnedModel:
+            {
+                auto* actor = New<AnimatedModel>();
+                if (auto* skinnedModel = Content::LoadAsync<SkinnedModel>(e.AssetPath))
+                    actor->SkinnedModel = skinnedModel;
+                a = actor;
+                break;
+            }
+            default:
+                continue;
+            }
+            a->SetName(e.Name);
+            nodeActors.Add(a);
         }
         Actor* nodeActor = nodeActors.Count() == 1 ? nodeActors[0] : New<EmptyActor>();
         if (nodeActors.Count() > 1)
         {
             for (Actor* e : nodeActors)
-            {
                 e->SetParent(nodeActor);
-            }
         }
         if (nodeActors.Count() != 1)
         {
@@ -767,7 +846,6 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
         // Link with object from prefab (if reimporting)
         if (prefab)
         {
-            rapidjson_flax::StringBuffer buffer;
             for (Actor* a : nodeActors)
             {
                 for (const auto& i : prefab->ObjectsCache)
@@ -779,33 +857,12 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
                         continue;
 
                     // Preserve local changes made in the prefab
-                    {
-                        // Serialize
-                        buffer.Clear();
-                        CompactJsonWriter writer(buffer);
-                        writer.StartObject();
-                        const void* defaultInstance = o->GetType().GetDefaultInstance();
-                        o->Serialize(writer, defaultInstance);
-                        writer.EndObject();
-
-                        // Parse json
-                        rapidjson_flax::Document document;
-                        document.Parse(buffer.GetString(), buffer.GetSize());
-
-                        // Strip unwanted data
-                        document.RemoveMember("ID");
-                        document.RemoveMember("ParentID");
-                        document.RemoveMember("PrefabID");
-                        document.RemoveMember("PrefabObjectID");
-                        document.RemoveMember("Name");
-
-                        // Deserialize object
-                        auto modifier = Cache::ISerializeModifier.Get();
-                        a->Deserialize(document, &*modifier);
-                    }
+                    CloneObject(jsonBuffer, o, a, true);
 
                     // Mark as this object already exists in prefab so will be preserved when updating it
-                    a->LinkPrefab(o->GetPrefabID(), o->GetPrefabObjectID());
+                    const Guid prefabObjectId = o->GetPrefabObjectID();
+                    a->LinkPrefab(o->GetPrefabID(), prefabObjectId);
+                    newPrefabObjects.Add(prefabObjectId, a);
                     break;
                 }
             }
@@ -826,10 +883,41 @@ CreateAssetResult ImportModel::CreatePrefab(CreateAssetContext& context, ModelDa
             {
                 if (i.Value->GetTypeHandle() == modelPrefabScript->GetTypeHandle())
                 {
-                    modelPrefabScript->LinkPrefab(i.Value->GetPrefabID(), i.Value->GetPrefabObjectID());
+                    const Guid prefabObjectId = i.Value->GetPrefabObjectID();
+                    modelPrefabScript->LinkPrefab(i.Value->GetPrefabID(), prefabObjectId);
+                    newPrefabObjects.Add(prefabObjectId, modelPrefabScript);
                     break;
                 }
             }
+        }
+    }
+    if (prefab)
+    {
+        // Preserve existing objects added by user (eg. colliders, sfx, vfx, scripts)
+        for (const auto& i : prefab->ObjectsCache)
+        {
+            // Skip already restored objects
+            const Guid prefabObjectId = i.Key;
+            if (newPrefabObjects.ContainsKey(prefabObjectId))
+                continue;
+            SceneObject* defaultObject = i.Value;
+            // TODO: ignore objects that were imported previously but not now (eg. mesh was removed from source asset)
+
+            // Find parent to link
+            SceneObject* parent;
+            if (!newPrefabObjects.TryGet(defaultObject->GetParent()->GetPrefabObjectID(), parent))
+                continue;
+
+            // Duplicate object
+            SceneObject* restoredObject = (SceneObject*)Scripting::NewObject(defaultObject->GetTypeHandle());
+            if (!restoredObject)
+                continue;
+            CloneObject(jsonBuffer, defaultObject, restoredObject);
+            restoredObject->SetParent((Actor*)parent);
+
+            // Link with existing prefab instance
+            restoredObject->LinkPrefab(i.Value->GetPrefabID(), prefabObjectId);
+            newPrefabObjects.Add(prefabObjectId, restoredObject);
         }
     }
 

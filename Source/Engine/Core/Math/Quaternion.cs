@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 // -----------------------------------------------------------------------------
 // Original code from SharpDX project. https://github.com/sharpdx/SharpDX/
@@ -60,7 +60,7 @@ namespace FlaxEngine
 #if FLAX_EDITOR
     [System.ComponentModel.TypeConverter(typeof(TypeConverters.QuaternionConverter))]
 #endif
-    partial struct Quaternion : IEquatable<Quaternion>, IFormattable
+    partial struct Quaternion : IEquatable<Quaternion>, IFormattable, Json.ICustomValueEquals
     {
         private static readonly string _formatString = "X:{0:F2} Y:{1:F2} Z:{2:F2} W:{3:F2}";
 
@@ -1149,7 +1149,7 @@ namespace FlaxEngine
         }
 
         /// <summary>
-        /// Gets the quaternion that will rotate vector from into vector to, around their plan perpendicular axis.The input vectors don't need to be normalized.
+        /// Gets the quaternion that will rotate vector from into vector to, around their plan perpendicular axis. The input vectors don't need to be normalized.
         /// </summary>
         /// <param name="from">The source vector.</param>
         /// <param name="to">The destination vector.</param>
@@ -1179,7 +1179,7 @@ namespace FlaxEngine
         }
 
         /// <summary>
-        /// Gets the quaternion that will rotate vector from into vector to, around their plan perpendicular axis.The input vectors don't need to be normalized.
+        /// Gets the quaternion that will rotate the from into vector to, around their plan perpendicular axis. The input vectors don't need to be normalized.
         /// </summary>
         /// <param name="from">The source vector.</param>
         /// <param name="to">The destination vector.</param>
@@ -1602,7 +1602,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(Quaternion left, Quaternion right)
         {
-            return Dot(ref left, ref right) > Tolerance;
+            return left.Equals(ref right);
         }
 
         /// <summary>
@@ -1614,7 +1614,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator !=(Quaternion left, Quaternion right)
         {
-            return Dot(ref left, ref right) <= Tolerance;
+            return !left.Equals(ref right);
         }
 
         /// <summary>
@@ -1681,6 +1681,13 @@ namespace FlaxEngine
             }
         }
 
+        /// <inheritdoc />
+        public bool ValueEquals(object other)
+        {
+            var o = (Quaternion)other;
+            return Equals(ref o);
+        }
+
         /// <summary>
         /// Tests whether one quaternion is near another quaternion.
         /// </summary>
@@ -1714,8 +1721,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ref Quaternion other)
         {
-            //return Dot(ref this, ref other) > Tolerance;
-            return Mathf.NearEqual(other.X, X) && Mathf.NearEqual(other.Y, Y) && Mathf.NearEqual(other.Z, Z) && Mathf.NearEqual(other.W, W);
+            return X == other.X && Y == other.Y && Z == other.Z && W == other.W;
         }
 
         /// <summary>
@@ -1736,10 +1742,7 @@ namespace FlaxEngine
         /// <returns><c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.</returns>
         public override bool Equals(object value)
         {
-            if (!(value is Quaternion))
-                return false;
-            var strongValue = (Quaternion)value;
-            return Equals(ref strongValue);
+            return value is Quaternion other && Equals(ref other);
         }
     }
 }

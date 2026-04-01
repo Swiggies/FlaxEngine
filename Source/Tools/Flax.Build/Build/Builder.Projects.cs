@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -121,17 +121,28 @@ namespace Flax.Build
                         string configurationName = configuration.ToString();
                         foreach (var architecture in target.GetArchitectures(targetPlatform))
                         {
+                            string configurationText = targetName + '.' + platformName + '.' + configurationName;
                             if (!Platform.IsPlatformSupported(targetPlatform, architecture))
                                 continue;
                             var platform = Platform.GetPlatform(targetPlatform, true);
                             if (platform == null)
                                 continue;
                             if (!platform.HasRequiredSDKsInstalled && (!projectInfo.IsCSharpOnlyProject || platform != Platform.BuildPlatform))
+                            {
+                                Log.Verbose($"Skipping configuration {configurationText} for {architecture}: Missing platform SDK");
                                 continue;
-                            if (!platform.CanBuildArchitecture(architecture))
+                            }
+                            if (!projectInfo.IsCSharpOnlyProject && !platform.CanBuildArchitecture(architecture))
+                            {
+                                Log.Verbose($"Skipping configuration {configurationText} for {architecture}: Unsupported target architecture");
                                 continue;
+                            }
+                            if (projectInfo.IsCSharpOnlyProject && !Platform.IsPlatformSupported(platform.Target, architecture))
+                            {
+                                Log.Verbose($"Skipping configuration {configurationText} for {architecture}: Unsupported target architecture");
+                                continue;
+                            }
 
-                            string configurationText = targetName + '.' + platformName + '.' + configurationName;
                             string architectureName = architecture.ToString();
                             if (platform is IProjectCustomizer customizer)
                                 customizer.GetProjectArchitectureName(project, platform, architecture, ref architectureName);
@@ -181,6 +192,8 @@ namespace Flax.Build
             {
                 // Pick the project format
                 var projectFormats = new HashSet<ProjectFormat>();
+                if (Configuration.ProjectFormatVS2026)
+                    projectFormats.Add(ProjectFormat.VisualStudio2026);
                 if (Configuration.ProjectFormatVS2022)
                     projectFormats.Add(ProjectFormat.VisualStudio2022);
                 if (Configuration.ProjectFormatVS2019)
@@ -198,8 +211,13 @@ namespace Flax.Build
                 if (projectFormats.Count == 0)
                     projectFormats.Add(Platform.BuildPlatform.DefaultProjectFormat);
 
-                // Always generate VS solution files for project (needed for C# Intellisense support)
-                projectFormats.Add(ProjectFormat.VisualStudio2022);
+                // Always generate VS solution files for project (needed for C# Intellisense support in other IDEs)
+                if (!projectFormats.Contains(ProjectFormat.VisualStudio2026) &&
+                    !projectFormats.Contains(ProjectFormat.VisualStudio2022) &&
+                    !projectFormats.Contains(ProjectFormat.VisualStudio))
+                {
+                    projectFormats.Add(ProjectFormat.VisualStudio2022);
+                }
 
                 foreach (ProjectFormat projectFormat in projectFormats)
                     GenerateProject(projectFormat);
@@ -255,6 +273,7 @@ namespace Flax.Build
                     if (targetGroup.Project == null && target is ProjectTarget projectTarget)
                         targetGroup.Project = projectTarget.Project;
                     targetGroup.Targets.Add(target);
+                    Log.Verbose($"Found target {target}");
                 }
                 foreach (var targetGroup in targetGroups)
                 {
@@ -283,6 +302,7 @@ namespace Flax.Build
                         var projectInfo = e.Project;
 
                         // Create project
+                        Log.Verbose($"Found project {projectName}");
                         Project mainProject;
                         var binaryModules = new Dictionary<string, HashSet<Module>>();
                         var modulesBuildOptions = new Dictionary<Module, BuildOptions>();
@@ -390,11 +410,17 @@ namespace Flax.Build
 
                             // Skip bindings projects for prebuilt targets (eg. no sources to build/view - just binaries)
                             if (targets[0].IsPreBuilt)
+                            {
+                                Log.Verbose($"Skipping prebuilt module {binaryModuleName}");
                                 continue;
+                            }
 
                             // Skip if project of that name has been already added
                             if (projects.Any(x => x.OutputType == TargetOutputType.Library && x.Type == TargetType.DotNetCore && x.BaseName == binaryModuleName))
+                            {
+                                Log.Verbose($"Skipping already added module {binaryModuleName}");
                                 continue;
+                            }
 
                             using (new ProfileEventScope(binaryModuleName))
                             {
@@ -494,6 +520,7 @@ namespace Flax.Build
                             // Combine build options from this module
                             project.CSharp.SystemReferences.AddRange(moduleBuildOptions.ScriptingAPI.SystemReferences);
                             project.CSharp.FileReferences.AddRange(moduleBuildOptions.ScriptingAPI.FileReferences);
+                            project.CSharp.NugetPackageReferences.AddRange(moduleBuildOptions.NugetPackageReferences);
 
                             // Find references based on the modules dependencies (external or from projects)
                             foreach (var dependencyName in moduleBuildOptions.PublicDependencies.Concat(moduleBuildOptions.PrivateDependencies))
@@ -543,6 +570,7 @@ namespace Flax.Build
                     }
                     if (flaxDependencyToRemove != null)
                     {
+                        Log.Verbose($"Removing project reference {flaxDependencyToRemove.Name}");
                         projects.Remove(flaxDependencyToRemove);
                         foreach (var project in projects)
                             project.Dependencies.Remove(flaxDependencyToRemove);
@@ -558,8 +586,8 @@ namespace Flax.Build
                 {
                     foreach (var project in projects)
                     {
-                        Log.Verbose(project.Name + " -> " + project.Path);
-                        project.Generate(solutionPath);
+                        Log.Verbose($"Project {project.Name} -> {project.Path}");
+                        project.Generate(solutionPath, project == mainSolutionProject);
                     }
                 }
 
@@ -637,8 +665,8 @@ namespace Flax.Build
                     // Generate project
                     using (new ProfileEventScope("GenerateProject"))
                     {
-                        Log.Verbose("Project " + rulesProjectName + " -> " + project.Path);
-                        dotNetProjectGenerator.GenerateProject(project, solutionPath);
+                        Log.Verbose($"Project {rulesProjectName} -> {project.Path}");
+                        dotNetProjectGenerator.GenerateProject(project, solutionPath, project == mainSolutionProject);
                     }
 
                     projects.Add(project);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -27,6 +27,9 @@ API_CLASS(Abstract) class FLAXENGINE_API ModelInstanceActor : public Actor
         API_FIELD() int32 LODIndex = 0;
         // Index of the mesh (within the LOD).
         API_FIELD() int32 MeshIndex = 0;
+
+        String ToString() const;
+        MeshBase* Get() const;
     };
 
 protected:
@@ -111,15 +114,28 @@ public:
 
     /// <summary>
     /// Extracts mesh buffer data from CPU. Might be cached internally (eg. by Model/SkinnedModel).
+    /// [Deprecated in 1.12]
     /// </summary>
-    /// <param name="mesh">Mesh reference.</param>
+    /// <param name="ref">Mesh reference.</param>
     /// <param name="type">Buffer type</param>
     /// <param name="result">The result data</param>
     /// <param name="count">The amount of items inside the result buffer.</param>
+    /// <param name="layout">The result layout of the result buffer (for vertex buffers). Optional, pass null to ignore it.</param>
     /// <returns>True if failed, otherwise false.</returns>
-    virtual bool GetMeshData(const MeshReference& mesh, MeshBufferType type, BytesContainer& result, int32& count) const
+    DEPRECATED("Use GetMesh to resolve mesh reference and access mesh data with MeshAccessor.")
+    virtual bool GetMeshData(const MeshReference& ref, MeshBufferType type, BytesContainer& result, int32& count, GPUVertexLayout** layout = nullptr) const
     {
         return true;
+    }
+
+    /// <summary>
+    /// Resolves a given mesh reference.
+    /// </summary>
+    /// <param name="ref">Mesh reference.</param>
+    /// <returns>Mesh or null if invalid ref.</returns>
+    virtual MeshBase* GetMesh(const MeshReference& ref) const
+    {
+        return nullptr;
     }
 
     /// <summary>

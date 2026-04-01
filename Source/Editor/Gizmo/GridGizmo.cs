@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEngine;
@@ -68,7 +68,8 @@ namespace FlaxEditor.Gizmo
                 if (_vertexBuffer == null)
                 {
                     _vertexBuffer = new GPUBuffer();
-                    var desc = GPUBufferDescription.Vertex(sizeof(Float3), 4);
+                    var layout = GPUVertexLayout.Get([new VertexElement(VertexElement.Types.Position, 0, 0, false, PixelFormat.R32G32B32_Float)]);
+                    var desc = GPUBufferDescription.Vertex(layout, sizeof(Float3), 4);
                     _vertexBuffer.Init(ref desc);
                 }
                 if (_indexBuffer == null)
@@ -88,6 +89,7 @@ namespace FlaxEditor.Gizmo
                     desc.CullMode = CullMode.TwoSided;
                     desc.VS = _shader.GPU.GetVS("VS_Grid");
                     desc.PS = _shader.GPU.GetPS("PS_Grid");
+                    desc.DepthWriteEnable = false;
                     _psGrid.Init(ref desc);
                 }
 

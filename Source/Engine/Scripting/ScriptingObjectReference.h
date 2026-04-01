@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -31,6 +31,13 @@ public:
     /// </summary>
     ScriptingObjectReferenceBase()
     {
+    }
+
+    ScriptingObjectReferenceBase(ScriptingObjectReferenceBase&& other) noexcept
+        : _object(nullptr)
+    {
+        OnSet(other._object);
+        other.OnSet(nullptr);
     }
 
     /// <summary>
@@ -96,6 +103,16 @@ protected:
     void OnSet(ScriptingObject* object);
 
     void OnDeleted(ScriptingObject* obj);
+
+    ScriptingObjectReferenceBase& operator=(ScriptingObjectReferenceBase&& other) noexcept
+    {
+        if (this != &other)
+        {
+            OnSet(other._object);
+            other.OnSet(nullptr);
+        }
+        return *this;
+    }
 };
 
 /// <summary>
@@ -130,6 +147,11 @@ public:
     /// <param name="other">The other property.</param>
     ScriptingObjectReference(const ScriptingObjectReference& other)
         : ScriptingObjectReferenceBase(other._object)
+    {
+    }
+
+    ScriptingObjectReference(ScriptingObjectReference&& other) noexcept
+        : ScriptingObjectReferenceBase(MoveTemp(other))
     {
     }
 
@@ -170,6 +192,12 @@ public:
     ScriptingObjectReference& operator=(const ScriptingObjectReference& other)
     {
         OnSet(other._object);
+        return *this;
+    }
+
+    ScriptingObjectReference& operator=(ScriptingObjectReference&& other) noexcept
+    {
+        ScriptingObjectReferenceBase::operator=(MoveTemp(other));
         return *this;
     }
 

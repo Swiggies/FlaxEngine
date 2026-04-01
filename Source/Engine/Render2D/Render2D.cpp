@@ -1,7 +1,8 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Render2D.h"
 #include "Font.h"
+#include "FontAsset.h"
 #include "FontManager.h"
 #include "FontTextureAtlas.h"
 #include "RotatedRectangle.h"
@@ -14,11 +15,13 @@
 #include "Engine/Graphics/GPUContext.h"
 #include "Engine/Graphics/GPUDevice.h"
 #include "Engine/Graphics/GPUPipelineState.h"
+#include "Engine/Graphics/GPUPass.h"
 #include "Engine/Graphics/RenderTask.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Graphics/DynamicBuffer.h"
 #include "Engine/Graphics/Shaders/GPUShader.h"
 #include "Engine/Graphics/Shaders/GPUConstantBuffer.h"
+#include "Engine/Graphics/Shaders/GPUVertexLayout.h"
 #include "Engine/Animations/AnimationUtils.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Math/Half.h"
@@ -72,6 +75,7 @@ enum class DrawCallType : byte
     FillTexture,
     FillTexturePoint,
     DrawChar,
+    DrawCharMSDF,
     DrawCharMaterial,
     Custom,
     Material,
@@ -162,6 +166,7 @@ struct CachedPSO
     GPUPipelineState* PS_Color_NoAlpha;
 
     GPUPipelineState* PS_Font;
+    GPUPipelineState* PS_FontMSDF;
 
     GPUPipelineState* PS_BlurH;
     GPUPipelineState* PS_BlurV;
@@ -193,7 +198,7 @@ namespace
 
     // Drawing
     Array<Render2DDrawCall> DrawCalls;
-    Array<FontLineCache> Lines;
+    Array<FontLineCache, InlinedAllocation<8>> Lines;
     Array<Float2> Lines2;
     bool IsScissorsRectEmpty;
     bool IsScissorsRectEnabled;
@@ -453,6 +458,7 @@ CanDrawCallCallback CanDrawCallBatch[] =
     CanDrawCallCallbackTexture, // FillTexture,
     CanDrawCallCallbackTexture, // FillTexturePoint,
     CanDrawCallCallbackChar, // DrawChar,
+    CanDrawCallCallbackChar, // DrawCharMSDF,
     CanDrawCallCallbackCharMaterial, // DrawCharMaterial,
     CanDrawCallCallbackFalse, // Custom,
     CanDrawCallCallbackMaterial, // Material,
@@ -513,6 +519,12 @@ bool CachedPSO::Init(GPUShader* shader, bool useDepth)
     desc.PS = shader->GetPS("PS_Font");
     PS_Font = GPUDevice::Instance->CreatePipelineState();
     if (PS_Font->Init(desc))
+        return true;
+    //
+    desc.BlendMode = BlendingMode::AlphaBlend;
+    desc.PS = shader->GetPS("PS_FontMSDF");
+    PS_FontMSDF = GPUDevice::Instance->CreatePipelineState();
+    if (PS_FontMSDF->Init(desc))
         return true;
     //
     desc.PS = shader->GetPS("PS_LineAA");
@@ -596,6 +608,8 @@ void OnGUIShaderReloading(Asset* obj)
 
 bool Render2DService::Init()
 {
+    PROFILE_MEM(UI);
+
     // GUI Shader
     GUIShader = Content::LoadAsyncInternal<Shader>(TEXT("Shaders/GUI"));
     if (GUIShader == nullptr)
@@ -603,6 +617,14 @@ bool Render2DService::Init()
 #if COMPILE_WITH_DEV_ENV
     GUIShader.Get()->OnReloading.Bind<OnGUIShaderReloading>();
 #endif
+
+    VB.SetLayout(GPUVertexLayout::Get({
+        { VertexElement::Types::Position, 0, 0, 0, PixelFormat::R32G32_Float },
+        { VertexElement::Types::TexCoord, 0, 0, 0, PixelFormat::R16G16_Float },
+        { VertexElement::Types::Color, 0, 0, 0, PixelFormat::R32G32B32A32_Float },
+        { VertexElement::Types::TexCoord1, 0, 0, 0, PixelFormat::R32G32B32A32_Float },
+        { VertexElement::Types::TexCoord2, 0, 0, 0, PixelFormat::R32G32B32A32_Float },
+    }));
 
     DrawCalls.EnsureCapacity(RENDER2D_INITIAL_DRAW_CALL_CAPACITY);
 
@@ -730,8 +752,11 @@ void Render2D::End()
     }
 
     // Flush geometry buffers
-    VB.Flush(Context);
-    IB.Flush(Context);
+    {
+        GPUMemoryPass pass(Context);
+        VB.Flush(Context);
+        IB.Flush(Context);
+    }
 
     // Set output
     Context->ResetSR();
@@ -759,10 +784,7 @@ void Render2D::End()
     IsScissorsRectEmpty = false;
     for (int32 i = 0; i < DrawCalls.Count(); i++)
     {
-        // Peek draw call
         const auto& drawCall = DrawCalls[i];
-
-        // Check if cannot add element to the batching
         if (batchSize != 0 && !CanBatchDrawCalls(DrawCalls[batchStart], drawCall))
         {
             // Flush batched elements
@@ -982,6 +1004,10 @@ void DrawBatch(int32 startIndex, int32 count)
         Context->BindSR(0, d.AsChar.Tex);
         Context->SetState(CurrentPso->PS_Font);
         break;
+    case DrawCallType::DrawCharMSDF:
+        Context->BindSR(0, d.AsChar.Tex);
+        Context->SetState(CurrentPso->PS_FontMSDF);
+        break;
     case DrawCallType::DrawCharMaterial:
     {
         // Apply and bind material
@@ -990,6 +1016,7 @@ void DrawBatch(int32 startIndex, int32 count)
         Render2D::CustomData customData;
         customData.ViewProjection = ViewProjection;
         customData.ViewSize = Float2::One;
+        customData.UseDepthBuffer = DepthBuffer != nullptr;
         bindParams.CustomData = &customData;
         material->Bind(bindParams);
 
@@ -1026,6 +1053,7 @@ void DrawBatch(int32 startIndex, int32 count)
         Render2D::CustomData customData;
         customData.ViewProjection = ViewProjection;
         customData.ViewSize = Float2(d.AsMaterial.Width, d.AsMaterial.Height);
+        customData.UseDepthBuffer = DepthBuffer != nullptr;
         bindParams.CustomData = &customData;
         material->Bind(bindParams);
 
@@ -1172,7 +1200,7 @@ void Render2D::DrawText(Font* font, const StringView& text, const Color& color, 
     }
     else
     {
-        drawCall.Type = DrawCallType::DrawChar;
+        drawCall.Type = font->GetAsset()->GetOptions().RasterMode == FontRasterMode::MSDF ? DrawCallType::DrawCharMSDF : DrawCallType::DrawChar;
         drawCall.AsChar.Mat = nullptr;
     }
     Float2 pointer = location;
@@ -1291,7 +1319,7 @@ void Render2D::DrawText(Font* font, const StringView& text, const Color& color, 
     }
     else
     {
-        drawCall.Type = DrawCallType::DrawChar;
+        drawCall.Type = font->GetAsset()->GetOptions().RasterMode == FontRasterMode::MSDF ? DrawCallType::DrawCharMSDF : DrawCallType::DrawChar;
         drawCall.AsChar.Mat = nullptr;
     }
     for (int32 lineIndex = 0; lineIndex < Lines.Count(); lineIndex++)
@@ -1426,7 +1454,27 @@ void Render2D::DrawRectangle(const Rectangle& rect, const Color& color1, const C
     RENDER2D_CHECK_RENDERING_STATE;
 
     const auto& mask = ClipLayersStack.Peek().Mask;
+    float thick = thickness;
     thickness *= (TransformCached.M11 + TransformCached.M22 + TransformCached.M33) * 0.3333333f;
+
+    // When lines thickness is very large, don't use corner caps and place line ends to not overlap
+    if (thickness > 4.0f)
+    {
+        thick *= Math::Lerp(0.6f, 1.0f, Math::Saturate(thick - 4.0f)); // Smooth transition between soft LineAA and harsh FillRect
+        Float2 totalMin = rect.GetUpperLeft() - Float2(thick * 0.5f);
+        Float2 totalMax = rect.GetBottomRight() + Float2(thick * 0.5f);
+        Float2 size = totalMax - totalMin;
+        Render2DDrawCall& drawCall = DrawCalls.AddOne();
+        drawCall.Type = NeedAlphaWithTint(color1, color2, color3, color4) ? DrawCallType::FillRect : DrawCallType::FillRectNoAlpha;
+        drawCall.StartIB = IBIndex;
+        drawCall.CountIB = 6 * 4;
+        // TODO: interpolate colors from corners to extended rectangle edges properly
+        WriteRect(Rectangle(totalMin.X, totalMin.Y, size.X, thick), color1, color2, color2, color1);
+        WriteRect(Rectangle(totalMin.X, totalMin.Y + rect.Size.Y, size.X, thick), color4, color3, color3, color4);
+        WriteRect(Rectangle(totalMin.X, totalMin.Y + thick, thick, rect.Size.Y - thick), color1, color1, color4, color4);
+        WriteRect(Rectangle(totalMax.X - thick, totalMin.Y + thick, thick, rect.Size.Y - thick), color2, color2, color3, color3);
+        return;
+    }
 
     Float2 points[5];
     ApplyTransform(rect.GetUpperLeft(), points[0]);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -27,6 +27,7 @@ namespace FlaxEditor.Windows
         private Panel _sceneTreePanel;
         private bool _isUpdatingSelection;
         private bool _isMouseDown;
+        private bool _blockSceneTreeScroll = false;
 
         private DragAssets _dragAssets;
         private DragActorType _dragActorType;
@@ -34,6 +35,7 @@ namespace FlaxEditor.Windows
         private DragScriptItems _dragScriptItems;
         private DragHandlers _dragHandlers;
         private bool _isDropping = false;
+        private bool _forceScrollNodeToView = false;
 
         /// <summary>
         /// Scene tree panel.
@@ -48,6 +50,7 @@ namespace FlaxEditor.Windows
         : base(editor, true, ScrollBars.None)
         {
             Title = "Scene";
+            Icon = editor.Icons.Globe32;
 
             // Scene searching query input box
             var headerPanel = new ContainerControl
@@ -62,8 +65,10 @@ namespace FlaxEditor.Windows
                 AnchorPreset = AnchorPresets.HorizontalStretchMiddle,
                 Parent = headerPanel,
                 Bounds = new Rectangle(4, 4, headerPanel.Width - 8, 18),
+                TooltipText = "Search the scene tree.\n\nYou can prefix your search with different search operators:\ns: -> Actor with script of type\na: -> Actor type\nc: -> Control type",
             };
             _searchBox.TextChanged += OnSearchBoxTextChanged;
+            ScriptsBuilder.ScriptsReloadEnd += OnSearchBoxTextChanged;
 
             // Scene tree panel
             _sceneTreePanel = new Panel
@@ -83,11 +88,21 @@ namespace FlaxEditor.Windows
             {
                 Margin = new Margin(0.0f, 0.0f, -16.0f, _sceneTreePanel.ScrollBarsSize), // Hide root node
                 IsScrollable = true,
+                DrawRootTreeLine = false,
             };
             _tree.AddChild(root.TreeNode);
             _tree.SelectedChanged += Tree_OnSelectedChanged;
             _tree.RightClick += OnTreeRightClick;
             _tree.Parent = _sceneTreePanel;
+            _tree.AfterDeferredLayout += () =>
+            {
+                if (_forceScrollNodeToView)
+                {
+                    _forceScrollNodeToView = false;
+                    ScrollToSelectedNode();
+                }
+            };
+
             headerPanel.Parent = this;
 
             // Setup input actions
@@ -97,6 +112,36 @@ namespace FlaxEditor.Windows
             InputActions.Add(options => options.FocusSelection, () => Editor.Windows.EditWin.Viewport.FocusSelection());
             InputActions.Add(options => options.LockFocusSelection, () => Editor.Windows.EditWin.Viewport.LockFocusSelection());
             InputActions.Add(options => options.Rename, RenameSelection);
+        }
+
+        /// <inheritdoc />
+        public override void OnPlayBeginning()
+        {
+            base.OnPlayBeginning();
+            _blockSceneTreeScroll = true;
+        }
+
+        /// <inheritdoc />
+        public override void OnPlayBegin()
+        {
+            base.OnPlayBegin();
+            _blockSceneTreeScroll = false;
+            OnSearchBoxTextChanged();
+        }
+
+        /// <inheritdoc />
+        public override void OnPlayEnding()
+        {
+            base.OnPlayEnding();
+            _blockSceneTreeScroll = true;
+        }
+
+        /// <inheritdoc />
+        public override void OnPlayEnd()
+        {
+            base.OnPlayEnd();
+            _blockSceneTreeScroll = true;
+            OnSearchBoxTextChanged();
         }
 
         /// <summary>
@@ -132,6 +177,7 @@ namespace FlaxEditor.Windows
                 return;
 
             _tree.LockChildrenRecursive();
+            PerformLayout();
 
             // Update tree
             var query = _searchBox.Text;
@@ -139,6 +185,16 @@ namespace FlaxEditor.Windows
             root.TreeNode.UpdateFilter(query);
 
             _tree.UnlockChildrenRecursive();
+
+            // When keep the selected nodes in a view
+            var nodeSelection = _tree.Selection;
+            if (nodeSelection.Count != 0)
+            {
+                var node = nodeSelection[nodeSelection.Count - 1];
+                node.Expand(true);
+                _forceScrollNodeToView = true;
+            }
+
             PerformLayout();
             PerformLayout();
         }
@@ -247,7 +303,7 @@ namespace FlaxEditor.Windows
                 _tree.Select(nodes);
 
                 // For single node selected scroll view so user can see it
-                if (nodes.Count == 1)
+                if (nodes.Count == 1 && !_blockSceneTreeScroll)
                 {
                     nodes[0].ExpandAllParents(true);
                     _sceneTreePanel.ScrollViewTo(nodes[0]);
@@ -257,26 +313,32 @@ namespace FlaxEditor.Windows
             _isUpdatingSelection = false;
         }
 
+        /// <inheritdoc />
+        public override void OnEditorStateChanged()
+        {
+            _blockSceneTreeScroll = Editor.StateMachine.ReloadingScriptsState.IsActive;
+        }
+
         private bool ValidateDragAsset(AssetItem assetItem)
         {
             if (assetItem.IsOfType<SceneAsset>())
                 return true;
-            return assetItem.OnEditorDrag(this);
+            return assetItem.OnEditorDrag(this) && Level.IsAnySceneLoaded;
         }
 
         private static bool ValidateDragActorType(ScriptType actorType)
         {
-            return Editor.Instance.CodeEditing.Actors.Get().Contains(actorType);
+            return Editor.Instance.CodeEditing.Actors.Get().Contains(actorType) && Level.IsAnySceneLoaded;
         }
 
         private static bool ValidateDragControlType(ScriptType controlType)
         {
-            return Editor.Instance.CodeEditing.Controls.Get().Contains(controlType);
+            return Editor.Instance.CodeEditing.Controls.Get().Contains(controlType) && Level.IsAnySceneLoaded;
         }
 
         private static bool ValidateDragScriptItem(ScriptItem script)
         {
-            return Editor.Instance.CodeEditing.Actors.Get(script) != ScriptType.Null;
+            return Editor.Instance.CodeEditing.Actors.Get(script) != ScriptType.Null && Level.IsAnySceneLoaded;
         }
 
         /// <inheritdoc />
@@ -432,6 +494,7 @@ namespace FlaxEditor.Windows
             if (result == DragDropEffect.None)
             {
                 _isDropping = true;
+
                 // Drag assets
                 if (_dragAssets != null && _dragAssets.HasValidDrag)
                 {
@@ -446,7 +509,7 @@ namespace FlaxEditor.Windows
                         }
                         var actor = item.OnEditorDrop(this);
                         actor.Name = item.ShortName;
-                        Level.SpawnActor(actor);
+                        Editor.SceneEditing.Spawn(actor);
                         var graphNode = Editor.Scene.GetActorNode(actor.ID);
                         if (graphNode != null)
                             graphNodes.Add(graphNode);
@@ -469,7 +532,7 @@ namespace FlaxEditor.Windows
                             continue;
                         }
                         actor.Name = item.Name;
-                        Level.SpawnActor(actor);
+                        Editor.SceneEditing.Spawn(actor);
                         Editor.Scene.MarkSceneEdited(actor.Scene);
                     }
                     result = DragDropEffect.Move;
@@ -491,7 +554,7 @@ namespace FlaxEditor.Windows
                             Control = control,
                             Name = item.Name,
                         };
-                        Level.SpawnActor(uiControl);
+                        Editor.SceneEditing.Spawn(uiControl);
                         Editor.Scene.MarkSceneEdited(uiControl.Scene);
                     }
                     result = DragDropEffect.Move;
@@ -513,7 +576,7 @@ namespace FlaxEditor.Windows
                                 continue;
                             }
                             actor.Name = actorType.Name;
-                            Level.SpawnActor(actor);
+                            Editor.SceneEditing.Spawn(actor);
                             var graphNode = Editor.Scene.GetActorNode(actor.ID);
                             if (graphNode != null)
                                 graphNodes.Add(graphNode);
@@ -541,6 +604,7 @@ namespace FlaxEditor.Windows
             _dragHandlers = null;
             _tree = null;
             _searchBox = null;
+            ScriptsBuilder.ScriptsReloadEnd -= OnSearchBoxTextChanged;
 
             base.OnDestroy();
         }

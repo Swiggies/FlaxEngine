@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.ComponentModel;
@@ -77,6 +77,25 @@ namespace FlaxEditor.Options
         }
 
         /// <summary>
+        /// Options for the visibility status of the tab close button.
+        /// </summary>
+        public enum TabCloseButtonVisibility
+        {
+            /// <summary>
+            /// Never show the close button.
+            /// </summary>
+            Never,
+            /// <summary>
+            /// Show the close button on tabs that are currently selected.
+            /// </summary>
+            SelectedTab,
+            /// <summary>
+            /// Show the close button on all tabs that can be closed.
+            /// </summary>
+            Always
+        }
+
+        /// <summary>
         /// Options for the action taken by the play button.
         /// </summary>
         public enum PlayAction
@@ -140,7 +159,7 @@ namespace FlaxEditor.Options
         }
 
         /// <summary>
-        /// Options focus Game Window behaviour when play mode is entered.
+        /// Options for focus Game Window behaviour when play mode is entered.
         /// </summary>
         public enum PlayModeFocus
         {
@@ -161,20 +180,27 @@ namespace FlaxEditor.Options
         }
 
         /// <summary>
+        /// Generic options for a disabled or hidden state. Used for example in create content button.
+        /// </summary>
+        public enum DisabledHidden
+        {
+            /// <summary>
+            /// Disabled state.
+            /// </summary>
+            Disabled,
+
+            /// <summary>
+            /// Hidden state.
+            /// </summary>
+            Hidden,
+        }
+
+        /// <summary>
         /// Gets or sets the Editor User Interface scale. Applied to all UI elements, windows and text. Can be used to scale the interface up on a bigger display. Editor restart required.
         /// </summary>
         [DefaultValue(1.0f), Limit(0.1f, 10.0f)]
         [EditorDisplay("Interface"), EditorOrder(10), Tooltip("Editor User Interface scale. Applied to all UI elements, windows and text. Can be used to scale the interface up on a bigger display. Editor restart required.")]
         public float InterfaceScale { get; set; } = 1.0f;
-
-#if PLATFORM_WINDOWS
-        /// <summary>
-        /// Gets or sets a value indicating whether use native window title bar. Editor restart required.
-        /// </summary>
-        [DefaultValue(false)]
-        [EditorDisplay("Interface"), EditorOrder(70), Tooltip("Determines whether use native window title bar. Editor restart required.")]
-        public bool UseNativeWindowSystem { get; set; } = false;
-#endif
 
         /// <summary>
         /// Gets or sets a value indicating whether show selected camera preview in the editor window.
@@ -182,20 +208,6 @@ namespace FlaxEditor.Options
         [DefaultValue(true)]
         [EditorDisplay("Interface"), EditorOrder(80), Tooltip("Determines whether show selected camera preview in the edit window.")]
         public bool ShowSelectedCameraPreview { get; set; } = true;
-
-        /// <summary>
-        /// Gets or sets a value indicating whether center mouse position on window focus in play mode. Helps when working with games that lock mouse cursor.
-        /// </summary>
-        [DefaultValue(false)]
-        [EditorDisplay("Interface", "Center Mouse On Game Window Focus"), EditorOrder(100), Tooltip("Determines whether center mouse position on window focus in play mode. Helps when working with games that lock mouse cursor.")]
-        public bool CenterMouseOnGameWinFocus { get; set; } = false;
-
-        /// <summary>
-        /// Gets or sets the method window opening.
-        /// </summary>
-        [DefaultValue(DockStateProxy.Float)]
-        [EditorDisplay("Interface", "New Window Location"), EditorOrder(150), Tooltip("Define the opening method for new windows, open in a new tab by default.")]
-        public DockStateProxy NewWindowLocation { get; set; } = DockStateProxy.Float;
 
         /// <summary>
         /// Gets or sets the editor icons scale. Editor restart required.
@@ -212,13 +224,6 @@ namespace FlaxEditor.Options
         public FlaxEngine.GUI.Orientation ContentWindowOrientation { get; set; } = FlaxEngine.GUI.Orientation.Horizontal;
 
         /// <summary>
-        /// If checked, color pickers will always modify the color unless 'Cancel' if pressed, otherwise color won't change unless 'Ok' is pressed.
-        /// </summary>
-        [DefaultValue(true)]
-        [EditorDisplay("Interface"), EditorOrder(290)]
-        public bool AutoAcceptColorPickerChange { get; set; } = true;
-
-        /// <summary>
         /// Gets or sets the formatting option for numeric values in the editor.
         /// </summary>
         [DefaultValue(ValueFormattingType.None)]
@@ -231,6 +236,13 @@ namespace FlaxEditor.Options
         [DefaultValue(false)]
         [EditorDisplay("Interface"), EditorOrder(310)]
         public bool SeparateValueAndUnit { get; set; }
+
+        /// <summary>
+        /// Gets or sets the option to auto size the Properties panel splitter based on the longest property name. Editor restart recommended.
+        /// </summary>
+        [DefaultValue(false)]
+        [EditorDisplay("Interface"), EditorOrder(311)]
+        public bool AutoSizePropertiesPanelSplitter { get; set; }
 
         /// <summary>
         /// Gets or sets tree line visibility.
@@ -264,6 +276,66 @@ namespace FlaxEditor.Options
         [DefaultValue(true)]
         [EditorDisplay("Interface"), EditorOrder(322)]
         public bool ScrollToScriptOnAdd { get; set; } = true;
+
+#if PLATFORM_WINDOWS
+        /// <summary>
+        /// Gets or sets a value indicating whether use native window title bar. Editor restart required.
+        /// </summary>
+        [DefaultValue(false)]
+        [EditorDisplay("Tabs & Windows"), EditorOrder(70), Tooltip("Determines whether use native window title bar. Editor restart required.")]
+        public bool UseNativeWindowSystem { get; set; } = false;
+#endif
+
+#if PLATFORM_WINDOWS
+        /// <summary>
+        /// Gets or sets a value indicating whether a window containing a single tabs hides the tab bar. Editor restart recommended.
+        /// </summary>
+        [DefaultValue(true)]
+        [EditorDisplay("Tabs & Windows", "Hide Single-Tab Window Tab Bars"), EditorOrder(71)]
+        public bool HideSingleTabWindowTabBars { get; set; } = true;
+#endif
+
+        /// <summary>
+        /// Gets or sets a value indicating wether the minum tab width should be used. Editor restart required.
+        /// </summary>
+        [DefaultValue(false)]
+        [EditorDisplay("Tabs & Windows"), EditorOrder(99)]
+        public bool UseMinimumTabWidth { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets a value indicating the minimum tab width. If a tab is smaller than this width, its width will be set to this. Editor restart required.
+        /// </summary>
+        [DefaultValue(80.0f), Limit(50.0f, 150.0f)]
+        [EditorDisplay("Tabs & Windows"), EditorOrder(99), VisibleIf(nameof(UseMinimumTabWidth))]
+        public float MinimumTabWidth { get; set; } = 80.0f;
+
+        /// <summary>
+        /// Gets or sets a value indicating the height of window tabs. Editor restart required.
+        /// </summary>
+        [DefaultValue(20.0f), Limit(15.0f, 40.0f)]
+        [EditorDisplay("Tabs & Windows"), EditorOrder(100)]
+        public float TabHeight { get; set; } = 20.0f;
+
+        /// <summary>
+        /// Gets or sets a value indicating whether center mouse position on window focus in play mode. Helps when working with games that lock mouse cursor.
+        /// </summary>
+        [DefaultValue(false)]
+        [EditorDisplay("Tabs & Windows", "Center Mouse On Game Window Focus"), EditorOrder(101), Tooltip("Determines whether center mouse position on window focus in play mode. Helps when working with games that lock mouse cursor.")]
+        public bool CenterMouseOnGameWinFocus { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets the method window opening.
+        /// </summary>
+        [DefaultValue(DockStateProxy.Float)]
+        [EditorDisplay("Tabs & Windows", "New Window Location"), EditorOrder(150), Tooltip("Define the opening method for new windows, open in a new tab by default.")]
+        public DockStateProxy NewWindowLocation { get; set; } = DockStateProxy.Float;
+
+        /// <summary>
+        /// Gets or sets a value indicating when the tab close button should be visible.
+        /// </summary>
+        [DefaultValue(TabCloseButtonVisibility.SelectedTab)]
+        [EditorDisplay("Tabs & Windows"), EditorOrder(151)]
+        public TabCloseButtonVisibility ShowTabCloseButton { get; set; } = TabCloseButtonVisibility.SelectedTab;
 
         /// <summary>
         /// Gets or sets the timestamps prefix mode for output log messages.
@@ -347,13 +419,6 @@ namespace FlaxEditor.Options
         }
 
         /// <summary>
-        /// Gets or sets the output log text color.
-        /// </summary>
-        [DefaultValue(typeof(Color), "1,1,1,1")]
-        [EditorDisplay("Output Log", "Text Color"), EditorOrder(430), Tooltip("The output log text color.")]
-        public Color OutputLogTextColor { get; set; } = Color.White;
-
-        /// <summary>
         /// Gets or sets the output log text shadow color.
         /// </summary>
         [DefaultValue(typeof(Color), "0,0,0,0.5")]
@@ -378,22 +443,6 @@ namespace FlaxEditor.Options
                 FocusOnPlayMode = value ? PlayModeFocus.GameWindow : PlayModeFocus.None;
             }
         }
-
-        /// <summary>
-        /// Gets or sets the output log text color for warnings
-        /// </summary>
-        [DefaultValue(typeof(Color), "1,1,0,1")]
-        [EditorDisplay("Output Log", "Warning Color"), EditorOrder(446), Tooltip("The output log text color for warnings.")]
-        public Color OutputLogWarningTextColor { get; set; } = Color.Yellow;
-
-
-        /// <summary>
-        /// Gets or sets the output log text color for errors
-        /// </summary>
-        [DefaultValue(typeof(Color), "1,0,0,1")]
-        [EditorDisplay("Output Log", "Error Color"), EditorOrder(445), Tooltip("The output log text color for errors.")]
-        public Color OutputLogErrorTextColor { get; set; } = Color.Red;
-
 
         /// <summary>
         /// Gets or sets a value indicating whether auto-focus output log window on code compilation error.
@@ -443,6 +492,12 @@ namespace FlaxEditor.Options
         [DefaultValue(1), Range(1, 4)]
         [EditorDisplay("Cook & Run"), EditorOrder(600)]
         public int NumberOfGameClientsToLaunch = 1;
+        
+        /// <summary>
+        /// Gets or sets the build configuration to use when using Cook and Run option in the editor.
+        /// </summary>
+        [EditorDisplay("Cook & Run"), EditorOrder(601), ExpandGroups, Tooltip("The build configuration to use when using Cook and Run option in the editor.")]
+        public BuildConfiguration CookAndRunBuildConfiguration { get; set; } = BuildConfiguration.Development;
 
         /// <summary>
         /// Gets or sets the curvature of the line connecting to connected visject nodes.
@@ -478,6 +533,13 @@ namespace FlaxEditor.Options
         [DefaultValue(true)]
         [EditorDisplay("Visject", "Warn when deleting used parameter"), EditorOrder(552)]
         public bool WarnOnDeletingUsedVisjectParameter { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets a value indicating what should happen to unavaliable options in the content create menu.
+        /// </summary>
+        [DefaultValue(DisabledHidden.Hidden)]
+        [EditorDisplay("Content"), EditorOrder(600)]
+        public DisabledHidden UnavaliableContentCreateOptions { get; set; } = DisabledHidden.Hidden;
 
         private static FontAsset DefaultFont => FlaxEngine.Content.LoadAsyncInternal<FontAsset>(EditorAssets.PrimaryFont);
         private static FontAsset ConsoleFont => FlaxEngine.Content.LoadAsyncInternal<FontAsset>(EditorAssets.InconsolataRegularFont);

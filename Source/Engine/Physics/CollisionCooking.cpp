@@ -1,18 +1,22 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if COMPILE_WITH_PHYSICS_COOKING
 
 #include "CollisionCooking.h"
 #include "Engine/Threading/Task.h"
+#include "Engine/Graphics/GPUBuffer.h"
 #include "Engine/Graphics/Async/GPUTask.h"
 #include "Engine/Graphics/Models/MeshBase.h"
+#include "Engine/Graphics/Models/MeshAccessor.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Core/Log.h"
 
 bool CollisionCooking::CookCollision(const Argument& arg, CollisionData::SerializedOptions& outputOptions, BytesContainer& outputData)
 {
     PROFILE_CPU();
+    PROFILE_MEM(Physics);
     int32 convexVertexLimit = Math::Clamp(arg.ConvexVertexLimit, CONVEX_VERTEX_MIN, CONVEX_VERTEX_MAX);
     if (arg.ConvexVertexLimit == 0)
         convexVertexLimit = CONVEX_VERTEX_MAX;
@@ -216,21 +220,11 @@ bool CollisionCooking::CookCollision(const Argument& arg, CollisionData::Seriali
             const int32 vertexCount = vertexCounts[i];
             if (vertexCount == 0)
                 continue;
-            const int32 vStride = vData.Length() / vertexCount;
-            if (vStride == sizeof(Float3))
-                Platform::MemoryCopy(finalVertexData.Get() + firstVertexIndex, vData.Get(), vertexCount * sizeof(Float3));
-            else
-            {
-                // This assumes that each vertex structure contains position as Float3 in the beginning
-                auto dst = finalVertexData.Get() + firstVertexIndex;
-                auto src = vData.Get();
-                for (int32 j = 0; j < vertexCount; j++)
-                {
-                    *dst++ = *(Float3*)src;
-                    src += vStride;
-                
-                }
-            }
+            MeshAccessor accessor;
+            if (accessor.LoadBuffer(MeshBufferType::Vertex0, Span<byte>(vData), mesh.GetVertexBuffer(0)->GetVertexLayout()))
+                continue;
+            auto positionStream = accessor.Position();
+            positionStream.CopyTo(Span<Float3>(finalVertexData.Get() + firstVertexIndex, vertexCount));
             vertexCounter += vertexCount;
 
             if (needIndexBuffer)
@@ -242,9 +236,7 @@ bool CollisionCooking::CookCollision(const Argument& arg, CollisionData::Seriali
                     auto dst = finalIndexData.Get() + indexCounter;
                     auto src = iData.Get<uint16>();
                     for (int32 j = 0; j < indexCount; j++)
-                    {
                         *dst++ = firstVertexIndex + *src++;
-                    }
                     indexCounter += indexCount;
                 }
                 else
@@ -252,9 +244,7 @@ bool CollisionCooking::CookCollision(const Argument& arg, CollisionData::Seriali
                     auto dst = finalIndexData.Get() + indexCounter;
                     auto src = iData.Get<uint32>();
                     for (int32 j = 0; j < indexCount; j++)
-                    {
                         *dst++ = firstVertexIndex + *src++;
-                    }
                     indexCounter += indexCount;
                 }
             }

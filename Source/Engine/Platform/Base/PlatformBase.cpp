@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Engine/Platform/Platform.h"
 #include "Engine/Platform/CPUInfo.h"
@@ -17,6 +17,7 @@
 #include "Engine/Core/Utilities.h"
 #if COMPILE_WITH_PROFILER
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #endif
 #include "Engine/Threading/Threading.h"
 #include "Engine/Engine/CommandLine.h"
@@ -49,6 +50,8 @@ float PlatformBase::CustomDpiScale = 1.0f;
 Array<User*, FixedAllocation<8>> PlatformBase::Users;
 Delegate<User*> PlatformBase::UserAdded;
 Delegate<User*> PlatformBase::UserRemoved;
+void* OutOfMemoryBuffer = nullptr;
+volatile int64 FatalReporting = 0;
 
 const Char* ToString(NetworkConnectionType value)
 {
@@ -150,6 +153,12 @@ bool PlatformBase::Init()
 
     srand((unsigned int)Platform::GetTimeCycles());
 
+    // Preallocate safety dynamic buffer to be released before Out Of Memory reporting to ensure code can properly execute
+#ifndef PLATFORM_OUT_OF_MEMORY_BUFFER_SIZE
+#define PLATFORM_OUT_OF_MEMORY_BUFFER_SIZE (1ull * 1024 * 1024) // 1 MB
+#endif
+    OutOfMemoryBuffer = Allocator::Allocate(PLATFORM_OUT_OF_MEMORY_BUFFER_SIZE);
+
     return false;
 }
 
@@ -167,6 +176,10 @@ void PlatformBase::LogInfo()
     const MemoryStats memStats = Platform::GetMemoryStats();
     LOG(Info, "Physical Memory: {0} total, {1} used ({2}%)", Utilities::BytesToText(memStats.TotalPhysicalMemory), Utilities::BytesToText(memStats.UsedPhysicalMemory), Utilities::RoundTo2DecimalPlaces((float)memStats.UsedPhysicalMemory * 100.0f / (float)memStats.TotalPhysicalMemory));
     LOG(Info, "Virtual Memory: {0} total, {1} used ({2}%)", Utilities::BytesToText(memStats.TotalVirtualMemory), Utilities::BytesToText(memStats.UsedVirtualMemory), Utilities::RoundTo2DecimalPlaces((float)memStats.UsedVirtualMemory * 100.0f / (float)memStats.TotalVirtualMemory));
+    LOG(Info, "Program Size: {0}", Utilities::BytesToText(memStats.ProgramSizeMemory));
+#if !BUILD_RELEASE && !PLATFORM_DESKTOP
+    LOG(Info, "Extra Development Memory: {0}", Utilities::BytesToText(memStats.ExtraDevelopmentMemory));
+#endif
 
     LOG(Info, "Main thread id: 0x{0:x}, Process id: {1}", Globals::MainThreadID, Platform::GetCurrentProcessId());
     LOG(Info, "Desktop size: {0}", Platform::GetDesktopSize());
@@ -188,9 +201,21 @@ void PlatformBase::BeforeExit()
 
 void PlatformBase::Exit()
 {
+    Allocator::Free(OutOfMemoryBuffer);
+    OutOfMemoryBuffer = nullptr;
 }
 
 #if COMPILE_WITH_PROFILER
+
+#define TEST_MALLOC 0
+#if TEST_MALLOC
+#include "Engine/Utilities/MallocTester.h"
+MallocTester& GetMallocTester()
+{
+    static MallocTester MallocTest;
+    return MallocTest;
+}
+#endif
 
 #define TRACY_ENABLE_MEMORY (TRACY_ENABLE)
 
@@ -199,11 +224,20 @@ void PlatformBase::OnMemoryAlloc(void* ptr, uint64 size)
     if (!ptr)
         return;
 
+#if TEST_MALLOC
+    if (GetMallocTester().OnMalloc(ptr, size))
+        LOG(Fatal, "Invalid mallloc detected for pointer 0x{0:x} ({1} bytes)!\n{2}", (uintptr)ptr, size, Platform::GetStackTrace(3));
+#endif
+
 #if TRACY_ENABLE_MEMORY
     // Track memory allocation in Tracy
     //tracy::Profiler::MemAlloc(ptr, (size_t)size, false);
     tracy::Profiler::MemAllocCallstack(ptr, (size_t)size, 12, false);
 #endif
+
+    // Register in memory profiler
+    if (ProfilerMemory::Enabled)
+        ProfilerMemory::OnMemoryAlloc(ptr, size);
 
     // Register allocation during the current CPU event
     auto thread = ProfilerCPU::GetCurrentThread();
@@ -222,9 +256,18 @@ void PlatformBase::OnMemoryFree(void* ptr)
     if (!ptr)
         return;
 
+    // Register in memory profiler
+    if (ProfilerMemory::Enabled)
+        ProfilerMemory::OnMemoryFree(ptr);
+
 #if TRACY_ENABLE_MEMORY
     // Track memory allocation in Tracy
     tracy::Profiler::MemFree(ptr, false);
+#endif
+
+#if TEST_MALLOC
+    if (GetMallocTester().OnFree(ptr))
+        LOG(Fatal, "Invalid free detected for pointer 0x{0:x}!\n{1}", (uintptr)ptr, Platform::GetStackTrace(3));
 #endif
 }
 
@@ -257,26 +300,51 @@ bool PlatformBase::Is64BitApp()
 #endif
 }
 
-void PlatformBase::Fatal(const Char* msg, void* context)
+int32 PlatformBase::GetCacheLineSize()
 {
+    return (int32)Platform::GetCPUInfo().CacheLineSize;
+}
+
+void PlatformBase::Fatal(const StringView& msg, void* context, FatalErrorType error)
+{
+    // Let only one thread to report the error (and wait for it to end to have valid log before crash)
+RETRY:
+    if (Platform::InterlockedCompareExchange(&FatalReporting, 1, 0) != 0)
+    {
+        Platform::Sleep(1);
+        goto RETRY;
+    }
+
     // Check if is already during fatal state
-    if (Globals::FatalErrorOccurred)
+    if (Engine::FatalError != FatalErrorType::None)
     {
         // Just send one more error to the log and back
         LOG(Error, "Error after fatal error: {0}", msg);
+        Platform::AtomicStore(&FatalReporting, 0);
         return;
     }
 
+    // Free OOM safety buffer
+    Allocator::Free(OutOfMemoryBuffer);
+    OutOfMemoryBuffer = nullptr;
+
     // Set flags
+    PRAGMA_DISABLE_DEPRECATION_WARNINGS;
     Globals::FatalErrorOccurred = true;
     Globals::IsRequestingExit = true;
-    Globals::ExitCode = -1;
+    Globals::ExitCode = -Math::Max((int32)error, 1);
+    PRAGMA_ENABLE_DEPRECATION_WARNINGS;
+    Engine::IsRequestingExit = true;
+    Engine::ExitCode = -Math::Max((int32)error, 1);
+    Engine::FatalError = error;
     Engine::RequestingExit();
 
     // Collect crash info (platform-dependant implementation that might collect stack trace and/or create memory dump)
+#if LOG_ENABLE
     {
         // Log separation for crash info
-        Log::Logger::WriteFloor();
+        LOG_FLUSH();
+        LOG_FLOOR();
         LOG(Error, "");
         LOG(Error, "Critical error! Reason: {0}", msg);
         LOG(Error, "");
@@ -323,15 +391,33 @@ void PlatformBase::Fatal(const Char* msg, void* context)
             LOG(Error, "");
         }
 
-        // Log process memory stats
+        // Log memory stats
         {
             const MemoryStats memoryStats = Platform::GetMemoryStats();
-            LOG(Error, "Used Physical Memory: {0} ({1}%)", Utilities::BytesToText(memoryStats.UsedPhysicalMemory), (int32)(100 * memoryStats.UsedPhysicalMemory / memoryStats.TotalPhysicalMemory));
-            LOG(Error, "Used Virtual Memory: {0} ({1}%)", Utilities::BytesToText(memoryStats.UsedVirtualMemory), (int32)(100 * memoryStats.UsedVirtualMemory / memoryStats.TotalVirtualMemory));
             const ProcessMemoryStats processMemoryStats = Platform::GetProcessMemoryStats();
-            LOG(Error, "Process Used Physical Memory: {0}", Utilities::BytesToText(processMemoryStats.UsedPhysicalMemory));
-            LOG(Error, "Process Used Virtual Memory: {0}", Utilities::BytesToText(processMemoryStats.UsedVirtualMemory));
+#define GET_MEM(totalUsed, processUsed) totalUsed > processUsed ? totalUsed - processUsed : 0
+	        const uint64 externalUsedPhysical = GET_MEM(memoryStats.UsedPhysicalMemory, processMemoryStats.UsedPhysicalMemory);
+	        const uint64 externalUsedVirtual = GET_MEM(memoryStats.UsedVirtualMemory, processMemoryStats.UsedVirtualMemory);
+#undef GET_MEM
+
+            // Total memory usage
+            LOG(Error, "Total Used Physical Memory: {0} ({1}%)", Utilities::BytesToText(memoryStats.UsedPhysicalMemory), (int32)(100 * memoryStats.UsedPhysicalMemory / memoryStats.TotalPhysicalMemory));
+            LOG(Error, "Total Used Virtual Memory: {0} ({1}%)", Utilities::BytesToText(memoryStats.UsedVirtualMemory), (int32)(100 * memoryStats.UsedVirtualMemory / memoryStats.TotalVirtualMemory));
+
+            // Engine memory usage
+            LOG(Error, "Process Used Physical Memory: {0} ({1}%)", Utilities::BytesToText(processMemoryStats.UsedPhysicalMemory), (int32)(100 * processMemoryStats.UsedPhysicalMemory / memoryStats.TotalPhysicalMemory));
+            LOG(Error, "Process Used Virtual Memory: {0} ({1}%)", Utilities::BytesToText(processMemoryStats.UsedVirtualMemory), (int32)(100 * processMemoryStats.UsedVirtualMemory / memoryStats.TotalVirtualMemory));
+
+            // External apps memory usage
+            LOG(Error, "External Used Physical Memory: {0} ({1}%)", Utilities::BytesToText(externalUsedPhysical), (int32)(100 * externalUsedPhysical / memoryStats.TotalPhysicalMemory));
+            LOG(Error, "External Used Virtual Memory: {0} ({1}%)", Utilities::BytesToText(externalUsedVirtual), (int32)(100 * externalUsedVirtual / memoryStats.TotalVirtualMemory));
         }
+#if COMPILE_WITH_PROFILER
+        if (error == FatalErrorType::OutOfMemory || error == FatalErrorType::GPUOutOfMemory)
+        {
+            ProfilerMemory::Dump();
+        }
+#endif
     }
     if (Log::Logger::LogFilePath.HasChars())
     {
@@ -344,35 +430,41 @@ void PlatformBase::Fatal(const Char* msg, void* context)
 
         // Capture the original log file
         LOG(Error, "");
-        Log::Logger::WriteFloor();
+        LOG_FLOOR();
         LOG_FLUSH();
         FileSystem::CopyFile(crashDataFolder / TEXT("Log.txt"), Log::Logger::LogFilePath);
 
         LOG(Error, "Crash info collected.");
-        Log::Logger::WriteFloor();
+        LOG_FLOOR();
     }
+#endif
+
+    Platform::AtomicStore(&FatalReporting, 0);
 
     // Show error message
-    Error(msg);
+    if (Engine::ReportCrash.IsBinded())
+        Engine::ReportCrash(msg, context);
+    else
+        Error(msg);
 
     // Only main thread can call exit directly
     if (IsInMainThread())
     {
-        Engine::Exit(-1);
+        Engine::Exit(Engine::ExitCode, error);
     }
 }
 
-void PlatformBase::Error(const Char* msg)
+void PlatformBase::Error(const StringView& msg)
 {
 #if PLATFORM_HAS_HEADLESS_MODE
-    if (CommandLine::Options.Headless)
+    if (CommandLine::Options.Headless.IsTrue())
     {
 #if PLATFORM_TEXT_IS_CHAR16
         StringAnsi ansi(msg);
         ansi += PLATFORM_LINE_TERMINATOR;
         printf("Error: %s\n", ansi.Get());
 #else
-        std::cout << "Error: " << msg << std::endl;
+        std::cout << "Error: " << *msg << std::endl;
 #endif
     }
     else
@@ -382,12 +474,12 @@ void PlatformBase::Error(const Char* msg)
     }
 }
 
-void PlatformBase::Warning(const Char* msg)
+void PlatformBase::Warning(const StringView& msg)
 {
 #if PLATFORM_HAS_HEADLESS_MODE
-    if (CommandLine::Options.Headless)
+    if (CommandLine::Options.Headless.IsTrue())
     {
-        std::cout << "Warning: " << msg << std::endl;
+        std::cout << "Warning: " << *msg << std::endl;
     }
     else
 #endif
@@ -396,12 +488,12 @@ void PlatformBase::Warning(const Char* msg)
     }
 }
 
-void PlatformBase::Info(const Char* msg)
+void PlatformBase::Info(const StringView& msg)
 {
 #if PLATFORM_HAS_HEADLESS_MODE
-    if (CommandLine::Options.Headless)
+    if (CommandLine::Options.Headless.IsTrue())
     {
-        std::cout << "Info: " << msg << std::endl;
+        std::cout << "Info: " << *msg << std::endl;
     }
     else
 #endif
@@ -410,24 +502,9 @@ void PlatformBase::Info(const Char* msg)
     }
 }
 
-void PlatformBase::Fatal(const StringView& msg)
+void PlatformBase::Fatal(const StringView& msg, FatalErrorType error)
 {
-    Fatal(*msg);
-}
-
-void PlatformBase::Error(const StringView& msg)
-{
-    Error(*msg);
-}
-
-void PlatformBase::Warning(const StringView& msg)
-{
-    Warning(*msg);
-}
-
-void PlatformBase::Info(const StringView& msg)
-{
-    Info(*msg);
+    Fatal(msg, nullptr, error);
 }
 
 void PlatformBase::Log(const StringView& msg)
@@ -443,28 +520,43 @@ void PlatformBase::Crash(int32 line, const char* file)
 {
     const StringAsUTF16<256> fileUTF16(file);
     const String msg = String::Format(TEXT("Fatal crash!\nFile: {0}\nLine: {1}"), fileUTF16.Get(), line);
-    LOG_STR(Fatal, msg);
+    LOG_STR(Error, msg);
+    Fatal(msg, nullptr, FatalErrorType::Assertion);
 }
 
 void PlatformBase::OutOfMemory(int32 line, const char* file)
 {
-    const StringAsUTF16<256> fileUTF16(file);
-    const String msg = String::Format(TEXT("Out of memory error!\nFile: {0}\nLine: {1}"), fileUTF16.Get(), line);
-    LOG_STR(Fatal, msg);
+    fmt_flax::allocator allocator;
+    fmt_flax::memory_buffer buffer(allocator);
+    static_assert(fmt::inline_buffer_size > 300, "Update stack buffer to prevent dynamic memory allocation on Out Of Memory.");
+    if (file)
+    {
+        const StringAsUTF16<256> fileUTF16(file);
+        fmt_flax::format(buffer, TEXT("Out of memory error!\nFile: {0}\nLine: {1}"), fileUTF16.Get(), line);
+    }
+    else
+    {
+        fmt_flax::format(buffer, TEXT("Out of memory error!"));
+    }
+    const StringView msg(buffer.data(), (int32)buffer.size());
+    LOG_STR(Error, msg);
+    Fatal(msg, nullptr, FatalErrorType::OutOfMemory);
 }
 
 void PlatformBase::MissingCode(int32 line, const char* file, const char* info)
 {
     const StringAsUTF16<256> fileUTF16(file);
     const String msg = String::Format(TEXT("TODO: {0}\nFile: {1}\nLine: {2}"), String(info), fileUTF16.Get(), line);
-    LOG_STR(Fatal, msg);
+    LOG_STR(Error, msg);
+    Fatal(msg, nullptr, FatalErrorType::Assertion);
 }
 
 void PlatformBase::Assert(const char* message, const char* file, int line)
 {
     const StringAsUTF16<256> fileUTF16(file);
     const String msg = String::Format(TEXT("Assertion failed!\nFile: {0}\nLine: {1}\n\nExpression: {2}"), fileUTF16.Get(), line, String(message));
-    LOG_STR(Fatal, msg);
+    LOG_STR(Error, msg);
+    Fatal(msg, nullptr, FatalErrorType::Assertion);
 }
 
 void PlatformBase::CheckFailed(const char* message, const char* file, int line)

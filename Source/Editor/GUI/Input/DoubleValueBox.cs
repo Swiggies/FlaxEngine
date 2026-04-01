@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Utilities;
@@ -41,7 +41,7 @@ namespace FlaxEditor.GUI.Input
             get => _min;
             set
             {
-                if (!Mathd.NearEqual(_min, value))
+                if (_min != value)
                 {
                     if (value > _max)
                         throw new ArgumentException();
@@ -58,7 +58,7 @@ namespace FlaxEditor.GUI.Input
             get => _max;
             set
             {
-                if (!Mathd.NearEqual(_max, value))
+                if (_max != value)
                 {
                     if (value < _min)
                         throw new ArgumentException();

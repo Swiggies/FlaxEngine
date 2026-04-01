@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "GPUDevice.h"
 #include "RenderTargetPool.h"
@@ -9,6 +9,7 @@
 #include "RenderTools.h"
 #include "Graphics.h"
 #include "Shaders/GPUShader.h"
+#include "Shaders/GPUVertexLayout.h"
 #include "Async/DefaultGPUTasksExecutor.h"
 #include "Async/GPUTasksManager.h"
 #include "Engine/Core/Log.h"
@@ -74,10 +75,39 @@ GPUPipelineState::GPUPipelineState()
 {
 }
 
+#if !BUILD_RELEASE
+
+void GPUPipelineState::GetDebugName(DebugName& name) const
+{
+#define GET_NAME(e) \
+    if (DebugDesc.e) \
+    { \
+        GPUShaderProgram::DebugName n; \
+        DebugDesc.e->GetDebugName(n); \
+        name.Add(n.Get(), n.Count() - 1); \
+        name.Add('+'); \
+    }
+    GET_NAME(VS);
+#if GPU_ALLOW_TESSELLATION_SHADERS
+    GET_NAME(HS);
+    GET_NAME(DS);
+#endif
+#if GPU_ALLOW_GEOMETRY_SHADERS
+    GET_NAME(GS);
+#endif
+    GET_NAME(PS);
+#undef GET_NAME
+    if (name.Count() != 0 && name[name.Count() - 1] == '+')
+        name.RemoveLast();
+    name.Add('\0');
+}
+
+#endif
+
 bool GPUPipelineState::Init(const Description& desc)
 {
-    // Cache description in debug builds
-#if BUILD_DEBUG
+    // Cache description in development builds
+#if !BUILD_RELEASE
     DebugDesc = desc;
 #endif
 
@@ -309,6 +339,16 @@ struct GPUDevice::PrivateData
 
 GPUDevice* GPUDevice::Instance = nullptr;
 
+void GPUDevice::OnRequestingExit()
+{
+    if (Engine::FatalError != FatalErrorType::GPUCrash && 
+        Engine::FatalError != FatalErrorType::GPUHang && 
+        Engine::FatalError != FatalErrorType::GPUOutOfMemory)
+        return;
+    // TODO: get and log actual GPU memory used by the engine (API-specific)
+    DumpResourcesToLog();
+}
+
 GPUDevice::GPUDevice(RendererType type, ShaderProfile profile)
     : ScriptingObject(SpawnParams(Guid::New(), TypeInitializer))
     , _state(DeviceState::Missing)
@@ -352,6 +392,9 @@ bool GPUDevice::Init()
     LOG(Info, "Total graphics memory: {0}", Utilities::BytesToText(TotalGraphicsMemory));
     if (!Limits.HasCompute)
         LOG(Warning, "Compute Shaders are not supported");
+    for (const auto& videoOutput : VideoOutputs)
+        LOG(Info, "Video output '{0}' {1}x{2} {3} Hz", videoOutput.Name, videoOutput.Width, videoOutput.Height, videoOutput.RefreshRate);
+    Engine::RequestingExit.Bind<GPUDevice, &GPUDevice::OnRequestingExit>(this);
     return false;
 }
 
@@ -386,7 +429,11 @@ bool GPUDevice::LoadContent()
         };
         // @formatter:on
         _res->FullscreenTriangleVB = CreateBuffer(TEXT("QuadVB"));
-        if (_res->FullscreenTriangleVB->Init(GPUBufferDescription::Vertex(sizeof(float) * 4, 3, vb)))
+        auto layout = GPUVertexLayout::Get({
+            { VertexElement::Types::Position, 0, 0, 0, PixelFormat::R32G32_Float },
+            { VertexElement::Types::TexCoord, 0, 8, 0, PixelFormat::R32G32_Float },
+        });
+        if (_res->FullscreenTriangleVB->Init(GPUBufferDescription::Vertex(layout, 16, 3, vb)))
             return true;
     }
 
@@ -444,9 +491,23 @@ void GPUDevice::DumpResourcesToLog() const
     output.AppendLine();
     output.AppendLine();
 
+    const bool printTypes[(int32)GPUResourceType::MAX] =
+    {
+        true, // RenderTarget
+        true, // Texture
+        true, // CubeTexture
+        true, // VolumeTexture
+        true, // Buffer
+        true, // Shader
+        false, // PipelineState
+        false, // Descriptor
+        false, // Query
+        false, // Sampler
+    };
     for (int32 typeIndex = 0; typeIndex < (int32)GPUResourceType::MAX; typeIndex++)
     {
         const auto type = static_cast<GPUResourceType>(typeIndex);
+        const auto printType = printTypes[typeIndex];
 
         output.AppendFormat(TEXT("Group: {0}s"), ScriptingEnum::ToString(type));
         output.AppendLine();
@@ -456,12 +517,12 @@ void GPUDevice::DumpResourcesToLog() const
         for (int32 i = 0; i < _resources.Count(); i++)
         {
             const GPUResource* resource = _resources[i];
-            if (resource->GetResourceType() == type)
+            if (resource->GetResourceType() == type && resource->GetMemoryUsage() != 0)
             {
                 count++;
                 memUsage += resource->GetMemoryUsage();
                 auto str = resource->ToString();
-                if (str.HasChars())
+                if (str.HasChars() && printType)
                 {
                     output.Append(TEXT('\t'));
                     output.Append(str);
@@ -479,6 +540,8 @@ void GPUDevice::DumpResourcesToLog() const
     LOG_STR(Info, output.ToStringView());
 }
 
+extern void ClearVertexLayoutCache();
+
 void GPUDevice::preDispose()
 {
     Locker.Lock();
@@ -494,6 +557,7 @@ void GPUDevice::preDispose()
     SAFE_DELETE_GPU_RESOURCE(_res->PS_Clear);
     SAFE_DELETE_GPU_RESOURCE(_res->PS_DecodeYUY2);
     SAFE_DELETE_GPU_RESOURCE(_res->FullscreenTriangleVB);
+    ClearVertexLayoutCache();
 
     Locker.Unlock();
 
@@ -584,6 +648,7 @@ void GPUDevice::DrawEnd()
     const double presentEnd = Platform::GetTimeSeconds();
     ProfilerGPU::OnPresentTime((float)((presentEnd - presentStart) * 1000.0));
 #endif
+    GetMainContext()->OnPresent();
 
     _wasVSyncUsed = anyVSync;
     _isRendering = false;
@@ -615,8 +680,26 @@ GPUTasksExecutor* GPUDevice::CreateTasksExecutor()
     return New<DefaultGPUTasksExecutor>();
 }
 
+#if !COMPILE_WITHOUT_CSHARP
+
+#include "Engine/Scripting/ManagedCLR/MUtils.h"
+
+void* GPUDevice::GetResourcesInternal()
+{
+    _resourcesLock.Lock();
+    MArray* result = MCore::Array::New(GPUResource::TypeInitializer.GetClass(), _resources.Count());
+    int32 i = 0;
+    for (const auto& e : _resources)
+        MCore::GC::WriteArrayRef(result, e->GetOrCreateManagedInstance(), i++);
+    _resourcesLock.Unlock();
+    return result;
+}
+
+#endif
+
 void GPUDevice::Draw()
 {
+    PROFILE_MEM(Graphics);
     DrawBegin();
 
     auto context = GetMainContext();
@@ -644,6 +727,7 @@ void GPUDevice::Draw()
 void GPUDevice::Dispose()
 {
     RenderList::CleanupCache();
+    VideoOutputs.Resize(0);
     VideoOutputModes.Resize(0);
 }
 

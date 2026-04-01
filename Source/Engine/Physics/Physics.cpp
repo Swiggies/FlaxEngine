@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Physics.h"
 #include "PhysicsScene.h"
@@ -10,6 +10,7 @@
 #include "Engine/Engine/Time.h"
 #include "Engine/Engine/EngineService.h"
 #include "Engine/Profiler/ProfilerCPU.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Serialization/Serialization.h"
 #include "Engine/Threading/Threading.h"
 
@@ -50,6 +51,36 @@ PhysicsSettings::PhysicsSettings()
         LayerMasks[i] = MAX_uint32;
 }
 
+#if USE_EDITOR
+
+void PhysicsSettings::Serialize(SerializeStream& stream, const void* otherObj)
+{
+    SERIALIZE_GET_OTHER_OBJ(PhysicsSettings);
+
+    SERIALIZE(DefaultGravity);
+    SERIALIZE(TriangleMeshTriangleMinAreaThreshold);
+    SERIALIZE(BounceThresholdVelocity);
+    SERIALIZE(FrictionCombineMode);
+    SERIALIZE(RestitutionCombineMode);
+    SERIALIZE(DisableCCD);
+    SERIALIZE(BroadPhaseType);
+    SERIALIZE(SolverType);
+    SERIALIZE(MaxDeltaTime);
+    SERIALIZE(EnableSubstepping);
+    SERIALIZE(SubstepDeltaTime);
+    SERIALIZE(MaxSubsteps);
+    SERIALIZE(QueriesHitTriggers);
+    SERIALIZE(SupportCookingAtRuntime);
+
+    stream.JKEY("LayerMasks");
+    stream.StartArray();
+    for (uint32 e : LayerMasks)
+        stream.Uint(e);
+    stream.EndArray();
+}
+
+#endif
+
 void PhysicsSettings::Deserialize(DeserializeStream& stream, ISerializeModifier* modifier)
 {
     DESERIALIZE(DefaultGravity);
@@ -72,7 +103,7 @@ void PhysicsSettings::Deserialize(DeserializeStream& stream, ISerializeModifier*
     {
         auto& layersArray = layers->value;
         ASSERT(layersArray.IsArray());
-        for (uint32 i = 0; i < layersArray.Size() && i < 32; i++)
+        for (uint32 i = 0; i < layersArray.Size() && i < ARRAY_COUNT(LayerMasks); i++)
         {
             LayerMasks[i] = layersArray[i].GetUint();
         }
@@ -87,6 +118,8 @@ PhysicalMaterial::~PhysicalMaterial()
 
 bool PhysicsService::Init()
 {
+    PROFILE_MEM(Physics);
+
     // Initialize backend
     if (PhysicsBackend::Init())
         return true;
@@ -123,6 +156,7 @@ void PhysicsService::Dispose()
 
 PhysicsScene* Physics::FindOrCreateScene(const StringView& name)
 {
+    PROFILE_MEM(Physics);
     auto scene = FindScene(name);
     if (scene == nullptr)
     {
@@ -214,6 +248,7 @@ bool Physics::IsDuringSimulation()
 void Physics::FlushRequests()
 {
     PROFILE_CPU_NAMED("Physics.FlushRequests");
+    PROFILE_MEM(Physics);
     for (PhysicsScene* scene : Scenes)
         PhysicsBackend::FlushRequests(scene->GetPhysicsScene());
     PhysicsBackend::FlushRequests();
@@ -462,6 +497,7 @@ PhysicsStatistics PhysicsScene::GetStatistics() const
 
 bool PhysicsScene::Init(const StringView& name, const PhysicsSettings& settings)
 {
+    PROFILE_MEM(Physics);
     if (_scene)
     {
         PhysicsBackend::DestroyScene(_scene);

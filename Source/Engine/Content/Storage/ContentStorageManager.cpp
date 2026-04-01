@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ContentStorageManager.h"
 #include "FlaxFile.h"
@@ -15,14 +15,9 @@
 namespace
 {
     CriticalSection Locker;
-#if USE_EDITOR
-    Array<FlaxFile*> Files(1024);
-    Array<FlaxPackage*> Packages;
-#else
     Array<FlaxFile*> Files;
-    Array<FlaxPackage*> Packages(64);
-#endif
-    Dictionary<String, FlaxStorage*> StorageMap(2048);
+    Array<FlaxPackage*> Packages;
+    Dictionary<String, FlaxStorage*> StorageMap;
 }
 
 class ContentStorageService : public EngineService
@@ -51,6 +46,7 @@ namespace
 
 ContentStorageService ContentStorageServiceInstance;
 
+TimeSpan ContentStorageManager::UnusedStorageLifetime = TimeSpan::FromSeconds(0.5f);
 TimeSpan ContentStorageManager::UnusedDataChunksLifetime = TimeSpan::FromSeconds(10);
 
 FlaxStorageReference ContentStorageManager::GetStorage(const StringView& path, bool loadIt)
@@ -231,6 +227,12 @@ void ContentStorageManager::GetStorage(Array<FlaxStorage*>& result)
 
 bool ContentStorageService::Init()
 {
+#if USE_EDITOR
+    Files.EnsureCapacity(1024);
+#else
+    Packages.EnsureCapacity(64);
+#endif
+    StorageMap.EnsureCapacity(2048);
     System = New<ContentStorageSystem>();
     Engine::UpdateGraph->AddSystem(System);
     return false;

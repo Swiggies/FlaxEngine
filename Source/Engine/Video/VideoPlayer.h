@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -15,6 +15,7 @@ class FLAXENGINE_API VideoPlayer : public Actor
 {
     DECLARE_SCENE_OBJECT(VideoPlayer);
     API_AUTO_SERIALIZATION();
+    friend class AudioBackendOAL;
 
 public:
     /// <summary>
@@ -76,7 +77,7 @@ public:
     /// <summary>
     /// Determines the time (in seconds) at which the video clip starts playing if Play On Start is enabled.
     /// </summary>
-    API_FIELD(Attributes = "EditorOrder(35), DefaultValue(0.0f), Limit(0, float.MaxValue, 0.01f), EditorDisplay(\"Video Player\"), VisibleIf(nameof(PlayOnStart))")
+    API_FIELD(Attributes="EditorOrder(35), DefaultValue(0.0f), Limit(0, float.MaxValue, 0.01f), EditorDisplay(\"Video Player\"), VisibleIf(nameof(PlayOnStart))")
     float StartTime = 0.0f;
 
     /// <summary>

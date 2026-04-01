@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -88,6 +88,12 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorOrder(2100), EditorDisplay(\"Content\")")
     bool SkipDefaultFonts = false;
+
+    /// <summary>
+    /// The maximum acceptable mesh vertex position error (in world units) for data quantization. Use 0 to disable this feature. Affects meshes during import (or reimpport).
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(2200), EditorDisplay(\"Content\"), ValueCategory(Utils.ValueCategory.Distance)")
+    float MaxMeshPositionError = 0.5f;
 
     /// <summary>
     /// If checked, .NET Runtime won't be packaged with a game and will be required by user to be installed on system upon running game build. Available only on supported platforms such as Windows, Linux and macOS.

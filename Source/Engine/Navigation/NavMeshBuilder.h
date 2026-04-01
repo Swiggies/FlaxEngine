@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -15,11 +15,7 @@ class FLAXENGINE_API NavMeshBuilder
 {
 public:
     static void Init();
-    static bool IsBuildingNavMesh();
-    static float GetNavMeshBuildingProgress();
     static void Update();
-    static void Build(Scene* scene, float timeoutMs);
-    static void Build(Scene* scene, const BoundingBox& dirtyBounds, float timeoutMs);
 };
 
 #endif

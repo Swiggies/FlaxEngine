@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 namespace FlaxEngine.GUI
 {
@@ -298,16 +298,20 @@ namespace FlaxEngine.GUI
                     color *= 0.85f;
                 Render2D.DrawText(font, text, color, ref _layout, TextMaterial);
             }
-            else if (!string.IsNullOrEmpty(_watermarkText))
+            else
             {
-                Render2D.DrawText(font, _watermarkText, WatermarkTextColor, ref _layout, TextMaterial);
+                text = _watermarkText;
+                if (text?.Length > 0)
+                {
+                    Render2D.DrawText(font, _watermarkText, WatermarkTextColor, ref _layout, TextMaterial);
+                }
             }
 
             // Caret
             if (IsFocused && CaretPosition > -1)
             {
-                float alpha = Mathf.Saturate(Mathf.Cos(_animateTime * CaretFlashSpeed) * 0.5f + 0.7f);
-                alpha = alpha * alpha * alpha * alpha * alpha * alpha;
+                float alpha = Mathf.Saturate(Mathf.Cos(_animateTime * CaretFlashSpeed) * 0.5f + 0.8f);
+                alpha = alpha * alpha;
                 Render2D.FillRectangle(CaretBounds, CaretColor * alpha);
             }
 

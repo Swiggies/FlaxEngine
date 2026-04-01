@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Linq;
 using FlaxEditor.CustomEditors.Elements;
@@ -82,7 +82,7 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            var grid = layout.CustomContainer<UniformGridPanel>();
+            var grid = layout.UniformGrid();
             var gridControl = grid.CustomControl;
             gridControl.ClipChildren = false;
             gridControl.Height = TextBox.DefaultHeight;
@@ -469,7 +469,7 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            var grid = layout.CustomContainer<UniformGridPanel>();
+            var grid = layout.UniformGrid();
             var gridControl = grid.CustomControl;
             gridControl.ClipChildren = false;
             gridControl.Height = TextBox.DefaultHeight;
@@ -783,7 +783,7 @@ namespace FlaxEditor.CustomEditors.Editors
         /// <inheritdoc />
         public override void Initialize(LayoutElementsContainer layout)
         {
-            var grid = layout.CustomContainer<UniformGridPanel>();
+            var grid = layout.UniformGrid();
             var gridControl = grid.CustomControl;
             gridControl.ClipChildren = false;
             gridControl.Height = TextBox.DefaultHeight;

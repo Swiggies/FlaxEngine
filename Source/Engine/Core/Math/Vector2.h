@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -555,6 +555,24 @@ public:
     {
         Vector2Base result;
         Lerp(start, end, amount, result);
+        return result;
+    }
+
+    // Performs a spherical linear interpolation between two vectors.
+    static void Slerp(const Vector2Base& start, const Vector2Base& end, T amount, Vector2Base& result) 
+    {
+        T dot = Math::Clamp(Dot(start, end), -1.0f, 1.0f);
+        T theta = Math::Acos(dot) * amount;
+        Vector2Base relativeVector = end - start * dot;
+        relativeVector.Normalize();
+        result = ((start * Math::Cos(theta)) + (relativeVector * Math::Sin(theta)));
+    }
+
+    // Performs a spherical linear interpolation between two vectors.
+    static Vector2Base Slerp(const Vector2Base& start, const Vector2Base& end, T amount) 
+    {
+        Vector2Base result;
+        Slerp(start, end, amount, result);
         return result;
     }
 

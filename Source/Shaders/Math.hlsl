@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __MATH__
 #define __MATH__
@@ -8,7 +8,7 @@
 
 uint NextPow2(uint value)
 {
-    uint mask = (1 << firstbithigh(value)) - 1;
+    uint mask = (1u << firstbithigh(value)) - 1u;
     return (value + mask) & ~mask;
 }
 

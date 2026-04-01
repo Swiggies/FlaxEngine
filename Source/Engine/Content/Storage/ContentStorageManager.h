@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -15,7 +15,12 @@ class FLAXENGINE_API ContentStorageManager
 {
 public:
     /// <summary>
-    /// Auto-release timeout for unused asset chunks.
+    /// Auto-release timeout for unused asset files.
+    /// </summary>
+    static TimeSpan UnusedStorageLifetime;
+
+    /// <summary>
+    /// Auto-release timeout for unused asset data chunks.
     /// </summary>
     static TimeSpan UnusedDataChunksLifetime;
 

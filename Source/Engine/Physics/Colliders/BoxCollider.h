@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -52,15 +52,14 @@ public:
     // [Collider]
 #if USE_EDITOR
     void OnDebugDraw() override;
+    void OnDebugDrawSelf() override;
     void OnDebugDrawSelected() override;
 #endif
     bool IntersectsItself(const Ray& ray, Real& distance, Vector3& normal) override;
 
 protected:
     // [Collider]
+    ImplementPhysicsDebug;
     void UpdateBounds() override;
     void GetGeometry(CollisionShape& collision) override;
-#if USE_EDITOR
-    void DrawPhysicsDebug(RenderView& view) override;
-#endif
 };

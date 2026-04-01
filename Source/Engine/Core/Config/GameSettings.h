@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -32,6 +32,12 @@ public:
     /// </summary>
     API_FIELD(Attributes="EditorOrder(15), EditorDisplay(\"General\")")
     String CopyrightNotice;
+
+    /// <summary>
+    /// The game version number. Usually in format: MAJOR.MINOR.BUILD.REVISION
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(20), EditorDisplay(\"General\")")
+    String Version;
 
     /// <summary>
     /// The default application icon.

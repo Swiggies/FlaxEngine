@@ -1,16 +1,20 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Physics/Actors/RigidBody.h"
 #include "Engine/Physics/Colliders/Collider.h"
 #include "Engine/Scripting/ScriptingObjectReference.h"
+#include "IPhysicsDebug.h"
 
 /// <summary>
 /// Representation of the car vehicle that uses wheels. Built on top of the RigidBody with collider representing its chassis shape and wheels.
 /// </summary>
 /// <seealso cref="RigidBody" />
 API_CLASS(Attributes="ActorContextMenu(\"New/Physics/Wheeled Vehicle\"), ActorToolbox(\"Physics\")") class FLAXENGINE_API WheeledVehicle : public RigidBody
+#if USE_EDITOR
+    , public IPhysicsDebug
+#endif
 {
     friend class PhysicsBackend;
     friend struct ScenePhysX;
@@ -53,12 +57,12 @@ API_CLASS(Attributes="ActorContextMenu(\"New/Physics/Wheeled Vehicle\"), ActorTo
         /// <summary>
         /// The vehicle speed.
         /// </summary>
-        API_FIELD(Attributes = "Limit(0)") float Speed = 1000;
+        API_FIELD(Attributes="Limit(0)") float Speed = 1000;
 
         /// <summary>
         /// The target max steer of the speed.
         /// </summary>
-        API_FIELD(Attributes = "Limit(0, 1)") float Steer = 1;
+        API_FIELD(Attributes="Limit(0, 1)") float Steer = 1;
 
         SteerControl() = default;
 
@@ -242,7 +246,7 @@ API_CLASS(Attributes="ActorContextMenu(\"New/Physics/Wheeled Vehicle\"), ActorTo
         /// <summary>
         /// Number of gears to move to forward
         /// </summary>
-        API_FIELD(Attributes = "Limit(1, 30)") int32 ForwardGearsRatios = 5;
+        API_FIELD(Attributes="Limit(1, 30)") int32 ForwardGearsRatios = 5;
 
         /// <summary>
         /// Time it takes to switch gear. Specified in seconds (s).
@@ -464,10 +468,18 @@ public:
     API_FIELD(Attributes="EditorOrder(1), EditorDisplay(\"Vehicle\")")
     bool UseAnalogSteering = false;
 
+#if USE_EDITOR
+    /// <summary>
+    /// If checked, will draw wheel names and indices at the position of their colliders.
+    /// </summary>
+    API_FIELD(Attributes="EditorOrder(2), EditorDisplay(\"Vehicle\")")
+    bool ShowDebugDrawWheelNames = false;
+#endif
+
     /// <summary>
     /// Gets the vehicle driving model type.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(2), EditorDisplay(\"Vehicle\")") DriveTypes GetDriveType() const;
+    API_PROPERTY(Attributes="EditorOrder(4), EditorDisplay(\"Vehicle\")") DriveTypes GetDriveType() const;
 
     /// <summary>
     /// Sets the vehicle driving model type.
@@ -477,12 +489,12 @@ public:
     /// <summary>
     /// Gets the vehicle wheels settings.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(4), EditorDisplay(\"Vehicle\")") const Array<Wheel>& GetWheels() const;
+    API_PROPERTY(Attributes="EditorOrder(5), EditorDisplay(\"Vehicle\")") const Array<Wheel>& GetWheels() const;
 
     /// <summary>
     /// Gets the vehicle drive control settings.
     /// </summary>
-    API_PROPERTY(Attributes = "EditorOrder(5), EditorDisplay(\"Vehicle\")") DriveControlSettings GetDriveControl() const;
+    API_PROPERTY(Attributes="EditorOrder(6), EditorDisplay(\"Vehicle\")") DriveControlSettings GetDriveControl() const;
 
     /// <summary>
     /// Sets the vehicle drive control settings.
@@ -497,7 +509,7 @@ public:
     /// <summary>
     /// Gets the vehicle engine settings.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(6), EditorDisplay(\"Vehicle\")") EngineSettings GetEngine() const;
+    API_PROPERTY(Attributes="EditorOrder(7), EditorDisplay(\"Vehicle\")") EngineSettings GetEngine() const;
 
     /// <summary>
     /// Sets the vehicle engine settings.
@@ -507,7 +519,7 @@ public:
     /// <summary>
     /// Gets the vehicle differential settings.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(7), EditorDisplay(\"Vehicle\")") DifferentialSettings GetDifferential() const;
+    API_PROPERTY(Attributes="EditorOrder(8), EditorDisplay(\"Vehicle\")") DifferentialSettings GetDifferential() const;
 
     /// <summary>
     /// Sets the vehicle differential settings.
@@ -517,7 +529,7 @@ public:
     /// <summary>
     /// Gets the vehicle gearbox settings.
     /// </summary>
-    API_PROPERTY(Attributes="EditorOrder(8), EditorDisplay(\"Vehicle\")") GearboxSettings GetGearbox() const;
+    API_PROPERTY(Attributes="EditorOrder(9), EditorDisplay(\"Vehicle\")") GearboxSettings GetGearbox() const;
 
     /// <summary>
     /// Sets the vehicle gearbox settings.
@@ -527,7 +539,7 @@ public:
     // <summary>
     /// Sets axles anti roll bars to increase vehicle stability.
     /// </summary>
-    API_PROPERTY() void SetAntiRollBars(const Array<AntiRollBar>& value);
+    API_PROPERTY(Attributes="EditorOrder(10), EditorDisplay(\"Vehicle\")") void SetAntiRollBars(const Array<AntiRollBar>& value);
 
     // <summary>
     /// Gets axles anti roll bars.
@@ -545,7 +557,7 @@ public:
     /// Get the vehicle throttle. It is the analog accelerator pedal value in range (0,1) where 1 represents the pedal fully pressed and 0 represents the pedal in its rest state.
     /// </summary>
     /// <returns>The vehicle throttle.</returns>
-    API_FUNCTION() float GetThrottle();
+    API_FUNCTION() float GetThrottle() const;
 
     /// <summary>
     /// Sets the input for vehicle steering. Steer is the analog steer value in range (-1,1) where -1 represents the steering wheel at left lock and +1 represents the steering wheel at right lock.
@@ -554,16 +566,34 @@ public:
     API_FUNCTION() void SetSteering(float value);
 
     /// <summary>
+    /// Gets the vehicle steering. Steer is the analog steer value in range (-1,1) where -1 represents the steering wheel at left lock and +1 represents the steering wheel at right lock.
+    /// </summary>
+    /// <returns>The vehicle steering.</returns>
+    API_FUNCTION() float GetSteering();
+
+    /// <summary>
     /// Sets the input for vehicle brakes. Brake is the analog brake pedal value in range (0,1) where 1 represents the pedal fully pressed and 0 represents the pedal in its rest state.
     /// </summary>
     /// <param name="value">The value (0,1 range).</param>
     API_FUNCTION() void SetBrake(float value);
 
     /// <summary>
+    /// Gets the vehicle brakes. Brake is the analog brake pedal value in range (0,1) where 1 represents the pedal fully pressed and 0 represents the pedal in its rest state.
+    /// </summary>
+    /// <returns>The vehicle brake.</returns>
+    API_FUNCTION() float GetBrake();
+
+    /// <summary>
     /// Sets the input for vehicle handbrake. Handbrake is the analog handbrake value in range (0,1) where 1 represents the handbrake fully engaged and 0 represents the handbrake in its rest state.
     /// </summary>
     /// <param name="value">The value (0,1 range).</param>
     API_FUNCTION() void SetHandbrake(float value);
+
+    /// <summary>
+    /// Gets the vehicle handbrake. Handbrake is the analog handbrake value in range (0,1) where 1 represents the handbrake fully engaged and 0 represents the handbrake in its rest state.
+    /// </summary>
+    /// <returns>The vehicle handbrake.</returns>
+    API_FUNCTION() float GetHandbrake();
 
     /// <summary>
     /// Sets the input for tank left track throttle. It is the analog accelerator pedal value in range (-1,1) where 1 represents the pedal fully pressed to move to forward, 0 to represents the 
@@ -644,13 +674,9 @@ public:
     /// </summary>
     API_FUNCTION() void Setup();
 
-private:
-#if USE_EDITOR
-    void DrawPhysicsDebug(RenderView& view);
-#endif
-
 public:
     // [Vehicle]
+    ImplementPhysicsDebug;
 #if USE_EDITOR
     void OnDebugDrawSelected() override;
 #endif

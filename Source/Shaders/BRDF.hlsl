@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __BRDF__
 #define __BRDF__
@@ -56,6 +56,12 @@ float3 F_Schlick(float3 specularColor, float VoH)
 {
     float fc = Pow5(1 - VoH);
     return saturate(50.0 * specularColor.g) * fc + (1 - fc) * specularColor;
+}
+
+float3 F_Schlick(float3 f0, float3 f90, float VoH)
+{
+	float fc = Pow5(1 - VoH);
+	return f90 * fc + (1 - fc) * f0;
 }
 
 #define REFLECTION_CAPTURE_NUM_MIPS 7

@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
 #include "Engine/Core/Memory/Memory.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #define MOODYCAMEL_EXCEPTIONS_ENABLED 0
 #include <ThirdParty/concurrentqueue.h>
 
@@ -17,6 +18,7 @@ struct ConcurrentQueueSettings : public moodycamel::ConcurrentQueueDefaultTraits
     // Use default engine memory allocator
     static inline void* malloc(size_t size)
     {
+        PROFILE_MEM(EngineThreading);
         return Allocator::Allocate((uint64)size);
     }
 

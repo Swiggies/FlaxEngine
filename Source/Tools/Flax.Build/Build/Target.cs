@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -246,6 +246,25 @@ namespace Flax.Build
                 OutputType = TargetOutputType.Executable;
                 options.LinkEnv.Output = LinkerOutput.Executable;
                 Modules.Add("Main");
+            }
+
+            switch (options.CompileEnv.CpuArchitecture)
+            {
+            case CpuArchitecture.AVX:
+            case CpuArchitecture.SSE2:
+                // Basic SEE2
+                options.CompileEnv.PreprocessorDefinitions.Add("PLATFORM_SIMD_SSE2=1"); break;
+            case CpuArchitecture.AVX2:
+            case CpuArchitecture.SSE4_2:
+                // Assume full support of SEE4.2 and older
+                options.CompileEnv.PreprocessorDefinitions.Add("PLATFORM_SIMD_SSE2=1");
+                options.CompileEnv.PreprocessorDefinitions.Add("PLATFORM_SIMD_SSE3=1");
+                options.CompileEnv.PreprocessorDefinitions.Add("PLATFORM_SIMD_SSE4_1=1");
+                options.CompileEnv.PreprocessorDefinitions.Add("PLATFORM_SIMD_SSE4_2=1");
+                break;
+            case CpuArchitecture.NEON:
+                options.CompileEnv.PreprocessorDefinitions.Add("PLATFORM_SIMD_NEON=1");
+                break;
             }
 
             options.CompileEnv.EnableExceptions = true; // TODO: try to disable this!

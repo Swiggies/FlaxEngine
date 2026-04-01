@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections;
@@ -70,7 +70,9 @@ namespace FlaxEditor.CustomEditors.Editors
                 menu.ItemsContainer.RemoveChildren();
 
                 menu.AddButton("Copy", linkedEditor.Copy);
-                var b = menu.AddButton("Paste", linkedEditor.Paste);
+                var b = menu.AddButton("Duplicate", () => Editor.Duplicate(Index));
+                b.Enabled = !Editor._readOnly && Editor._canResize;
+                b = menu.AddButton("Paste", linkedEditor.Paste);
                 b.Enabled = linkedEditor.CanPaste && !Editor._readOnly;
 
                 menu.AddSeparator();
@@ -81,7 +83,7 @@ namespace FlaxEditor.CustomEditors.Editors
                 b.Enabled = Index + 1 < Editor.Count && !Editor._readOnly;
 
                 b = menu.AddButton("Remove", OnRemoveClicked);
-                b.Enabled = !Editor._readOnly;
+                b.Enabled = !Editor._readOnly && Editor._canResize;
             }
 
             /// <inheritdoc />
@@ -232,6 +234,7 @@ namespace FlaxEditor.CustomEditors.Editors
 
             public void Setup(CollectionEditor editor, int index, bool canReorder = true)
             {
+                Pivot = Float2.Zero;
                 HeaderHeight = 18;
                 _canReorder = canReorder;
                 EnableDropDownIcon = true;
@@ -403,8 +406,10 @@ namespace FlaxEditor.CustomEditors.Editors
                 var menu = new ContextMenu();
 
                 menu.AddButton("Copy", linkedEditor.Copy);
+                var b = menu.AddButton("Duplicate", () => Editor.Duplicate(Index));
+                b.Enabled = !Editor._readOnly && Editor._canResize;
                 var paste = menu.AddButton("Paste", linkedEditor.Paste);
-                paste.Enabled = linkedEditor.CanPaste;
+                paste.Enabled = linkedEditor.CanPaste && !Editor._readOnly;
 
                 if (_canReorder)
                 {
@@ -417,7 +422,8 @@ namespace FlaxEditor.CustomEditors.Editors
                     moveDownButton.Enabled = Index + 1 < Editor.Count;
                 }
 
-                menu.AddButton("Remove", OnRemoveClicked);
+                b = menu.AddButton("Remove", OnRemoveClicked);
+                b.Enabled = !Editor._readOnly && Editor._canResize;
 
                 menu.Show(panel, location);
             }
@@ -444,6 +450,7 @@ namespace FlaxEditor.CustomEditors.Editors
         protected bool NotNullItems;
 
         private IntValueBox _sizeBox;
+        private Label _label;
         private Color _background;
         private int _elementsCount, _minCount, _maxCount;
         private bool _readOnly;
@@ -556,16 +563,16 @@ namespace FlaxEditor.CustomEditors.Editors
                     MinValue = _minCount,
                     MaxValue = _maxCount,
                     AnchorPreset = AnchorPresets.TopRight,
-                    Bounds = new Rectangle(-40 - dropPanel.ItemsMargin.Right, y, 40, height),
+                    Bounds = new Rectangle(-55 - dropPanel.ItemsMargin.Right, y, 55, height),
                     Parent = dropPanel,
                 };
 
-                var label = new Label
+                _label = new Label
                 {
                     Text = "Size",
                     AnchorPreset = AnchorPresets.TopRight,
                     Bounds = new Rectangle(-_sizeBox.Width - 40 - dropPanel.ItemsMargin.Right - 2, y, 40, height),
-                    Parent = dropPanel
+                    Parent = dropPanel,
                 };
 
                 if (!_canResize || (NotNullItems && size == 0))
@@ -586,11 +593,12 @@ namespace FlaxEditor.CustomEditors.Editors
                 panel.Panel.Offsets = new Margin(7, 7, 0, 0);
                 panel.Panel.BackgroundColor = _background;
                 var elementType = ElementType;
+                var bindingAttr = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public;
                 bool single = elementType.IsPrimitive ||
                               elementType.Equals(new ScriptType(typeof(string))) ||
                               elementType.IsEnum ||
-                              (elementType.GetFields().Length == 1 && elementType.GetProperties().Length == 0) ||
-                              (elementType.GetProperties().Length == 1 && elementType.GetFields().Length == 0) ||
+                              (elementType.GetFields(bindingAttr).Length == 1 && elementType.GetProperties(bindingAttr).Length == 0) ||
+                              (elementType.GetProperties(bindingAttr).Length == 1 && elementType.GetFields(bindingAttr).Length == 0) ||
                               elementType.Equals(new ScriptType(typeof(JsonAsset))) ||
                               elementType.Equals(new ScriptType(typeof(SettingsBase)));
                 if (_cachedDropPanels == null)
@@ -641,10 +649,10 @@ namespace FlaxEditor.CustomEditors.Editors
             if (_canResize && !_readOnly)
             {
                 var panel = dragArea.HorizontalPanel();
-                panel.Panel.Size = new Float2(0, 20);
-                panel.Panel.Margin = new Margin(2);
+                panel.Panel.Size = new Float2(0, 18);
+                panel.Panel.Margin = new Margin(0, 0, Utilities.Constants.UIMargin, 0);
 
-                var removeButton = panel.Button("-", "Remove last item");
+                var removeButton = panel.Button("-", "Remove the last item.");
                 removeButton.Button.Size = new Float2(16, 16);
                 removeButton.Button.Enabled = size > _minCount;
                 removeButton.Button.AnchorPreset = AnchorPresets.TopRight;
@@ -655,7 +663,7 @@ namespace FlaxEditor.CustomEditors.Editors
                     Resize(Count - 1);
                 };
 
-                var addButton = panel.Button("+", "Add new item");
+                var addButton = panel.Button("+", "Add a new item.");
                 addButton.Button.Size = new Float2(16, 16);
                 addButton.Button.Enabled = (!NotNullItems || size > 0) && size < _maxCount;
                 addButton.Button.AnchorPreset = AnchorPresets.TopRight;
@@ -666,8 +674,10 @@ namespace FlaxEditor.CustomEditors.Editors
                     Resize(Count + 1);
                 };
             }
-        }
 
+            Layout.ContainerControl.SizeChanged += OnLayoutSizeChanged;
+        }
+        
         private void OnSetupContextMenu(ContextMenu menu, DropPanel panel)
         {
             if (menu.Items.Any(x => x is ContextMenuButton b && b.Text.Equals("Open All", StringComparison.Ordinal)))
@@ -690,10 +700,24 @@ namespace FlaxEditor.CustomEditors.Editors
             });
         }
 
+        private void OnLayoutSizeChanged(Control control)
+        {
+            if (Layout.ContainerControl is DropPanel dropPanel)
+            {
+                // Hide "Size" text when array editor title overlaps
+                var headerTextSize = dropPanel.HeaderTextFont.GetFont().MeasureText(dropPanel.HeaderText);
+                if (headerTextSize.X + DropPanel.DropDownIconSize >= _label.Left)
+                    _label.TextColor = _label.TextColorHighlighted = Color.Transparent;
+                else
+                    _label.TextColor = _label.TextColorHighlighted = FlaxEngine.GUI.Style.Current.Foreground;
+            }
+        }
+
         /// <inheritdoc />
         protected override void Deinitialize()
         {
             _sizeBox = null;
+            Layout.ContainerControl.SizeChanged -= OnLayoutSizeChanged;
 
             base.Deinitialize();
         }
@@ -739,6 +763,34 @@ namespace FlaxEditor.CustomEditors.Editors
             cloned[dstIndex] = cloned[srcIndex];
             cloned[srcIndex] = tmp;
             SetValue(cloned);
+        }
+        
+        /// <summary>
+        /// Duplicates the list item.
+        /// </summary>
+        /// <param name="index">The index to duplicate.</param>
+        public void Duplicate(int index)
+        {
+            if (IsSetBlocked)
+                return;
+
+            var count = Count;
+            var newValues = Allocate(count + 1);
+            var oldValues = (IList)Values[0];
+   
+            for (int i = 0; i <= index; i++)
+            {
+                newValues[i] = oldValues[i];
+            }
+
+            newValues[index + 1] = Utilities.Utils.CloneValue(oldValues[index]);
+
+            for (int i = index + 1; i < count; i++)
+            {
+                newValues[i + 1] = oldValues[i];
+            }
+
+            SetValue(newValues);
         }
 
         /// <summary>
@@ -882,6 +934,11 @@ namespace FlaxEditor.CustomEditors.Editors
             public string FileExtension
             {
                 set => _pickerValidator.FileExtension = value;
+            }
+
+            public DragAreaControl()
+            {
+                Pivot = Float2.Zero;
             }
 
             /// <inheritdoc />

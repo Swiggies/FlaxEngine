@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ProjectInfo.h"
 #include "Engine/Platform/FileSystem.h"
@@ -6,6 +6,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Engine/Globals.h"
 #include "Engine/Core/Math/Quaternion.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Serialization/JsonWriters.h"
 #include "Engine/Serialization/JsonTools.h"
 #include <ThirdParty/pugixml/pugixml.hpp>
@@ -327,6 +328,7 @@ ProjectInfo* ProjectInfo::Load(const String& path)
     }
 
     // Load
+    PROFILE_MEM(Editor);
     auto project = New<ProjectInfo>();
     if (project->LoadProject(path))
     {

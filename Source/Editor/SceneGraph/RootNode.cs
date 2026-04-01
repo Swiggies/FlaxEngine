@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if USE_LARGE_WORLDS
 using Real = System.Double;
@@ -97,13 +97,16 @@ namespace FlaxEditor.SceneGraph
         /// <returns>Hit object or null if there is no intersection at all.</returns>
         public SceneGraphNode RayCast(ref Ray ray, ref Ray view, out Real distance, RayCastData.FlagTypes flags = RayCastData.FlagTypes.None)
         {
+            Profiler.BeginEvent("RayCastScene");
             var data = new RayCastData
             {
                 Ray = ray,
                 View = view,
                 Flags = flags
             };
-            return RayCast(ref data, out distance, out _);
+            var result = RayCast(ref data, out distance, out _);
+            Profiler.EndEvent();
+            return result;
         }
 
         /// <summary>
@@ -117,13 +120,16 @@ namespace FlaxEditor.SceneGraph
         /// <returns>Hit object or null if there is no intersection at all.</returns>
         public SceneGraphNode RayCast(ref Ray ray, ref Ray view, out Real distance, out Vector3 normal, RayCastData.FlagTypes flags = RayCastData.FlagTypes.None)
         {
+            Profiler.BeginEvent("RayCastScene");
             var data = new RayCastData
             {
                 Ray = ray,
                 View = view,
                 Flags = flags
             };
-            return RayCast(ref data, out distance, out normal);
+            var result = RayCast(ref data, out distance, out normal);
+            Profiler.EndEvent();
+            return result;
         }
 
         internal static Quaternion RaycastNormalRotation(ref Vector3 normal)
@@ -159,7 +165,8 @@ namespace FlaxEditor.SceneGraph
         /// </summary>
         /// <param name="actor">The actor.</param>
         /// <param name="parent">The parent.</param>
-        public abstract void Spawn(Actor actor, Actor parent);
+        /// <param name="orderInParent">Custom index in parent to use. Value -1 means the default one (the last one).</param>
+        public abstract void Spawn(Actor actor, Actor parent, int orderInParent = -1);
 
         /// <summary>
         /// Gets the undo.
@@ -168,7 +175,14 @@ namespace FlaxEditor.SceneGraph
 
         /// <summary>
         /// Gets the list of selected scene graph nodes in the editor context.
+        /// [Deprecated in v1.10]
         /// </summary>
-        public abstract List<SceneGraphNode> Selection { get; }
+        [Obsolete("Use SceneContext.Selection instead.")]
+        public List<SceneGraphNode> Selection => SceneContext.Selection;
+
+        /// <summary>
+        /// Gets the scene editing context.
+        /// </summary>
+        public abstract ISceneEditingContext SceneContext { get; }
     }
 }

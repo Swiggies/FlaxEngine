@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -164,7 +164,7 @@ public:
     static Vector3 GetRigidDynamicActorAngularVelocity(void* actor);
     static void SetRigidDynamicActorAngularVelocity(void* actor, const Vector3& value, bool wakeUp);
     static Vector3 GetRigidDynamicActorCenterOfMass(void* actor);
-    static void SetRigidDynamicActorCenterOfMassOffset(void* actor, const Float3& value);
+    static void AddRigidDynamicActorCenterOfMassOffset(void* actor, const Float3& value);
     static bool GetRigidDynamicActorIsSleeping(void* actor);
     static void RigidDynamicActorSleep(void* actor);
     static void RigidDynamicActorWakeUp(void* actor);
@@ -248,6 +248,8 @@ public:
     static void SetControllerSlopeLimit(void* controller, float value);
     static void SetControllerNonWalkableMode(void* controller, int32 value);
     static void SetControllerStepOffset(void* controller, float value);
+    static Vector3 GetControllerBasePosition(void* controller);
+    static void SetControllerBasePosition(void* controller, const Vector3& value);
     static Vector3 GetControllerUpDirection(void* controller);
     static void SetControllerUpDirection(void* controller, const Vector3& value);
     static Vector3 GetControllerPosition(void* controller);

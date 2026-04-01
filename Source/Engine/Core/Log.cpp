@@ -1,6 +1,7 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Log.h"
+#if LOG_ENABLE
 #include "Engine/Engine/CommandLine.h"
 #include "Engine/Core/Types/DateTime.h"
 #include "Engine/Core/Collections/Array.h"
@@ -8,6 +9,7 @@
 #include "Engine/Engine/Globals.h"
 #include "Engine/Platform/FileSystem.h"
 #include "Engine/Platform/CriticalSection.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Serialization/FileWriteStream.h"
 #include "Engine/Debug/Exceptions/Exceptions.h"
 #if USE_EDITOR
@@ -42,6 +44,7 @@ bool Log::Logger::Init()
     // Skip if disabled
     if (!IsLogEnabled())
         return false;
+    PROFILE_MEM(Engine);
 
     // Create logs directory (if is missing)
 #if USE_EDITOR
@@ -119,6 +122,7 @@ void Log::Logger::Write(const StringView& msg)
     const auto length = msg.Length();
     if (length <= 0)
         return;
+    PROFILE_MEM(Engine);
 
     LogLocker.Lock();
     if (IsDuringLog)
@@ -129,7 +133,7 @@ void Log::Logger::Write(const StringView& msg)
     IsDuringLog = true;
 
     // Send message to standard process output
-    if (CommandLine::Options.Std)
+    if (CommandLine::Options.Std.IsTrue())
     {
 #if PLATFORM_TEXT_IS_CHAR16
         StringAnsi ansi(msg);
@@ -146,8 +150,10 @@ void Log::Logger::Write(const StringView& msg)
 #endif
     }
 
+#if !BUILD_RELEASE
     // Send message to platform logging
     Platform::Log(msg);
+#endif
 
     // Write message to log file
     constexpr int32 LogMaxWriteSize = 1 * 1024 * 1024; // 1GB
@@ -256,6 +262,7 @@ void Log::Logger::Write(LogType type, const StringView& msg)
 {
     if (msg.Length() <= 0)
         return;
+    PROFILE_MEM(Engine);
     const bool isError = IsError(type);
 
     // Create message for the log file
@@ -304,3 +311,5 @@ const Char* ToString(LogType e)
     }
     return result;
 }
+
+#endif

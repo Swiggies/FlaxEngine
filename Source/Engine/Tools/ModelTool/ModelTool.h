@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -98,7 +98,7 @@ API_CLASS(Namespace="FlaxEngine.Tools", Static) class FLAXENGINE_API ModelTool
 
     // Optional: inputModel or modelData
     // Optional: outputSDF or null, outputStream or null
-    static bool GenerateModelSDF(class Model* inputModel, class ModelData* modelData, float resolutionScale, int32 lodIndex, ModelBase::SDFData* outputSDF, class MemoryWriteStream* outputStream, const StringView& assetName, float backfacesThreshold = 0.6f, bool useGPU = true);
+    static bool GenerateModelSDF(class Model* inputModel, const class ModelData* modelData, float resolutionScale, int32 lodIndex, ModelBase::SDFData* outputSDF, class MemoryWriteStream* outputStream, const StringView& assetName, float backfacesThreshold = 0.6f, bool useGPU = true);
 
 #if USE_EDITOR
 
@@ -143,6 +143,30 @@ public:
     };
 
     /// <summary>
+    /// Declares the imported vertex positions data formats.
+    /// </summary>
+    API_ENUM(Attributes="HideInEditor") enum class PositionFormat
+    {
+        // XYZ channels with 32-bit precision (12 bytes per vertex).
+        Float32 = 0,
+        // XYZ(W) channels with 16-bit precision (8 bytes per vertex).
+        Float16 = 1,
+        // Selects the most memory-efficient format that can represent positions within a max error defined in project Build Settings.
+        Automatic = 2,
+    };
+
+    /// <summary>
+    /// Declares the imported vertex texture coordinates data formats.
+    /// </summary>
+    API_ENUM(Attributes="HideInEditor") enum class TexCoordFormats
+    {
+        // XY channels with 16-bit precision (4 bytes per vertex).
+        Float16 = 0,
+        // XY channels with 8-bit precision (2 bytes per vertex). Valid only for normalized UVs within range [0; 1], scaled or negative UVs won't work.
+        UNorm8 = 1,
+    };
+
+    /// <summary>
     /// Model import options.
     /// </summary>
     API_STRUCT(Attributes="HideInEditor") struct FLAXENGINE_API Options : public ISerializable
@@ -183,7 +207,7 @@ public:
         API_FIELD(Attributes="EditorOrder(70), EditorDisplay(\"Geometry\", \"Import LODs\"), VisibleIf(nameof(ShowGeometry))")
         bool ImportLODs = true;
         // Enable/disable importing vertex colors (channel 0 only).
-        API_FIELD(Attributes="EditorOrder(80), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowModel))")
+        API_FIELD(Attributes="EditorOrder(80), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
         bool ImportVertexColors = true;
         // Enable/disable importing blend shapes (morph targets).
         API_FIELD(Attributes="EditorOrder(85), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowSkinnedModel))")
@@ -197,9 +221,20 @@ public:
         // If specified, all meshes that name starts with this prefix in the name will be imported as a separate collision data asset (excluded used for rendering).
         API_FIELD(Attributes="EditorOrder(100), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
         String CollisionMeshesPrefix = TEXT("");
+        // If specified, all meshes that name ends with this postfix in the name will be imported as a separate collision data asset (excluded used for rendering).
+        API_FIELD(Attributes="EditorOrder(101), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
+        String CollisionMeshesPostfix = TEXT("");
         // The type of collision that should be generated if the mesh has a collision prefix specified.
-        API_FIELD(Attributes = "EditorOrder(105), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
+        API_FIELD(Attributes="EditorOrder(105), EditorDisplay(\"Geometry\"), VisibleIf(nameof(ShowGeometry))")
         CollisionDataType CollisionType = CollisionDataType::ConvexMesh;
+
+    public:
+        // The imported vertex positions data format to use by meshes. Changing this affects memory usage of the mesh data, performance and overall quality.
+        API_FIELD(Attributes = "EditorOrder(200), EditorDisplay(\"Data Format\"), VisibleIf(nameof(ShowGeometry))")
+        PositionFormat PositionFormat = PositionFormat::Automatic;
+        // The imported vertex texture coordinates data format to use by meshes. Changing this affects memory usage of the mesh data, performance and overall quality.
+        API_FIELD(Attributes = "EditorOrder(205), EditorDisplay(\"Data Format\"), VisibleIf(nameof(ShowGeometry))")
+        TexCoordFormats TexCoordFormat = TexCoordFormats::Float16;
 
     public: // Transform
 
@@ -258,10 +293,10 @@ public:
         API_FIELD(Attributes="EditorOrder(1100), EditorDisplay(\"Level Of Detail\", \"Generate LODs\"), VisibleIf(nameof(ShowGeometry))")
         bool GenerateLODs = false;
         // The index of the LOD from the source model data to use as a reference for following LODs generation.
-        API_FIELD(Attributes="EditorOrder(1110), EditorDisplay(\"Level Of Detail\", \"Base LOD\"), VisibleIf(nameof(ShowGeometry)), Limit(0, 5)")
+        API_FIELD(Attributes="EditorOrder(1110), EditorDisplay(\"Level Of Detail\", \"Base LOD\"), VisibleIf(nameof(ShowGeometry)), Limit(0, 5, 0.065f)")
         int32 BaseLOD = 0;
         // The amount of LODs to include in the model (all remaining ones starting from Base LOD will be generated).
-        API_FIELD(Attributes="EditorOrder(1120), EditorDisplay(\"Level Of Detail\", \"LOD Count\"), VisibleIf(nameof(ShowGeometry)), Limit(1, 6)")
+        API_FIELD(Attributes="EditorOrder(1120), EditorDisplay(\"Level Of Detail\", \"LOD Count\"), VisibleIf(nameof(ShowGeometry)), Limit(1, 6, 0.065f)")
         int32 LODCount = 4;
         // The target amount of triangles for the generated LOD (based on the higher LOD). Normalized to range 0-1. For instance 0.4 cuts the triangle count to 40%.
         API_FIELD(Attributes="EditorOrder(1130), EditorDisplay(\"Level Of Detail\"), VisibleIf(nameof(ShowGeometry)), Limit(0, 1, 0.001f)")
@@ -276,22 +311,25 @@ public:
     public: // Materials
 
         // If checked, the importer will create materials for model meshes as specified in the file.
-        API_FIELD(Attributes="EditorOrder(400), EditorDisplay(\"Materials\"), VisibleIf(nameof(ShowGeometry))")
+        API_FIELD(Attributes="EditorOrder(399), EditorDisplay(\"Materials\"), VisibleIf(nameof(ShowGeometry))")
         bool ImportMaterials = true;
+        // If checked, the importer will create empty material slots for every material without importing materials nor textures.
+        API_FIELD(Attributes="EditorOrder(400), EditorDisplay(\"Materials\"), VisibleIf(nameof(ShowGeometry))")
+        bool CreateEmptyMaterialSlots = false;
         // If checked, the importer will create the model's materials as instances of a base material.
-        API_FIELD(Attributes = "EditorOrder(401), EditorDisplay(\"Materials\"), VisibleIf(nameof(ImportMaterials)), VisibleIf(nameof(ShowGeometry))")
+        API_FIELD(Attributes="EditorOrder(401), EditorDisplay(\"Materials\"), VisibleIf(nameof(ImportMaterials)), VisibleIf(nameof(ShowGeometry)), VisibleIf(nameof(CreateEmptyMaterialSlots), true)")
         bool ImportMaterialsAsInstances = false;
         // The material used as the base material that will be instanced as the imported model's material.
-        API_FIELD(Attributes = "EditorOrder(402), EditorDisplay(\"Materials\"), VisibleIf(nameof(ImportMaterialsAsInstances)), VisibleIf(nameof(ShowGeometry))")
+        API_FIELD(Attributes="EditorOrder(402), EditorDisplay(\"Materials\"), VisibleIf(nameof(ImportMaterialsAsInstances)), VisibleIf(nameof(ShowGeometry)), VisibleIf(nameof(CreateEmptyMaterialSlots), true)")
         AssetReference<MaterialBase> InstanceToImportAs;
         // If checked, the importer will import texture files used by the model and any embedded texture resources.
-        API_FIELD(Attributes="EditorOrder(410), EditorDisplay(\"Materials\"), VisibleIf(nameof(ShowGeometry))")
+        API_FIELD(Attributes="EditorOrder(410), EditorDisplay(\"Materials\"), VisibleIf(nameof(ShowGeometry)), VisibleIf(nameof(CreateEmptyMaterialSlots), true)")
         bool ImportTextures = true;
         // If checked, the importer will try to keep the model's current overridden material slots, instead of importing materials from the source file.
         API_FIELD(Attributes="EditorOrder(420), EditorDisplay(\"Materials\", \"Keep Overridden Materials\"), VisibleIf(nameof(ShowGeometry))")
         bool RestoreMaterialsOnReimport = true;
         // If checked, the importer will not reimport any material from this model which already exist in the sub-asset folder.
-        API_FIELD(Attributes = "EditorOrder(421), EditorDisplay(\"Materials\", \"Skip Existing Materials\"), VisibleIf(nameof(ShowGeometry))")
+        API_FIELD(Attributes="EditorOrder(421), EditorDisplay(\"Materials\", \"Skip Existing Materials\"), VisibleIf(nameof(ShowGeometry))")
         bool SkipExistingMaterialsOnReimport = true;
 
     public: // SDF
@@ -309,7 +347,7 @@ public:
         API_FIELD(Attributes="EditorOrder(2000), EditorDisplay(\"Splitting\"), VisibleIf(nameof(ShowSplitting))")
         bool SplitObjects = false;
         // The zero-based index for the mesh/animation clip to import. If the source file has more than one mesh/animation it can be used to pick a desired object. Default -1 imports all objects.
-        API_FIELD(Attributes="EditorOrder(2010), EditorDisplay(\"Splitting\"), VisibleIf(nameof(ShowSplitting))")
+        API_FIELD(Attributes="EditorOrder(2010), EditorDisplay(\"Splitting\"), VisibleIf(nameof(ShowSplitting)), Limit(int.MinValue, int.MaxValue, 0.065f)")
         int32 ObjectIndex = -1;
 
     public: // Other

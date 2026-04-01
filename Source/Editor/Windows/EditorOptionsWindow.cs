@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -45,7 +45,7 @@ namespace FlaxEditor.Windows
             {
                 Parent = this
             };
-            _saveButton = (ToolStripButton)toolstrip.AddButton(editor.Icons.Save64, SaveData).LinkTooltip("Save");
+            _saveButton = (ToolStripButton)toolstrip.AddButton(editor.Icons.Save64, SaveData).LinkTooltip("Save.");
             _saveButton.Enabled = false;
 
             _tabs = new Tabs
@@ -104,6 +104,8 @@ namespace FlaxEditor.Windows
             {
                 _saveButton.Enabled = true;
                 _isDataDirty = true;
+                if (!Title.EndsWith('*'))
+                    Title += "*";
             }
         }
 
@@ -113,6 +115,8 @@ namespace FlaxEditor.Windows
             {
                 _saveButton.Enabled = false;
                 _isDataDirty = false;
+                if (Title.EndsWith('*'))
+                    Title = Title.Remove(Title.Length - 1);
             }
         }
 

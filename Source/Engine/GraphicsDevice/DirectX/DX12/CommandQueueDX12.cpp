@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_DIRECTX12
 
@@ -6,6 +6,7 @@
 #include "GPUDeviceDX12.h"
 #include "Engine/Threading/Threading.h"
 #include "Engine/GraphicsDevice/DirectX/RenderToolsDX.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 FenceDX12::FenceDX12(GPUDeviceDX12* device)
     : _currentValue(1)
@@ -64,12 +65,12 @@ void FenceDX12::WaitCPU(uint64 value)
 {
     if (IsFenceComplete(value))
         return;
-
+    PROFILE_CPU();
+    ZoneColor(TracyWaitZoneColor);
     ScopeLock lock(_locker);
 
     _fence->SetEventOnCompletion(value, _event);
     WaitForSingleObject(_event, INFINITE);
-
     _lastCompletedValue = _fence->GetCompletedValue();
 }
 
@@ -142,6 +143,8 @@ void CommandQueueDX12::WaitForFence(uint64 fenceValue)
 
 void CommandQueueDX12::WaitForGPU()
 {
+    PROFILE_CPU();
+    ZoneColor(TracyWaitZoneColor);
     const uint64 value = _fence.Signal(this);
     _fence.WaitCPU(value);
 }

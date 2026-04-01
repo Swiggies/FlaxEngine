@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Reflection;
@@ -11,7 +11,7 @@ namespace FlaxEngine
 #if FLAX_EDITOR
     [System.ComponentModel.TypeConverter(typeof(TypeConverters.ColorConverter))]
 #endif
-    partial struct Color
+    partial struct Color : Json.ICustomValueEquals
     {
         /// <summary>
         /// The size of the <see cref="Color" /> type, in bytes.
@@ -81,6 +81,11 @@ namespace FlaxEngine
                 }
             }
         }
+
+        /// <summary>
+        ///  Gets the brightness of the color
+        /// </summary>
+        public float Brightness => R * 0.299f + G * 0.587f + B * 0.114f;
 
         /// <summary>
         /// Returns the minimum color component value: Min(r,g,b).
@@ -197,12 +202,16 @@ namespace FlaxEngine
         }
 
         /// <inheritdoc />
-        public override bool Equals(object other)
+        public bool ValueEquals(object other)
         {
-            if (!(other is Color))
-                return false;
-            var color = (Color)other;
-            return Equals(ref color);
+            var o = (Color)other;
+            return Equals(ref o);
+        }
+
+        /// <inheritdoc />
+        public override bool Equals(object value)
+        {
+            return value is Color other && Equals(ref other);
         }
 
         /// <summary>
@@ -213,7 +222,7 @@ namespace FlaxEngine
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ref Color other)
         {
-            return Mathf.NearEqual(other.R, R) && Mathf.NearEqual(other.G, G) && Mathf.NearEqual(other.B, B) && Mathf.NearEqual(other.A, A);
+            return R == other.R && G == other.G && B == other.B && A == other.A;
         }
 
         /// <inheritdoc />
@@ -661,23 +670,23 @@ namespace FlaxEngine
         /// <summary>
         /// Compares two colors.
         /// </summary>
-        /// <param name="lhs">The left.</param>
-        /// <param name="rhs">The right.</param>
+        /// <param name="left">The left.</param>
+        /// <param name="right">The right.</param>
         /// <returns>True if colors are equal, otherwise false.</returns>
-        public static bool operator ==(Color lhs, Color rhs)
+        public static bool operator ==(Color left, Color right)
         {
-            return lhs.Equals(ref rhs);
+            return left.Equals(ref right);
         }
 
         /// <summary>
         /// Compares two colors.
         /// </summary>
-        /// <param name="lhs">The left.</param>
-        /// <param name="rhs">The right.</param>
+        /// <param name="left">The left.</param>
+        /// <param name="right">The right.</param>
         /// <returns>True if colors are not equal, otherwise false.</returns>
-        public static bool operator !=(Color lhs, Color rhs)
+        public static bool operator !=(Color left, Color right)
         {
-            return !lhs.Equals(ref rhs);
+            return !left.Equals(ref right);
         }
 
         /// <summary>

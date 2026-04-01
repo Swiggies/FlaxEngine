@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -104,6 +104,9 @@ namespace Flax.Build.Platforms
                 args.Add("-fno-function-sections");
             }
 
+            // Support 16kb pages
+            args.Add("-D__BIONIC_NO_PAGE_SIZE_MACRO");
+
             switch (Architecture)
             {
             case TargetArchitecture.x86:
@@ -136,6 +139,9 @@ namespace Flax.Build.Platforms
             args.Add("-Wl,-Bsymbolic");
             args.Add("-Wl,--build-id=sha1");
             args.Add("-Wl,-gc-sections");
+
+            // Support 16kb pages
+            args.Add("-Wl,-z,max-page-size=16384");
 
             if (options.LinkEnv.Output == LinkerOutput.Executable)
             {
@@ -192,10 +198,10 @@ namespace Flax.Build.Platforms
             {
                 // https://android.googlesource.com/platform/ndk/+/master/docs/BuildSystemMaintainers.md#libc
                 var ndkPath = AndroidNdk.Instance.RootPath;
-                var libCppSharedPath = Path.Combine(ndkPath, "sources/cxx-stl/llvm-libc++/libs/", GetAbiName(Architecture), "libc++_shared.so"); // NDK24 (and older) location
+                var libCppSharedPath = Path.Combine(ndkPath, "toolchains/llvm/prebuilt", AndroidSdk.GetHostName(), "sysroot/usr/lib/", GetToolchainName(TargetPlatform.Android, Architecture), "libc++_shared.so"); // NDK25+ location
                 if (!File.Exists(libCppSharedPath))
                 {
-                    libCppSharedPath = Path.Combine(ndkPath, "toolchains/llvm/prebuilt", AndroidSdk.GetHostName(), "sysroot/usr/lib/", GetToolchainName(TargetPlatform.Android, Architecture), "libc++_shared.so"); // NDK25+ location
+                    libCppSharedPath = Path.Combine(ndkPath, "sources/cxx-stl/llvm-libc++/libs/", GetAbiName(Architecture), "libc++_shared.so"); // NDK24 (and older) location
                     if (!File.Exists(libCppSharedPath))
                         throw new Exception($"Missing Android NDK `libc++_shared.so` for architecture {Architecture}.");
                 }

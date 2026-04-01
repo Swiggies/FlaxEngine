@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -6,6 +6,7 @@
 #include "Engine/Content/JsonAsset.h"
 #include "Engine/Content/JsonAssetReference.h"
 #include "Engine/Physics/Actors/PhysicsColliderActor.h"
+#include "Engine/Physics/Actors/IPhysicsDebug.h"
 
 struct RayCastHit;
 class RigidBody;
@@ -15,7 +16,10 @@ class RigidBody;
 /// </summary>
 /// <seealso cref="Actor" />
 /// <seealso cref="PhysicsColliderActor" />
-API_CLASS(Abstract) class FLAXENGINE_API Collider : public PhysicsColliderActor
+API_CLASS(Abstract) class FLAXENGINE_API Collider : public PhysicsColliderActor, protected IAssetReference
+#if USE_EDITOR
+    , public IPhysicsDebug
+#endif
 {
     API_AUTO_SERIALIZATION();
     DECLARE_SCENE_OBJECT_ABSTRACT(Collider);
@@ -24,7 +28,7 @@ protected:
     bool _isTrigger;
     void* _shape;
     void* _staticActor;
-    Float3 _cachedScale;
+    float _cachedScale;
     float _contactOffset;
     Vector3 _cachedLocalPosePos;
     Quaternion _cachedLocalPoseRot;
@@ -61,7 +65,7 @@ public:
     /// <summary>
     /// Sets the center of the collider, measured in the object's local space.
     /// </summary>
-    API_PROPERTY() void SetCenter(const Vector3& value);
+    API_PROPERTY() virtual void SetCenter(const Vector3& value);
 
     /// <summary>
     /// Gets the contact offset. Colliders whose distance is less than the sum of their ContactOffset values will generate contacts. The contact offset must be positive. Contact offset allows the collision detection system to predictively enforce the contact constraint even when the objects are slightly separated.
@@ -155,7 +159,10 @@ protected:
     void RemoveStaticActor();
 
 private:
-    void OnMaterialChanged();
+    friend RigidBody;
+#if USE_EDITOR
+    virtual void OnDebugDrawSelf() {}
+#endif
 
 public:
     // [PhysicsColliderActor]
@@ -164,10 +171,6 @@ public:
     bool RayCast(const Vector3& origin, const Vector3& direction, RayCastHit& hitInfo, float maxDistance = MAX_float) const final;
     void ClosestPoint(const Vector3& point, Vector3& result) const final;
     bool ContainsPoint(const Vector3& point) const final;
-
-#if USE_EDITOR
-    virtual void DrawPhysicsDebug(RenderView& view);
-#endif
 
 protected:
     // [PhysicsColliderActor]
@@ -181,4 +184,9 @@ protected:
     void OnLayerChanged() override;
     void OnStaticFlagsChanged() override;
     void OnPhysicsSceneChanged(PhysicsScene* previous) override;
+
+    // [IAssetReference]
+    void OnAssetChanged(Asset* asset, void* caller) override;
+    void OnAssetLoaded(Asset* asset, void* caller) override;
+    void OnAssetUnloaded(Asset* asset, void* caller) override;
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ParticlesSimulation.h"
 #include "ParticleSystem.h"
@@ -156,7 +156,7 @@ void ParticleSystemInstance::Sync(ParticleSystem* system)
         if (GPUParticlesCountReadback)
             GPUParticlesCountReadback->ReleaseGPU();
     }
-    ASSERT(Emitters.Count() == system->Emitters.Count());
+    CHECK(Emitters.Count() == system->Emitters.Count());
 }
 
 bool ParticleSystemInstance::ContainsEmitter(ParticleEmitter* emitter) const

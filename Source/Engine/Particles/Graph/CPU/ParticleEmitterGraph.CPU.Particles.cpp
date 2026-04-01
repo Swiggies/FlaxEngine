@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "ParticleEmitterGraph.CPU.h"
 #include "Engine/Particles/ParticleEmitter.h"
@@ -159,6 +159,13 @@ void ParticleEmitterGraphCPUExecutor::ProcessGroupTextures(Box* box, Node* node,
     case 14:
     {
         // Not supported
+        value = Value::Zero;
+        break;
+    }
+    // Texture Size
+    case 24:
+    {
+        // TODO: support sampling textures in CPU particles
         value = Value::Zero;
         break;
     }
@@ -475,9 +482,15 @@ void ParticleEmitterGraphCPUExecutor::ProcessGroupFunction(Box* box, Node* node,
     // Function Input
     case 1:
     {
+        // Skip when graph is too small (eg. preview) and fallback with default value from the function graph
+        if (context.GraphStack.Count() < 2)
+        {
+            value = tryGetValue(node->TryGetBox(1), Value::Zero);
+            break;
+        }
+
         // Find the function call
         Node* functionCallNode = nullptr;
-        ASSERT(context.GraphStack.Count() >= 2);
         ParticleEmitterGraphCPU* graph;
         for (int32 i = context.CallStackSize - 1; i >= 0; i--)
         {

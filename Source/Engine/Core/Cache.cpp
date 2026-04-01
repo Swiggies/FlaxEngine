@@ -1,9 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Cache.h"
 #include "FlaxEngine.Gen.h"
 
-CollectionPoolCache<ISerializeModifier, Cache::ISerializeModifierClearCallback> Cache::ISerializeModifier;
+Cache::ISerializeModifierCache Cache::ISerializeModifier;
 
 void Cache::ISerializeModifierClearCallback(::ISerializeModifier* obj)
 {

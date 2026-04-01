@@ -1,11 +1,10 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Material.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Types/DataContainer.h"
 #include "Engine/Content/Upgraders/ShaderAssetUpgrader.h"
 #include "Engine/Content/Factories/BinaryAssetFactory.h"
-#include "Engine/Graphics/GPUDevice.h"
 #include "Engine/Graphics/RenderTools.h"
 #include "Engine/Graphics/Materials/MaterialShader.h"
 #include "Engine/Graphics/Shaders/Cache/ShaderCacheManager.h"
@@ -40,6 +39,35 @@ bool Material::IsMaterialInstance() const
 {
     return false;
 }
+
+#if USE_EDITOR
+
+void Material::GetReferences(Array<Guid>& assets, Array<String>& files) const
+{
+    ShaderAssetTypeBase<MaterialBase>::GetReferences(assets, files);
+
+    // Collect references from material graph (needs to load it)
+    if (!WaitForLoaded() && HasChunk(SHADER_FILE_CHUNK_VISJECT_SURFACE))
+    {
+        ScopeLock lock(Locker);
+        if (!LoadChunks(GET_CHUNK_FLAG(SHADER_FILE_CHUNK_VISJECT_SURFACE)))
+        {
+            const auto surfaceChunk = GetChunk(SHADER_FILE_CHUNK_VISJECT_SURFACE);
+            if (surfaceChunk)
+            {
+                MemoryReadStream stream(surfaceChunk->Get(), surfaceChunk->Size());
+                MaterialGraph graph;
+                if (!graph.Load(&stream, false))
+                {
+                    graph.GetReferences(assets);
+                }
+            }
+        }
+    }
+
+}
+
+#endif
 
 const MaterialInfo& Material::GetInfo() const
 {
@@ -127,46 +155,8 @@ Asset::LoadResult Material::load()
     FlaxChunk* materialParamsChunk;
 
     // Wait for the GPU Device to be ready (eg. case when loading material before GPU init)
-#define IS_GPU_NOT_READY() (GPUDevice::Instance == nullptr || GPUDevice::Instance->GetState() != GPUDevice::DeviceState::Ready)
-    if (!IsInMainThread() && IS_GPU_NOT_READY())
-    {
-        int32 timeout = 1000;
-        while (IS_GPU_NOT_READY() && timeout-- > 0)
-            Platform::Sleep(1);
-        if (IS_GPU_NOT_READY())
-            return LoadResult::InvalidData;
-    }
-#undef IS_GPU_NOT_READY
-
-    // Special case for Null renderer
-    if (IsNullRenderer())
-    {
-        // Hack loading
-        MemoryReadStream shaderCacheStream(nullptr, 0);
-        _materialShader = MaterialShader::CreateDummy(shaderCacheStream, _shaderHeader.Material.Info);
-        if (_materialShader == nullptr)
-        {
-            LOG(Warning, "Cannot load material.");
-            return LoadResult::Failed;
-        }
-        materialParamsChunk = GetChunk(SHADER_FILE_CHUNK_MATERIAL_PARAMS);
-        if (materialParamsChunk != nullptr && materialParamsChunk->IsLoaded())
-        {
-            MemoryReadStream materialParamsStream(materialParamsChunk->Get(), materialParamsChunk->Size());
-            if (Params.Load(&materialParamsStream))
-            {
-                LOG(Warning, "Cannot load material parameters.");
-                return LoadResult::Failed;
-            }
-        }
-        else
-        {
-            // Don't use parameters
-            Params.Dispose();
-        }
-        ParamsChanged();
-        return LoadResult::Ok;
-    }
+    if (WaitForInitGraphics())
+        return LoadResult::CannotLoadData;
 
     // If engine was compiled with shaders compiling service:
     // - Material should be changed in need to convert it to the newer version (via Visject Surface)
@@ -191,12 +181,17 @@ Asset::LoadResult Material::load()
         auto lock = Storage->Lock();
 
         // Prepare
+        const String name = ToString();
         MaterialGenerator generator;
         generator.Error.Bind(&OnGeneratorError);
         if (_shaderHeader.Material.GraphVersion != MATERIAL_GRAPH_VERSION)
-            LOG(Info, "Converting material \'{0}\', from version {1} to {2}...", ToString(), _shaderHeader.Material.GraphVersion, MATERIAL_GRAPH_VERSION);
+        {
+            LOG(Info, "Converting material \'{0}\', from version {1} to {2}...", name, _shaderHeader.Material.GraphVersion, MATERIAL_GRAPH_VERSION);
+        }
         else
-            LOG(Info, "Updating material \'{0}\'...", ToString());
+        {
+            LOG(Info, "Updating material \'{0}\'...", name);
+        }
 
         // Load or create material surface
         MaterialLayer* layer;
@@ -205,7 +200,7 @@ Asset::LoadResult Material::load()
             // Load graph
             if (LoadChunks(GET_CHUNK_FLAG(SHADER_FILE_CHUNK_VISJECT_SURFACE)))
             {
-                LOG(Warning, "Cannot load \'{0}\' data from chunk {1}.", ToString(), SHADER_FILE_CHUNK_VISJECT_SURFACE);
+                LOG(Warning, "Cannot load \'{0}\' data from chunk {1}.", name, SHADER_FILE_CHUNK_VISJECT_SURFACE);
                 return LoadResult::Failed;
             }
 
@@ -214,7 +209,58 @@ Asset::LoadResult Material::load()
             MemoryReadStream stream(surfaceChunk->Get(), surfaceChunk->Size());
 
             // Load layer
-            layer = MaterialLayer::Load(GetID(), &stream, _shaderHeader.Material.Info, ToString());
+            layer = MaterialLayer::Load(GetID(), &stream, _shaderHeader.Material.Info, name);
+            const bool upgradeOldSpecular = _shaderHeader.Material.GraphVersion < 177;
+            if (ContentDeprecated::Clear() || upgradeOldSpecular)
+            {
+                // If encountered any deprecated data when loading graph then serialize it
+                MaterialGraph graph;
+                MemoryWriteStream writeStream(1024);
+                stream.SetPosition(0);
+                if (!graph.Load(&stream, true))
+                {
+                    if (upgradeOldSpecular)
+                    {
+                        // [Deprecated in 1.11]
+                        // Specular calculations were changed to support up to 16% of reflectance via ^2 curve instead of linear up to 8%
+                        // Insert Custom Code node that converts old materials into a new system to ensure they look the same
+                        MaterialGraph::Node* rootNode = nullptr;
+                        for (auto& e : graph.Nodes)
+                        {
+                            if (e.Type == ROOT_NODE_TYPE)
+                            {
+                                rootNode = &e;
+                                break;
+                            }
+                        }
+                        const auto& specularBoxInfo = MaterialGenerator::GetMaterialRootNodeBox(MaterialGraphBoxes::Specular);
+                        auto specularBox = rootNode ? rootNode->GetBox(specularBoxInfo.ID) : nullptr;
+                        if (specularBox && specularBox->HasConnection())
+                        {
+                            auto& customCodeNode = graph.Nodes.AddOne();
+                            customCodeNode.ID = graph.Nodes.Count() + 1000;
+                            customCodeNode.Type = GRAPH_NODE_MAKE_TYPE(1, 8);
+                            customCodeNode.Boxes.Resize(2);
+                            customCodeNode.Boxes[0] = MaterialGraphBox(&customCodeNode, 0, VariantType::Float4); // Input0
+                            customCodeNode.Boxes[1] = MaterialGraphBox(&customCodeNode, 8, VariantType::Float4); // Output0
+                            customCodeNode.Values.Resize(1);
+                            customCodeNode.Values[0] = TEXT("// Convert old Specular value to a new range\nOutput0.x = min(Input0.x * 0.5f, 0.6f);");
+                            auto specularSourceBox = specularBox->Connections[0];
+                            specularBox->Connections.Clear();
+                            specularSourceBox->Connections.Clear();
+#define CONNECT(boxA, boxB) boxA->Connections.Add(boxB); boxB->Connections.Add(boxA)
+                            CONNECT(specularSourceBox, (&customCodeNode.Boxes[0])); // Specular -> Input0
+                            CONNECT((&customCodeNode.Boxes[1]), specularBox); // Output0 -> Specular
+#undef CONNECT
+                        }
+                    }
+                    if (!graph.Save(&writeStream, true))
+                    {
+                        surfaceChunk->Data.Copy(ToSpan(writeStream));
+                        ContentDeprecated::Clear();
+                    }
+                }
+            }
         }
         else
         {
@@ -229,7 +275,7 @@ Asset::LoadResult Material::load()
             // Save layer to the chunk data
             MemoryWriteStream stream(512);
             layer->Graph.Save(&stream, false);
-            surfaceChunk->Data.Copy(stream.GetHandle(), stream.GetPosition());
+            surfaceChunk->Data.Copy(ToSpan(stream));
         }
         generator.AddLayer(layer);
 
@@ -245,7 +291,7 @@ Asset::LoadResult Material::load()
         MaterialInfo info = _shaderHeader.Material.Info;
         if (generator.Generate(source, info, materialParamsChunk->Data))
         {
-            LOG(Error, "Cannot generate material source code for \'{0}\'. Please see log for more info.", ToString());
+            LOG(Error, "Cannot generate material source code for \'{0}\'. Please see log for more info.", name);
             return LoadResult::Failed;
         }
 
@@ -282,9 +328,9 @@ Asset::LoadResult Material::load()
 
         // Save to file
 #if USE_EDITOR
-        if (Save())
+        if (SaveShaderAsset())
         {
-            LOG(Error, "Cannot save \'{0}\'", ToString());
+            LOG(Error, "Cannot save \'{0}\'", name);
             return LoadResult::Failed;
         }
 #endif
@@ -307,7 +353,12 @@ Asset::LoadResult Material::load()
 
     // Load shader cache (it may call compilation or gather cached data)
     ShaderCacheResult shaderCache;
-    if (LoadShaderCache(shaderCache))
+    if (IsNullRenderer())
+    {
+        MemoryReadStream shaderCacheStream(nullptr, 0);
+        _materialShader = MaterialShader::CreateDummy(shaderCacheStream, _shaderHeader.Material.Info);
+    }
+    else if (LoadShaderCache(shaderCache))
     {
         LOG(Error, "Cannot load \'{0}\' shader cache.", ToString());
 #if 1
@@ -422,16 +473,18 @@ void Material::InitCompilationOptions(ShaderCompilationOptions& options)
     // Prepare
     auto& info = _shaderHeader.Material.Info;
     const bool isSurfaceOrTerrainOrDeformable = info.Domain == MaterialDomain::Surface || info.Domain == MaterialDomain::Terrain || info.Domain == MaterialDomain::Deformable;
+    const bool isOpaque = info.BlendMode == MaterialBlendMode::Opaque;
     const bool useCustomData = info.ShadingModel == MaterialShadingModel::Subsurface || info.ShadingModel == MaterialShadingModel::Foliage;
-    const bool useForward = ((info.Domain == MaterialDomain::Surface || info.Domain == MaterialDomain::Deformable) && info.BlendMode != MaterialBlendMode::Opaque) || info.Domain == MaterialDomain::Particle;
+    const bool useForward = ((info.Domain == MaterialDomain::Surface || info.Domain == MaterialDomain::Deformable) && !isOpaque) || info.Domain == MaterialDomain::Particle;
     const bool useTess =
             info.TessellationMode != TessellationMethod::None &&
             RenderTools::CanSupportTessellation(options.Profile) && isSurfaceOrTerrainOrDeformable;
     const bool useDistortion =
             (info.Domain == MaterialDomain::Surface || info.Domain == MaterialDomain::Deformable || info.Domain == MaterialDomain::Particle) &&
-            info.BlendMode != MaterialBlendMode::Opaque &&
+            !isOpaque &&
             EnumHasAnyFlags(info.UsageFlags, MaterialUsageFlags::UseRefraction) &&
             (info.FeaturesFlags & MaterialFeaturesFlags::DisableDistortion) == MaterialFeaturesFlags::None;
+    const MaterialShadingModel shadingModel = info.ShadingModel == MaterialShadingModel::CustomLit ? MaterialShadingModel::Unlit : info.ShadingModel;
 
     // @formatter:off
     static const char* Numbers[] =
@@ -443,7 +496,7 @@ void Material::InitCompilationOptions(ShaderCompilationOptions& options)
     // Setup shader macros
     options.Macros.Add({ "MATERIAL_DOMAIN", Numbers[(int32)info.Domain] });
     options.Macros.Add({ "MATERIAL_BLEND", Numbers[(int32)info.BlendMode] });
-    options.Macros.Add({ "MATERIAL_SHADING_MODEL", Numbers[(int32)info.ShadingModel] });
+    options.Macros.Add({ "MATERIAL_SHADING_MODEL", Numbers[(int32)shadingModel] });
     options.Macros.Add({ "MATERIAL_MASKED", Numbers[EnumHasAnyFlags(info.UsageFlags, MaterialUsageFlags::UseMask) ? 1 : 0] });
     options.Macros.Add({ "DECAL_BLEND_MODE", Numbers[(int32)info.DecalBlendingMode] });
     options.Macros.Add({ "USE_EMISSIVE", Numbers[EnumHasAnyFlags(info.UsageFlags, MaterialUsageFlags::UseEmissive) ? 1 : 0] });
@@ -500,9 +553,28 @@ void Material::InitCompilationOptions(ShaderCompilationOptions& options)
     options.Macros.Add({ "IS_PARTICLE", Numbers[info.Domain == MaterialDomain::Particle ? 1 : 0] });
     options.Macros.Add({ "IS_DEFORMABLE", Numbers[info.Domain == MaterialDomain::Deformable ? 1 : 0] });
     options.Macros.Add({ "USE_FORWARD", Numbers[useForward ? 1 : 0] });
-    options.Macros.Add({ "USE_DEFERRED", Numbers[isSurfaceOrTerrainOrDeformable && info.BlendMode == MaterialBlendMode::Opaque ? 1 : 0] });
+    options.Macros.Add({ "USE_DEFERRED", Numbers[isSurfaceOrTerrainOrDeformable && isOpaque ? 1 : 0] });
     options.Macros.Add({ "USE_DISTORTION", Numbers[useDistortion ? 1 : 0] });
 #endif
+}
+
+bool Material::Save(const StringView& path)
+{
+    if (OnCheckSave(path))
+        return true;
+    ScopeLock lock(Locker);
+    BytesContainer existingData = LoadSurface(true);
+    if (existingData.IsInvalid())
+        return true;
+    MaterialGraph graph;
+    MemoryWriteStream writeStream(existingData.Length());
+    MemoryReadStream readStream(existingData);
+    if (graph.Load(&readStream, true) || graph.Save(&writeStream, true))
+        return true;
+    BytesContainer data;
+    data.Link(ToSpan(writeStream));
+    auto materialInfo = _shaderHeader.Material.Info;
+    return SaveSurface(data, materialInfo);
 }
 
 #endif
@@ -542,7 +614,7 @@ BytesContainer Material::LoadSurface(bool createDefaultIfMissing)
         layer->Graph.Save(&stream, false);
 
         // Set output data
-        result.Copy(stream.GetHandle(), stream.GetPosition());
+        result.Copy(ToSpan(stream));
         return result;
     }
 
@@ -555,17 +627,8 @@ BytesContainer Material::LoadSurface(bool createDefaultIfMissing)
 
 bool Material::SaveSurface(const BytesContainer& data, const MaterialInfo& info)
 {
-    // Wait for asset to be loaded or don't if last load failed (eg. by shader source compilation error)
-    if (LastLoadFailed())
-    {
-        LOG(Warning, "Saving asset that failed to load.");
-    }
-    else if (WaitForLoaded())
-    {
-        LOG(Error, "Asset loading failed. Cannot save it.");
+    if (OnCheckSave())
         return true;
-    }
-
     ScopeLock lock(Locker);
 
     // Release all chunks
@@ -582,7 +645,7 @@ bool Material::SaveSurface(const BytesContainer& data, const MaterialInfo& info)
     ASSERT(visjectSurfaceChunk != nullptr);
     visjectSurfaceChunk->Data.Copy(data);
 
-    if (Save())
+    if (SaveShaderAsset())
     {
         LOG(Error, "Cannot save \'{0}\'", ToString());
         return true;

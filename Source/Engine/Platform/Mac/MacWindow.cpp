@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_MAC
 
@@ -714,6 +714,11 @@ MacWindow::MacWindow(const CreateWindowSettings& settings)
     {
         styleMask |= NSWindowStyleMaskTitled;
         styleMask &= ~NSWindowStyleMaskFullSizeContentView;
+    }
+    else
+    {
+        styleMask |= NSWindowStyleMaskBorderless;
+        styleMask &= ~NSWindowStyleMaskTitled;
     }
 
     const float screenScale = MacPlatform::ScreenScale;

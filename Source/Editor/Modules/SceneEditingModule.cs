@@ -1,10 +1,11 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using FlaxEditor.Actions;
 using FlaxEditor.SceneGraph;
+using FlaxEditor.SceneGraph.Actors;
 using FlaxEngine;
 
 namespace FlaxEditor.Modules
@@ -228,7 +229,7 @@ namespace FlaxEditor.Modules
             if (!isPlayMode && options.General.AutoRebuildNavMesh && actor.Scene && node.AffectsNavigationWithChildren)
             {
                 var bounds = actor.BoxWithChildren;
-                Navigation.BuildNavMesh(actor.Scene, bounds, options.General.AutoRebuildNavMeshTimeoutMs);
+                Navigation.BuildNavMesh(bounds, options.General.AutoRebuildNavMeshTimeoutMs);
             }
         }
 
@@ -310,8 +311,9 @@ namespace FlaxEditor.Modules
         /// </summary>
         /// <param name="actor">The actor.</param>
         /// <param name="parent">The parent actor. Set null as default.</param>
+        /// <param name="orderInParent">The order under the parent to put the spawned actor.</param>
         /// <param name="autoSelect">True if automatically select the spawned actor, otherwise false.</param>
-        public void Spawn(Actor actor, Actor parent = null, bool autoSelect = true)
+        public void Spawn(Actor actor, Actor parent = null, int orderInParent = -1, bool autoSelect = true)
         {
             bool isPlayMode = Editor.StateMachine.IsPlayMode;
 
@@ -320,17 +322,21 @@ namespace FlaxEditor.Modules
 
             SpawnBegin?.Invoke();
 
+            // During play in editor mode spawned actors should be dynamic (user can move them)
+            if (isPlayMode)
+                actor.StaticFlags = StaticFlags.None;
+
             // Add it
             Level.SpawnActor(actor, parent);
+
+            // Set order if given
+            if (orderInParent != -1)
+                actor.OrderInParent = orderInParent;
 
             // Peek spawned node
             var actorNode = Editor.Instance.Scene.GetActorNode(actor);
             if (actorNode == null)
                 throw new InvalidOperationException("Failed to create scene node for the spawned actor.");
-
-            // During play in editor mode spawned actors should be dynamic (user can move them)
-            if (isPlayMode)
-                actor.StaticFlags = StaticFlags.None;
 
             // Call post spawn action (can possibly setup custom default values)
             actorNode.PostSpawn();
@@ -556,7 +562,8 @@ namespace FlaxEditor.Modules
         public void CreateParentForSelectedActors()
         {
             List<SceneGraphNode> selection = Editor.SceneEditing.Selection;
-            var actors = selection.Where(x => x is ActorNode).Select(x => ((ActorNode)x).Actor);
+            // Get Actors but skip scene node
+            var actors = selection.Where(x => x is ActorNode and not SceneNode).Select(x => ((ActorNode)x).Actor);
             var actorsCount = actors.Count();
             if (actorsCount == 0)
                 return;
@@ -568,7 +575,7 @@ namespace FlaxEditor.Modules
             {
                 Position = center,
             };
-            Editor.SceneEditing.Spawn(parent, null, false);
+            Editor.SceneEditing.Spawn(parent, null, -1, false);
             using (new UndoMultiBlock(Undo, actors, "Reparent actors"))
             {
                 for (int i = 0; i < selection.Count; i++)
@@ -666,6 +673,7 @@ namespace FlaxEditor.Modules
                 pasteAction.Do(out _, out var nodeParents);
 
                 // Select spawned objects (parents only)
+                newSelection.Clear();
                 newSelection.AddRange(nodeParents);
                 var selectAction = new SelectionChangeAction(Selection.ToArray(), newSelection.ToArray(), OnSelectionUndo);
                 selectAction.Do();
@@ -704,7 +712,11 @@ namespace FlaxEditor.Modules
 
         private void OnActorChildNodesDispose(ActorNode node)
         {
+            if (Selection.Count == 0)
+                return;
+
             // TODO: cache if selection contains any actor child node and skip this loop if no need to iterate
+            // TODO: or build a hash set with selected nodes for quick O(1) checks (cached until selection changes)
 
             // Deselect child nodes
             for (int i = 0; i < node.ChildNodes.Count; i++)

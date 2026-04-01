@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -17,6 +17,34 @@ API_CLASS(Static, Namespace="FlaxEditor") class FLAXENGINE_API ViewportIconsRend
     DECLARE_SCRIPTING_TYPE_NO_SPAWN(ViewportIconsRenderer);
 
 public:
+    /// <summary>
+    /// Global scale of the icons.
+    /// </summary>
+    API_FIELD() static float Scale;
+
+    /// <summary>
+    /// The minimum size of the icons.
+    /// </summary>
+    API_FIELD() static Real MinSize;
+
+    /// <summary>
+    /// The maximum size of the icons.
+    /// </summary>
+    API_FIELD() static Real MaxSize;
+
+    /// <summary>
+    /// The distance to the camera at which the icons will be drawn at their maximum size.
+    /// </summary>
+    API_FIELD() static Real MaxSizeDistance;
+
+    /// <summary>
+    /// Draws the icons for the actors in the given scene (or actor tree).
+    /// </summary>
+    /// <param name="position">The icon position.</param>
+    /// <param name="viewPosition">The viewer position.</param>
+    /// <param name="bounds">The computed bounds for the icon.</param>
+    API_FUNCTION() static void GetBounds(API_PARAM(Ref) const Vector3& position, API_PARAM(Ref) const Vector3& viewPosition, API_PARAM(Out) BoundingSphere& bounds);
+
     /// <summary>
     /// Draws the icons for the actors in the given scene (or actor tree).
     /// </summary>

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "UIControl.h"
 #include "Engine/Scripting/Scripting.h"
@@ -7,6 +7,7 @@
 #include "Engine/Scripting/ManagedCLR/MClass.h"
 #include "Engine/Scripting/ManagedCLR/MCore.h"
 #include "Engine/Serialization/Serialization.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 
 #if COMPILE_WITHOUT_CSHARP
 #define UICONTROL_INVOKE(event)
@@ -22,10 +23,12 @@ MMethod* UIControl_BeginPlay = nullptr;
 MMethod* UIControl_EndPlay = nullptr;
 
 #define UICONTROL_INVOKE(event) \
-	if (HasManagedInstance()) \
+    auto* managed = GetManagedInstance(); \
+    if (managed) \
 	{ \
+        PROFILE_MEM(UI); \
 	    MObject* exception = nullptr; \
-	    UIControl_##event->Invoke(GetManagedInstance(), nullptr, &exception); \
+	    UIControl_##event->Invoke(managed, nullptr, &exception); \
 	    if (exception) \
 	    { \
 		    MException ex(exception); \
@@ -77,6 +80,7 @@ void UIControl::Serialize(SerializeStream& stream, const void* otherObj)
     SERIALIZE_MEMBER(NavTargetRight, _navTargetRight);
 
 #if !COMPILE_WITHOUT_CSHARP
+    PROFILE_MEM(UI);
     void* params[2];
     MString* controlType = nullptr;
     params[0] = &controlType;
@@ -128,6 +132,7 @@ void UIControl::Deserialize(DeserializeStream& stream, ISerializeModifier* modif
     DESERIALIZE_MEMBER(NavTargetRight, _navTargetRight);
 
 #if !COMPILE_WITHOUT_CSHARP
+    PROFILE_MEM(UI);
     MTypeObject* typeObj = nullptr;
     const auto controlMember = stream.FindMember("Control");
     if (controlMember != stream.MemberEnd())

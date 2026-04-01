@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.Content.Settings;
@@ -6,6 +6,7 @@ using FlaxEditor.Scripting;
 using FlaxEditor.Surface.Elements;
 using FlaxEditor.Windows.Assets;
 using FlaxEngine;
+using FlaxEngine.GUI;
 
 namespace FlaxEditor.Surface.Archetypes
 {
@@ -15,6 +16,29 @@ namespace FlaxEditor.Surface.Archetypes
     [HideInEditor]
     public static class Material
     {
+        /// <summary>
+        /// Blend modes (each enum item value maps to box ID).
+        /// </summary>
+        internal enum BlendMode
+        {
+            Normal,
+            Add,
+            Subtract,
+            Multiply,
+            Screen,
+            Overlay,
+            LinearBurn,
+            LinearLight,
+            Darken,
+            Lighten,
+            Difference,
+            Exclusion,
+            Divide,
+            HardLight,
+            PinLight,
+            HardMix
+        };
+
         /// <summary>
         /// Customized <see cref="SurfaceNode"/> for main material node.
         /// </summary>
@@ -100,7 +124,8 @@ namespace FlaxEditor.Surface.Archetypes
                 case MaterialDomain.Particle:
                 case MaterialDomain.Deformable:
                 {
-                    bool isNotUnlit = info.ShadingModel != MaterialShadingModel.Unlit;
+                    bool isNotUnlit = info.ShadingModel != MaterialShadingModel.Unlit && info.ShadingModel != MaterialShadingModel.CustomLit;
+                    bool isOpaque = info.BlendMode == MaterialBlendMode.Opaque;
                     bool withTess = info.TessellationMode != TessellationMethod.None;
 
                     GetBox(MaterialNodeBoxes.Color).IsActive = isNotUnlit;
@@ -111,8 +136,8 @@ namespace FlaxEditor.Surface.Archetypes
                     GetBox(MaterialNodeBoxes.Roughness).IsActive = isNotUnlit;
                     GetBox(MaterialNodeBoxes.AmbientOcclusion).IsActive = isNotUnlit;
                     GetBox(MaterialNodeBoxes.Normal).IsActive = isNotUnlit;
-                    GetBox(MaterialNodeBoxes.Opacity).IsActive = info.ShadingModel == MaterialShadingModel.Subsurface || info.ShadingModel == MaterialShadingModel.Foliage || info.BlendMode != MaterialBlendMode.Opaque;
-                    GetBox(MaterialNodeBoxes.Refraction).IsActive = info.BlendMode != MaterialBlendMode.Opaque;
+                    GetBox(MaterialNodeBoxes.Opacity).IsActive = info.ShadingModel == MaterialShadingModel.Subsurface || info.ShadingModel == MaterialShadingModel.Foliage || !isOpaque;
+                    GetBox(MaterialNodeBoxes.Refraction).IsActive = !isOpaque;
                     GetBox(MaterialNodeBoxes.PositionOffset).IsActive = true;
                     GetBox(MaterialNodeBoxes.TessellationMultiplier).IsActive = withTess;
                     GetBox(MaterialNodeBoxes.WorldDisplacement).IsActive = withTess;
@@ -234,6 +259,93 @@ namespace FlaxEditor.Surface.Archetypes
                 if (function)
                     function.GetSignature(out types, out names);
                 return function;
+            }
+        }
+
+#if false // TODO: finish code editor based on RichTextBoxBase with text block parsing for custom styling
+        internal sealed class CustomCodeTextBox : RichTextBoxBase
+        {
+            protected override void OnParseTextBlocks()
+            {
+                base.OnParseTextBlocks();
+
+                // Single block for a whole text
+                // TODO: implement code parsing with HLSL syntax
+                var font = Style.Current.FontMedium;
+                var style = new TextBlockStyle
+                {
+                    Font = new FontReference(font),
+                    Color = Style.Current.Foreground,
+                    BackgroundSelectedBrush = new SolidColorBrush(Style.Current.BackgroundSelected),
+                };
+                _textBlocks.Clear();
+                _textBlocks.Add(new TextBlock
+                {
+                    Range = new TextRange
+                    {
+                        StartIndex = 0,
+                        EndIndex = TextLength,
+                    },
+                    Style = style,
+                    Bounds = new Rectangle(Float2.Zero, font.MeasureText(Text)),
+                });
+            }
+#else
+        internal sealed class CustomCodeTextBox : TextBox
+        {
+#endif
+            public override void Draw()
+            {
+                base.Draw();
+
+                // Draw border
+                if (!IsFocused)
+                    Render2D.DrawRectangle(new Rectangle(Float2.Zero, Size), Style.Current.BorderNormal);
+            }
+        }
+
+        internal sealed class CustomCodeNode : ResizableSurfaceNode
+        {
+            private CustomCodeTextBox _textBox;
+
+            public CustomCodeNode(uint id, VisjectSurfaceContext context, NodeArchetype nodeArch, GroupArchetype groupArch)
+            : base(id, context, nodeArch, groupArch)
+            {
+                _sizeValueIndex = Archetype.TypeID == 8 ? 1 : 3; // Index of the Size stored in Values array
+                Float2 pos = new Float2(FlaxEditor.Surface.Constants.NodeMarginX, FlaxEditor.Surface.Constants.NodeMarginY + FlaxEditor.Surface.Constants.NodeHeaderSize), size;
+                if (nodeArch.TypeID == 8)
+                {
+                    pos += new Float2(60, 0);
+                    size = new Float2(172, 200);
+                }
+                else
+                {
+                    pos += new Float2(0, 40);
+                    size = new Float2(300, 200);
+                }
+                _textBox = new CustomCodeTextBox
+                {
+                    IsMultiline = true,
+                    Location = pos,
+                    Size = size,
+                    Parent = this,
+                    AnchorMax = Float2.One,
+                };
+                _textBox.EditEnd += () => SetValue(0, _textBox.Text);
+            }
+
+            public override void OnSurfaceLoaded(SurfaceNodeActions action)
+            {
+                base.OnSurfaceLoaded(action);
+
+                _textBox.Text = (string)Values[0];
+            }
+
+            public override void OnValuesChanged()
+            {
+                base.OnValuesChanged();
+
+                _textBox.Text = (string)Values[0];
             }
         }
 
@@ -387,13 +499,15 @@ namespace FlaxEditor.Surface.Archetypes
             new NodeArchetype
             {
                 TypeID = 8,
+                Create = (id, context, arch, groupArch) => new CustomCodeNode(id, context, arch, groupArch),
                 Title = "Custom Code",
                 Description = "Custom HLSL shader code expression",
                 Flags = NodeFlags.MaterialGraph,
                 Size = new Float2(300, 200),
                 DefaultValues = new object[]
                 {
-                    "// Here you can add HLSL code\nOutput0 = Input0;"
+                    "// Here you can add HLSL code\nOutput0 = Input0;",
+                    new Float2(300, 200),
                 },
                 Elements = new[]
                 {
@@ -410,8 +524,6 @@ namespace FlaxEditor.Surface.Archetypes
                     NodeElementArchetype.Factory.Output(1, "Output1", typeof(Float4), 9),
                     NodeElementArchetype.Factory.Output(2, "Output2", typeof(Float4), 10),
                     NodeElementArchetype.Factory.Output(3, "Output3", typeof(Float4), 11),
-
-                    NodeElementArchetype.Factory.TextBox(60, 0, 175, 200, 0),
                 }
             },
             new NodeArchetype
@@ -474,8 +586,9 @@ namespace FlaxEditor.Surface.Archetypes
                 TypeID = 13,
                 Title = "Pre-skinned Local Position",
                 Description = "Per vertex local position (before skinning)",
+                AlternativeTitles = new[] { "Vertex Position", "Pre skinning Local Vertex Position" },
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(230, 40),
+                Size = new Float2(270, 40),
                 Elements = new[]
                 {
                     NodeElementArchetype.Factory.Output(0, string.Empty, typeof(Float3), 0),
@@ -486,8 +599,9 @@ namespace FlaxEditor.Surface.Archetypes
                 TypeID = 14,
                 Title = "Pre-skinned Local Normal",
                 Description = "Per vertex local normal (before skinning)",
+                AlternativeTitles = new[] { "Vertex Normal", "Pre skinning Local Normal" },
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(230, 40),
+                Size = new Float2(270, 40),
                 Elements = new[]
                 {
                     NodeElementArchetype.Factory.Output(0, string.Empty, typeof(Float3), 0),
@@ -511,7 +625,7 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Tangent Vector",
                 Description = "World space tangent vector",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(160, 40),
+                Size = new Float2(160, 30),
                 Elements = new[]
                 {
                     NodeElementArchetype.Factory.Output(0, "Tangent", typeof(Float3), 0),
@@ -523,7 +637,7 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Bitangent Vector",
                 Description = "World space bitangent vector",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(160, 40),
+                Size = new Float2(160, 30),
                 Elements = new[]
                 {
                     NodeElementArchetype.Factory.Output(0, "Bitangent", typeof(Float3), 0),
@@ -535,7 +649,7 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Camera Position",
                 Description = "World space camera location",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(160, 40),
+                Size = new Float2(160, 30),
                 Elements = new[]
                 {
                     NodeElementArchetype.Factory.Output(0, "XYZ", typeof(Float3), 0),
@@ -547,7 +661,7 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Per Instance Random",
                 Description = "Per object instance random value (normalized to range 0-1)",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(200, 40),
+                Size = new Float2(200, 30),
                 Elements = new[]
                 {
                     NodeElementArchetype.Factory.Output(0, "", typeof(float), 0),
@@ -584,14 +698,14 @@ namespace FlaxEditor.Surface.Archetypes
                 Title = "Terrain Layer Weight",
                 Description = "Terrain layer weight mask used for blending terrain layers",
                 Flags = NodeFlags.MaterialGraph,
-                Size = new Float2(220, 30),
+                Size = new Float2(200, 30),
                 DefaultValues = new object[]
                 {
                     0,
                 },
                 Elements = new[]
                 {
-                    NodeElementArchetype.Factory.ComboBox(0, 0, 70.0f, 0, LayersAndTagsSettings.GetCurrentTerrainLayers()),
+                    NodeElementArchetype.Factory.ComboBox(0, 0, 175.0f, 0, LayersAndTagsSettings.GetCurrentTerrainLayers()),
                     NodeElementArchetype.Factory.Output(0, "", typeof(float), 0),
                 }
             },
@@ -851,6 +965,7 @@ namespace FlaxEditor.Surface.Archetypes
             new NodeArchetype
             {
                 TypeID = 38,
+                Create = (id, context, arch, groupArch) => new CustomCodeNode(id, context, arch, groupArch),
                 Title = "Custom Global Code",
                 Description = "Custom global HLSL shader code expression (placed before material shader code). Can contain includes to shader utilities or declare functions to reuse later.",
                 Flags = NodeFlags.MaterialGraph,
@@ -860,6 +975,7 @@ namespace FlaxEditor.Surface.Archetypes
                     "// Here you can add HLSL code\nfloat4 GetCustomColor()\n{\n\treturn float4(1, 0, 0, 1);\n}",
                     true,
                     (int)MaterialTemplateInputsMapping.Utilities,
+                    new Float2(300, 240),
                 },
                 Elements = new[]
                 {
@@ -867,7 +983,6 @@ namespace FlaxEditor.Surface.Archetypes
                     NodeElementArchetype.Factory.Text(20, 0, "Enabled"),
                     NodeElementArchetype.Factory.Text(0, 20, "Location"),
                     NodeElementArchetype.Factory.Enum(50, 20, 120, 2, typeof(MaterialTemplateInputsMapping)),
-                    NodeElementArchetype.Factory.TextBox(0, 40, 300, 200, 0),
                 }
             },
             new NodeArchetype
@@ -1072,6 +1187,49 @@ namespace FlaxEditor.Surface.Archetypes
                     NodeElementArchetype.Factory.Input(3, "Falloff", true, typeof(float), 3, 2),
                     NodeElementArchetype.Factory.Output(0, string.Empty, typeof(Float3), 4),
                 ]
+            },
+            new NodeArchetype
+            {
+                TypeID = 50,
+                Title = "Shift HSV",
+                Description = "Modifies the HSV of a color, values are from -1:1, preserves alpha",
+                Flags = NodeFlags.MaterialGraph,
+                Size = new Float2(175, 80),
+                DefaultValues =
+                [
+                    0.0f,  // For Hue (index 0)
+                    0.0f,  // For Sat (index 1)
+                    0.0f,  // For Val (index 2)
+                ],
+                Elements =
+                [
+                    NodeElementArchetype.Factory.Input(0, "RGBA", true, typeof(Float4), 0),          // No default
+                    NodeElementArchetype.Factory.Input(1, "Hue", true, typeof(float), 1, 0),        // Uses DefaultValues[0]
+                    NodeElementArchetype.Factory.Input(2, "Sat", true, typeof(float), 2, 1),        // Uses DefaultValues[1]
+                    NodeElementArchetype.Factory.Input(3, "Val", true, typeof(float), 3, 2),        // Uses DefaultValues[2]
+                    NodeElementArchetype.Factory.Output(0, "RGBA", typeof(Float4), 4),
+                ]
+            },
+            new NodeArchetype
+            {
+                TypeID = 51,
+                Title = "Color Blend",
+                Description = "Blends two colors using various blend modes. Passes base alpha through.",
+                Flags = NodeFlags.MaterialGraph,
+                Size = new Float2(180, 80),
+                DefaultValues = new object[]
+                {
+                    BlendMode.Normal, // Default blend mode
+                    1.0f,            // Default blend amount
+                },
+                Elements = new[]
+                {
+                    NodeElementArchetype.Factory.Input(1, "Base Color", true, typeof(Float4), 0),
+                    NodeElementArchetype.Factory.Input(2, "Blend Color", true, typeof(Float4), 1),
+                    NodeElementArchetype.Factory.Input(3, "Intensity", true, typeof(float), 2, 1),
+                    NodeElementArchetype.Factory.Enum(0, 0, 120, 0, typeof(BlendMode)), // Blend mode selector
+                    NodeElementArchetype.Factory.Output(0, "Result", typeof(Float4), 3),
+                }
             },
         };
     }

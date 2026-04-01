@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #ifndef __EXPONENTIAL_HEIGHT_FOG__
 #define __EXPONENTIAL_HEIGHT_FOG__
@@ -29,7 +29,7 @@ struct ExponentialHeightFogData
     float StartDistance;
 };
 
-float4 GetExponentialHeightFog(ExponentialHeightFogData exponentialHeightFog, float3 posWS, float3 camWS, float skipDistance)
+float4 GetExponentialHeightFog(ExponentialHeightFogData exponentialHeightFog, float3 posWS, float3 camWS, float skipDistance, float sceneDistance)
 {
     float3 cameraToPos = posWS - camWS;
     float cameraToPosSqr = dot(cameraToPos, cameraToPos);
@@ -78,13 +78,23 @@ float4 GetExponentialHeightFog(ExponentialHeightFogData exponentialHeightFog, fl
 
     // Disable fog after a certain distance
     FLATTEN
-    if (exponentialHeightFog.FogCutoffDistance > 0 && cameraToPosLen > exponentialHeightFog.FogCutoffDistance)
+    if (exponentialHeightFog.FogCutoffDistance > 0 && sceneDistance > exponentialHeightFog.FogCutoffDistance)
     {
         expFogFactor = 1;
         directionalInscattering = 0;
     }
 
     return float4(inscatteringColor * (1.0f - expFogFactor) + directionalInscattering, expFogFactor);
+}
+
+float4 GetExponentialHeightFog(ExponentialHeightFogData exponentialHeightFog, float3 posWS, float3 camWS, float skipDistance)
+{
+    return GetExponentialHeightFog(exponentialHeightFog, posWS, camWS, skipDistance, distance(posWS, camWS));
+}
+
+float4 CombineVolumetricFog(float4 fog, float4 volumetricFog)
+{
+    return float4(volumetricFog.rgb + fog.rgb * volumetricFog.a, volumetricFog.a * fog.a);
 }
 
 #endif

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -8,6 +8,7 @@
 #include "Engine/Graphics/GPUResource.h"
 #include "../IncludeDirectXHeaders.h"
 #include "ResourceOwnerDX12.h"
+#include "UploadBufferDX12.h"
 #include "QueryHeapDX12.h"
 #include "DescriptorHeapDX12.h"
 
@@ -17,16 +18,10 @@
 #define DX12_BACK_BUFFER_COUNT 2
 #endif
 
-#define DX12_ROOT_SIGNATURE_CB 0
-#define DX12_ROOT_SIGNATURE_SR (GPU_MAX_CB_BINDED+0)
-#define DX12_ROOT_SIGNATURE_UA (GPU_MAX_CB_BINDED+1)
-#define DX12_ROOT_SIGNATURE_SAMPLER (GPU_MAX_CB_BINDED+2)
-
 class Engine;
 class WindowsWindow;
 class GPUContextDX12;
 class GPUSwapChainDX12;
-class UploadBufferDX12;
 class CommandQueueDX12;
 class CommandSignatureDX12;
 
@@ -70,11 +65,10 @@ public:
     ~GPUDeviceDX12();
 
 public:
-
     /// <summary>
-    /// Upload buffer for general purpose
+    /// Data uploading utility via pages.
     /// </summary>
-    UploadBufferDX12* UploadBuffer;
+    UploadBufferDX12 UploadBuffer;
 
     /// <summary>
     /// The timestamp queries heap.
@@ -85,6 +79,7 @@ public:
     CommandSignatureDX12* DispatchIndirectCommandSignature = nullptr;
     CommandSignatureDX12* DrawIndexedIndirectCommandSignature = nullptr;
     CommandSignatureDX12* DrawIndirectCommandSignature = nullptr;
+    GPUBuffer* DummyVB = nullptr;
 
     D3D12_CPU_DESCRIPTOR_HANDLE NullSRV(D3D12_SRV_DIMENSION dimension) const;
     D3D12_CPU_DESCRIPTOR_HANDLE NullUAV() const;
@@ -196,6 +191,7 @@ public:
     GPUTimerQuery* CreateTimerQuery() override;
     GPUBuffer* CreateBuffer(const StringView& name) override;
     GPUSampler* CreateSampler() override;
+    GPUVertexLayout* CreateVertexLayout(const VertexElements& elements, bool explicitOffsets) override;
     GPUSwapChain* CreateSwapChain(Window* window) override;
     GPUConstantBuffer* CreateConstantBuffer(uint32 size, const StringView& name) override;
 };
@@ -214,7 +210,7 @@ public:
     /// <param name="device">The graphics device.</param>
     /// <param name="name">The resource name.</param>
     GPUResourceDX12(GPUDeviceDX12* device, const StringView& name)
-        : GPUResourceBase(device, name)
+        : GPUResourceBase<GPUDeviceDX12, BaseType>(device, name)
     {
     }
 };

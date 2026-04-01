@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "EnvironmentProbe.h"
 #include "Engine/Platform/FileSystem.h"
@@ -11,6 +11,7 @@
 #include "Engine/Renderer/ProbesRenderer.h"
 #include "Engine/Renderer/ReflectionsPass.h"
 #include "Engine/Content/Content.h"
+#include "Engine/Content/Deprecated.h"
 #include "Engine/ContentExporters/AssetExporters.h"
 #include "Engine/ContentImporters/AssetsImportingManager.h"
 #include "Engine/Graphics/RenderTools.h"
@@ -40,7 +41,7 @@ float EnvironmentProbe::GetRadius() const
 void EnvironmentProbe::SetRadius(float value)
 {
     value = Math::Max(0.0f, value);
-    if (Math::NearEqual(value, _radius))
+    if (value == _radius)
         return;
 
     _radius = value;
@@ -196,6 +197,7 @@ void EnvironmentProbe::Draw(RenderContext& renderContext)
             data.Position = position;
             data.Radius = radius;
             data.Brightness = Brightness;
+            data.SortOrder = SortOrder;
             data.HashID = GetHash(_id);
             renderContext.List->EnvironmentProbes.Add(data);
         }
@@ -233,6 +235,7 @@ void EnvironmentProbe::Serialize(SerializeStream& stream, const void* otherObj)
     SERIALIZE_MEMBER(Radius, _radius);
     SERIALIZE(CubemapResolution);
     SERIALIZE(Brightness);
+    SERIALIZE(SortOrder);
     SERIALIZE(UpdateMode);
     SERIALIZE(CaptureNearPlane);
     SERIALIZE_MEMBER(IsCustomProbe, _isUsingCustomProbe);
@@ -247,6 +250,7 @@ void EnvironmentProbe::Deserialize(DeserializeStream& stream, ISerializeModifier
     DESERIALIZE_MEMBER(Radius, _radius);
     DESERIALIZE(CubemapResolution);
     DESERIALIZE(Brightness);
+    DESERIALIZE(SortOrder);
     DESERIALIZE(UpdateMode);
     DESERIALIZE(CaptureNearPlane);
     DESERIALIZE_MEMBER(IsCustomProbe, _isUsingCustomProbe);
@@ -255,6 +259,7 @@ void EnvironmentProbe::Deserialize(DeserializeStream& stream, ISerializeModifier
     // [Deprecated on 18.07.2022, expires on 18.07.2022]
     if (modifier->EngineBuild <= 6332)
     {
+        MARK_CONTENT_DEPRECATED();
         const auto member = stream.FindMember("AutoUpdate");
         if (member != stream.MemberEnd() && member->value.IsBool() && member->value.GetBool())
             UpdateMode = ProbeUpdateMode::WhenMoved;

@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if GRAPHICS_API_VULKAN
 
@@ -6,6 +6,7 @@
 #include "GPUDeviceVulkan.h"
 #include "CmdBufferVulkan.h"
 #include "RenderToolsVulkan.h"
+#include "Engine/Profiler/ProfilerCPU.h"
 
 QueueVulkan::QueueVulkan(GPUDeviceVulkan* device, uint32 familyIndex)
     : _queue(VK_NULL_HANDLE)
@@ -20,6 +21,7 @@ QueueVulkan::QueueVulkan(GPUDeviceVulkan* device, uint32 familyIndex)
 
 void QueueVulkan::Submit(CmdBufferVulkan* cmdBuffer, uint32 signalSemaphoresCount, const VkSemaphore* signalSemaphores)
 {
+    PROFILE_CPU_NAMED("vkQueueSubmit");
     ASSERT(cmdBuffer->HasEnded());
     auto fence = cmdBuffer->GetFence();
     ASSERT(!fence->IsSignaled);
@@ -60,11 +62,7 @@ void QueueVulkan::Submit(CmdBufferVulkan* cmdBuffer, uint32 signalSemaphoresCoun
 	const bool WaitForIdleOnSubmit = false;
 	if (WaitForIdleOnSubmit)
 	{
-		// Use 200ms timeout
-		bool success = _device->FenceManager.WaitForFence(fence, 200 * 1000 * 1000);
-		ASSERT(success);
-		ASSERT(_device->FenceManager.IsFenceSignaled(fence));
-		cmdBuffer->GetOwner()->RefreshFenceStatus();
+        cmdBuffer->Wait();
 	}
 #endif
 

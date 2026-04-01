@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using FlaxEditor.GUI.ContextMenu;
@@ -18,10 +18,12 @@ namespace FlaxEditor.CustomEditors.Elements
         /// </summary>
         public readonly DropPanel Panel = new DropPanel
         {
+            Pivot = Float2.Zero,
             ArrowImageClosed = new SpriteBrush(Style.Current.ArrowRight),
             ArrowImageOpened = new SpriteBrush(Style.Current.ArrowDown),
             EnableDropDownIcon = true,
-            ItemsMargin = new Margin(7, 7, 3, 3),
+            ItemsMargin = new Margin(Utilities.Constants.UIMargin),
+            ItemsSpacing = Utilities.Constants.UIMargin,
             HeaderHeight = 18.0f,
             EnableContainmentLines = true,
         };
@@ -35,24 +37,35 @@ namespace FlaxEditor.CustomEditors.Elements
         public override ContainerControl ContainerControl => Panel;
 
         /// <summary>
-        /// Adds utility settings button to the group header.
+        /// Add utility settings button to the group header.
         /// </summary>
         /// <returns>The created control.</returns>
         public Image AddSettingsButton()
         {
+            return AddHeaderButton("Settings", 0, Style.Current.Settings);
+        }
+
+        /// <summary>
+        /// Adds a button to the group header.
+        /// </summary>
+        /// <returns>The created control.</returns>
+        public Image AddHeaderButton(string tooltipText, float xOffset, SpriteHandle sprite)
+        {
             var style = Style.Current;
+            const float padding = 2.0f;
             var settingsButtonSize = Panel.HeaderHeight;
-            return new Image
+            Panel.HeaderTextMargin = Panel.HeaderTextMargin with { Right = settingsButtonSize + Utilities.Constants.UIMargin };
+;           return new Image
             {
-                TooltipText = "Settings",
+                TooltipText = tooltipText,
                 AutoFocus = true,
                 AnchorPreset = AnchorPresets.TopRight,
                 Parent = Panel,
-                Bounds = new Rectangle(Panel.Width - settingsButtonSize, 0, settingsButtonSize, settingsButtonSize),
+                Bounds = new Rectangle(Panel.Width - settingsButtonSize - xOffset, padding * 0.5f, settingsButtonSize - padding, settingsButtonSize - padding),
                 IsScrollable = false,
                 Color = style.ForegroundGrey,
                 Margin = new Margin(1),
-                Brush = new SpriteBrush(style.Settings),
+                Brush = new SpriteBrush(sprite),
             };
         }
     }

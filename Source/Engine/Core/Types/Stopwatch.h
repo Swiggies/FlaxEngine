@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -43,7 +43,7 @@ public:
     /// <summary>
     /// Gets the total number of milliseconds.
     /// </summary>
-    FORCE_INLINE double GetTotalMilliseconds() const
+    FORCE_INLINE float GetTotalMilliseconds() const
     {
         return (float)((_end - _start) * 1000.0);
     }

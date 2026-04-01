@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -51,6 +51,7 @@ namespace FlaxEditor.SceneGraph
             CustomNodesTypes.Add(typeof(AudioSource), typeof(AudioSourceNode));
             CustomNodesTypes.Add(typeof(BoneSocket), typeof(BoneSocketNode));
             CustomNodesTypes.Add(typeof(Decal), typeof(DecalNode));
+            CustomNodesTypes.Add(typeof(Cloth), typeof(ClothNode));
             CustomNodesTypes.Add(typeof(BoxCollider), typeof(BoxColliderNode));
             CustomNodesTypes.Add(typeof(SphereCollider), typeof(ColliderNode));
             CustomNodesTypes.Add(typeof(CapsuleCollider), typeof(ColliderNode));
@@ -73,6 +74,7 @@ namespace FlaxEditor.SceneGraph
             CustomNodesTypes.Add(typeof(NavMesh), typeof(ActorNode));
             CustomNodesTypes.Add(typeof(SpriteRender), typeof(SpriteRenderNode));
             CustomNodesTypes.Add(typeof(Joint), typeof(JointNode));
+            CustomNodesTypes.Add(typeof(RigidBody), typeof(RigidBodyNode));
         }
 
         /// <summary>

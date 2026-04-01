@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 //#define DEBUG_INVOKE_METHODS_SEARCHING
 //#define DEBUG_FIELDS_SEARCHING
@@ -62,6 +62,12 @@ namespace FlaxEditor.Surface
         {
             _supportsImplicitCastFromObjectToBoolean = true;
             DragHandlers.Add(_dragActors = new DragActors(ValidateDragActor));
+            ScriptsBuilder.ScriptsReloadBegin += OnScriptsReloadBegin;
+        }
+
+        private void OnScriptsReloadBegin()
+        {
+            _nodesCache.Clear();
         }
 
         private bool ValidateDragActor(ActorNode actor)
@@ -182,6 +188,9 @@ namespace FlaxEditor.Surface
         public override bool CanSetParameters => true;
 
         /// <inheritdoc />
+        public override bool CanShowPrivateParameters => true;
+
+        /// <inheritdoc />
         public override bool UseContextMenuDescriptionPanel => true;
 
         /// <inheritdoc />
@@ -206,7 +215,7 @@ namespace FlaxEditor.Surface
         }
 
         /// <inheritdoc />
-        protected override void OnShowPrimaryMenu(VisjectCM activeCM, Float2 location, Box startBox)
+        protected override void OnShowPrimaryMenu(VisjectCM activeCM, Float2 location, List<Box> startBoxes)
         {
             // Update nodes for method overrides
             Profiler.BeginEvent("Overrides");
@@ -262,7 +271,7 @@ namespace FlaxEditor.Surface
             // Update nodes for invoke methods (async)
             _nodesCache.Get(activeCM);
 
-            base.OnShowPrimaryMenu(activeCM, location, startBox);
+            base.OnShowPrimaryMenu(activeCM, location, startBoxes);
 
             activeCM.VisibleChanged += OnActiveContextMenuVisibleChanged;
         }
@@ -631,6 +640,7 @@ namespace FlaxEditor.Surface
         {
             if (IsDisposing)
                 return;
+            ScriptsBuilder.ScriptsReloadBegin -= OnScriptsReloadBegin;
             _nodesCache.Wait();
 
             base.OnDestroy();

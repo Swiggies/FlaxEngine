@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -45,6 +45,10 @@ public:
     {
         __sync_synchronize();
     }
+    FORCE_INLINE static void MemoryPrefetch(void const* ptr)
+    {
+        __builtin_prefetch(static_cast<char const*>(ptr));
+    }
     FORCE_INLINE static int64 InterlockedExchange(int64 volatile* dst, int64 exchange)
     {
         return __sync_lock_test_and_set(dst, exchange);
@@ -89,13 +93,10 @@ public:
     {
         __atomic_store(dst, &value, __ATOMIC_SEQ_CST);
     }
-    FORCE_INLINE static void Prefetch(void const* ptr)
-    {
-        __builtin_prefetch(static_cast<char const*>(ptr));
-    }
     static bool Is64BitPlatform();
+    static String GetSystemName();
+    static Version GetSystemVersion();
     static CPUInfo GetCPUInfo();
-    static int32 GetCacheLineSize();
     static MemoryStats GetMemoryStats();
     static ProcessMemoryStats GetProcessMemoryStats();
     static uint64 GetCurrentThreadID()
@@ -105,6 +106,7 @@ public:
     static void SetThreadPriority(ThreadPriority priority);
     static void SetThreadAffinityMask(uint64 affinityMask);
     static void Sleep(int32 milliseconds);
+    static void Yield();
     static double GetTimeSeconds();
     static uint64 GetTimeCycles();
     FORCE_INLINE static uint64 GetClockFrequency()

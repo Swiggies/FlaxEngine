@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #pragma once
 
@@ -59,7 +59,7 @@ API_STRUCT() struct HingeJointDrive
 public:
     bool operator==(const HingeJointDrive& other) const
     {
-        return Math::NearEqual(Velocity, other.Velocity) && Math::NearEqual(ForceLimit, other.ForceLimit) && Math::NearEqual(GearRatio, other.GearRatio) && FreeSpin == other.FreeSpin;
+        return Velocity == other.Velocity && ForceLimit == other.ForceLimit && GearRatio == other.GearRatio && FreeSpin == other.FreeSpin;
     }
 };
 

@@ -1,19 +1,46 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #include "Asset.h"
 #include "Content.h"
+#include "Deprecated.h"
 #include "SoftAssetReference.h"
 #include "Cache/AssetsCache.h"
-#include "Loading/ContentLoadingManager.h"
 #include "Loading/Tasks/LoadAssetTask.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/LogContext.h"
-#include "Engine/Engine/Engine.h"
-#include "Engine/Threading/Threading.h"
+#include "Engine/Graphics/GPUDevice.h"
+#include "Engine/Physics/Physics.h"
 #include "Engine/Profiler/ProfilerCPU.h"
-#include "Engine/Threading/MainThreadTask.h"
-#include "Engine/Threading/ConcurrentTaskQueue.h"
+#include "Engine/Profiler/ProfilerMemory.h"
 #include "Engine/Scripting/ManagedCLR/MCore.h"
+#include "Engine/Threading/MainThreadTask.h"
+#include "Engine/Threading/ThreadLocal.h"
+
+#if USE_EDITOR
+
+#include "Engine/Engine/Globals.h"
+
+ThreadLocal<bool> ContentDeprecatedFlags;
+
+void ContentDeprecated::Mark()
+{
+    ContentDeprecatedFlags.Set(true);
+}
+
+bool ContentDeprecated::Clear(bool newValue)
+{
+    auto& flag = ContentDeprecatedFlags.Get();
+    bool result = flag;
+    flag = newValue;
+    return result;
+}
+
+#endif
+
+AssetReferenceBase::AssetReferenceBase(IAssetReference* owner)
+    : _owner(owner)
+{
+}
 
 AssetReferenceBase::~AssetReferenceBase()
 {
@@ -21,9 +48,7 @@ AssetReferenceBase::~AssetReferenceBase()
     if (asset)
     {
         _asset = nullptr;
-        asset->OnLoaded.Unbind<AssetReferenceBase, &AssetReferenceBase::OnLoaded>(this);
-        asset->OnUnloaded.Unbind<AssetReferenceBase, &AssetReferenceBase::OnUnloaded>(this);
-        asset->RemoveReference();
+        asset->RemoveReference(this);
     }
 }
 
@@ -32,43 +57,51 @@ String AssetReferenceBase::ToString() const
     return _asset ? _asset->ToString() : TEXT("<null>");
 }
 
+void AssetReferenceBase::OnAssetChanged(Asset* asset, void* caller)
+{
+    if (_owner)
+        _owner->OnAssetChanged(asset, this);
+}
+
+void AssetReferenceBase::OnAssetLoaded(Asset* asset, void* caller)
+{
+    if (_asset != asset)
+        return;
+    Loaded();
+    if (_owner)
+        _owner->OnAssetLoaded(asset, this);
+}
+
+void AssetReferenceBase::OnAssetUnloaded(Asset* asset, void* caller)
+{
+    if (_asset != asset)
+        return;
+    Unload();
+    OnSet(nullptr);
+    if (_owner)
+        _owner->OnAssetUnloaded(asset, this);
+}
+
 void AssetReferenceBase::OnSet(Asset* asset)
 {
     auto e = _asset;
     if (e != asset)
     {
         if (e)
-        {
-            e->OnLoaded.Unbind<AssetReferenceBase, &AssetReferenceBase::OnLoaded>(this);
-            e->OnUnloaded.Unbind<AssetReferenceBase, &AssetReferenceBase::OnUnloaded>(this);
-            e->RemoveReference();
-        }
+            e->RemoveReference(this);
         _asset = e = asset;
         if (e)
-        {
-            e->AddReference();
-            e->OnLoaded.Bind<AssetReferenceBase, &AssetReferenceBase::OnLoaded>(this);
-            e->OnUnloaded.Bind<AssetReferenceBase, &AssetReferenceBase::OnUnloaded>(this);
-        }
+            e->AddReference(this);
         Changed();
+        if (_owner)
+            _owner->OnAssetChanged(asset, this);
         if (e && e->IsLoaded())
+        {
             Loaded();
+            if (_owner)
+                _owner->OnAssetLoaded(asset, this);
+        }
     }
-}
-
-void AssetReferenceBase::OnLoaded(Asset* asset)
-{
-    if (_asset != asset)
-        return;
-    Loaded();
-}
-
-void AssetReferenceBase::OnUnloaded(Asset* asset)
-{
-    if (_asset != asset)
-        return;
-    Unload();
-    OnSet(nullptr);
 }
 
 WeakAssetReferenceBase::~WeakAssetReferenceBase()
@@ -77,7 +110,7 @@ WeakAssetReferenceBase::~WeakAssetReferenceBase()
     if (asset)
     {
         _asset = nullptr;
-        asset->OnUnloaded.Unbind<WeakAssetReferenceBase, &WeakAssetReferenceBase::OnUnloaded>(this);
+        asset->RemoveReference(this, true);
     }
 }
 
@@ -86,26 +119,34 @@ String WeakAssetReferenceBase::ToString() const
     return _asset ? _asset->ToString() : TEXT("<null>");
 }
 
+void WeakAssetReferenceBase::OnAssetChanged(Asset* asset, void* caller)
+{
+}
+
+void WeakAssetReferenceBase::OnAssetLoaded(Asset* asset, void* caller)
+{
+}
+
+void WeakAssetReferenceBase::OnAssetUnloaded(Asset* asset, void* caller)
+{
+    if (_asset != asset)
+        return;
+    Unload();
+    asset->RemoveReference(this, true);
+    _asset = nullptr;
+}
+
 void WeakAssetReferenceBase::OnSet(Asset* asset)
 {
     auto e = _asset;
     if (e != asset)
     {
         if (e)
-            e->OnUnloaded.Unbind<WeakAssetReferenceBase, &WeakAssetReferenceBase::OnUnloaded>(this);
+            e->RemoveReference(this, true);
         _asset = e = asset;
         if (e)
-            e->OnUnloaded.Bind<WeakAssetReferenceBase, &WeakAssetReferenceBase::OnUnloaded>(this);
+            e->AddReference(this, true);
     }
-}
-
-void WeakAssetReferenceBase::OnUnloaded(Asset* asset)
-{
-    if (_asset != asset)
-        return;
-    Unload();
-    asset->OnUnloaded.Unbind<WeakAssetReferenceBase, &WeakAssetReferenceBase::OnUnloaded>(this);
-    _asset = nullptr;
 }
 
 SoftAssetReferenceBase::~SoftAssetReferenceBase()
@@ -114,8 +155,7 @@ SoftAssetReferenceBase::~SoftAssetReferenceBase()
     if (asset)
     {
         _asset = nullptr;
-        asset->OnUnloaded.Unbind<SoftAssetReferenceBase, &SoftAssetReferenceBase::OnUnloaded>(this);
-        asset->RemoveReference();
+        asset->RemoveReference(this);
     }
 #if !BUILD_RELEASE
     _id = Guid::Empty;
@@ -127,22 +167,34 @@ String SoftAssetReferenceBase::ToString() const
     return _asset ? _asset->ToString() : (_id.IsValid() ? _id.ToString() : TEXT("<null>"));
 }
 
+void SoftAssetReferenceBase::OnAssetChanged(Asset* asset, void* caller)
+{
+}
+
+void SoftAssetReferenceBase::OnAssetLoaded(Asset* asset, void* caller)
+{
+}
+
+void SoftAssetReferenceBase::OnAssetUnloaded(Asset* asset, void* caller)
+{
+    if (_asset != asset)
+        return;
+    _asset->RemoveReference(this);
+    _asset = nullptr;
+    _id = Guid::Empty;
+    Changed();
+}
+
 void SoftAssetReferenceBase::OnSet(Asset* asset)
 {
     if (_asset == asset)
         return;
     if (_asset)
-    {
-        _asset->OnUnloaded.Unbind<SoftAssetReferenceBase, &SoftAssetReferenceBase::OnUnloaded>(this);
-        _asset->RemoveReference();
-    }
+        _asset->RemoveReference(this);
     _asset = asset;
     _id = asset ? asset->GetID() : Guid::Empty;
     if (asset)
-    {
-        asset->AddReference();
-        asset->OnUnloaded.Bind<SoftAssetReferenceBase, &SoftAssetReferenceBase::OnUnloaded>(this);
-    }
+        asset->AddReference(this);
     Changed();
 }
 
@@ -151,10 +203,7 @@ void SoftAssetReferenceBase::OnSet(const Guid& id)
     if (_id == id)
         return;
     if (_asset)
-    {
-        _asset->OnUnloaded.Unbind<SoftAssetReferenceBase, &SoftAssetReferenceBase::OnUnloaded>(this);
-        _asset->RemoveReference();
-    }
+        _asset->RemoveReference(this);
     _asset = nullptr;
     _id = id;
     Changed();
@@ -165,21 +214,7 @@ void SoftAssetReferenceBase::OnResolve(const ScriptingTypeHandle& type)
     ASSERT(!_asset);
     _asset = ::LoadAsset(_id, type);
     if (_asset)
-    {
-        _asset->OnUnloaded.Bind<SoftAssetReferenceBase, &SoftAssetReferenceBase::OnUnloaded>(this);
-        _asset->AddReference();
-    }
-}
-
-void SoftAssetReferenceBase::OnUnloaded(Asset* asset)
-{
-    if (_asset != asset)
-        return;
-    _asset->RemoveReference();
-    _asset->OnUnloaded.Unbind<SoftAssetReferenceBase, &SoftAssetReferenceBase::OnUnloaded>(this);
-    _asset = nullptr;
-    _id = Guid::Empty;
-    Changed();
+        _asset->AddReference(this);
 }
 
 Asset::Asset(const SpawnParams& params, const AssetInfo* info)
@@ -195,6 +230,39 @@ Asset::Asset(const SpawnParams& params, const AssetInfo* info)
 int32 Asset::GetReferencesCount() const
 {
     return (int32)Platform::AtomicRead(const_cast<int64 volatile*>(&_refCount));
+}
+
+void Asset::AddReference()
+{
+    Platform::InterlockedIncrement(&_refCount);
+}
+
+void Asset::AddReference(IAssetReference* ref, bool week)
+{
+    if (!week)
+        Platform::InterlockedIncrement(&_refCount);
+    if (ref)
+    {
+        //PROFILE_MEM(EngineDelegate); // Include references tracking memory within Delegate memory
+        ScopeLock lock(_referencesLocker);
+        _references.Add(ref);
+    }
+}
+
+void Asset::RemoveReference()
+{
+    Platform::InterlockedDecrement(&_refCount);
+}
+
+void Asset::RemoveReference(IAssetReference* ref, bool week)
+{
+    if (ref)
+    {
+        ScopeLock lock(_referencesLocker);
+        _references.Remove(ref);
+    }
+    if (!week)
+        Platform::InterlockedDecrement(&_refCount);
 }
 
 String Asset::ToString() const
@@ -213,7 +281,7 @@ void Asset::OnDeleteObject()
 
     const bool wasMarkedToDelete = _deleteFileOnUnload != 0;
 #if USE_EDITOR
-    const String path = wasMarkedToDelete ? GetPath() : String::Empty;
+    const String path = wasMarkedToDelete ? String(GetPath()) : String::Empty;
 #endif
     const Guid id = GetID();
 
@@ -335,6 +403,7 @@ uint64 Asset::GetMemoryUsage() const
     if (Platform::AtomicRead(&_loadingTask))
         result += sizeof(ContentLoadTask);
     result += (OnLoaded.Capacity() + OnReloading.Capacity() + OnUnloaded.Capacity()) * sizeof(EventType::FunctionType);
+    result += _references.Capacity() * sizeof(HashSet<IAssetReference*>::Bucket);
     Locker.Unlock();
     return result;
 }
@@ -344,6 +413,7 @@ void Asset::Reload()
     // Virtual assets are memory-only so reloading them makes no sense
     if (IsVirtual())
         return;
+    PROFILE_CPU_NAMED("Asset.Reload");
 
     // It's better to call it from the main thread
     if (IsInMainThread())
@@ -376,11 +446,6 @@ void Asset::Reload()
         Task::StartNew(New<MainThreadActionTask>(action, this));
     }
 }
-
-namespace ContentLoadingManagerImpl
-{
-    extern ConcurrentTaskQueue<ContentLoadTask> Tasks;
-};
 
 bool Asset::WaitForLoaded(double timeoutInMilliseconds) const
 {
@@ -424,86 +489,18 @@ bool Asset::WaitForLoaded(double timeoutInMilliseconds) const
     const auto loadingTask = (ContentLoadTask*)Platform::AtomicRead(&_loadingTask);
     if (loadingTask == nullptr)
     {
+        if (IsLoaded())
+            return false;
         LOG(Warning, "WaitForLoaded asset \'{0}\' failed. No loading task attached and asset is not loaded.", ToString());
         return true;
     }
 
     PROFILE_CPU();
+    ZoneColor(TracyWaitZoneColor);
+    const StringView path(GetPath());
+    ZoneText(*path, path.Length());
 
-    // Check if call is made from the Loading Thread and task has not been taken yet
-    auto thread = ContentLoadingManager::GetCurrentLoadThread();
-    if (thread != nullptr)
-    {
-        // Note: to reproduce this case just include material into material (use layering).
-        // So during loading first material it will wait for child materials loaded calling this function
-
-        const double timeoutInSeconds = timeoutInMilliseconds * 0.001;
-        const double startTime = Platform::GetTimeSeconds();
-        Task* task = loadingTask;
-        Array<ContentLoadTask*, InlinedAllocation<64>> localQueue;
-#define CHECK_CONDITIONS() (!Engine::ShouldExit() && (timeoutInSeconds <= 0.0 || Platform::GetTimeSeconds() - startTime < timeoutInSeconds))
-        do
-        {
-            // Try to execute content tasks
-            while (task->IsQueued() && CHECK_CONDITIONS())
-            {
-                // Dequeue task from the loading queue
-                ContentLoadTask* tmp;
-                if (ContentLoadingManagerImpl::Tasks.try_dequeue(tmp))
-                {
-                    if (tmp == task)
-                    {
-                        if (localQueue.Count() != 0)
-                        {
-                            // Put back queued tasks
-                            ContentLoadingManagerImpl::Tasks.enqueue_bulk(localQueue.Get(), localQueue.Count());
-                            localQueue.Clear();
-                        }
-
-                        thread->Run(tmp);
-                    }
-                    else
-                    {
-                        localQueue.Add(tmp);
-                    }
-                }
-                else
-                {
-                    // No task in queue but it's queued so other thread could have stolen it into own local queue
-                    break;
-                }
-            }
-            if (localQueue.Count() != 0)
-            {
-                // Put back queued tasks
-                ContentLoadingManagerImpl::Tasks.enqueue_bulk(localQueue.Get(), localQueue.Count());
-                localQueue.Clear();
-            }
-
-            // Check if task is done
-            if (task->IsEnded())
-            {
-                // If was fine then wait for the next task
-                if (task->IsFinished())
-                {
-                    task = task->GetContinueWithTask();
-                    if (!task)
-                        break;
-                }
-                else
-                {
-                    // Failed or cancelled so this wait also fails
-                    break;
-                }
-            }
-        } while (CHECK_CONDITIONS());
-#undef CHECK_CONDITIONS
-    }
-    else
-    {
-        // Wait for task end
-        loadingTask->Wait(timeoutInMilliseconds);
-    }
+    Content::WaitForTask(loadingTask, timeoutInMilliseconds);
 
     // If running on a main thread we can flush asset `Loaded` event
     if (IsInMainThread() && IsLoaded())
@@ -527,11 +524,13 @@ void Asset::CancelStreaming()
 {
     // Cancel loading task but go over asset locker to prevent case if other load threads still loads asset while it's reimported on other thread
     Locker.Lock();
-    auto loadTask = (ContentLoadTask*)Platform::AtomicRead(&_loadingTask);
+    auto loadingTask = (ContentLoadTask*)Platform::AtomicRead(&_loadingTask);
     Locker.Unlock();
-    if (loadTask)
+    if (loadingTask)
     {
-        loadTask->Cancel();
+        Platform::AtomicStore(&_loadingTask, 0);
+        LOG(Warning, "Cancel loading task for \'{0}\'", ToString());
+        loadingTask->Cancel();
     }
 }
 
@@ -558,6 +557,12 @@ Array<Guid> Asset::GetReferences() const
     return result;
 }
 
+bool Asset::Save(const StringView& path)
+{
+    LOG(Warning, "Asset type '{}' does not support saving.", GetTypeName());
+    return true;
+}
+
 #endif
 
 void Asset::DeleteManaged()
@@ -578,6 +583,7 @@ ContentLoadTask* Asset::createLoadingTask()
 
 void Asset::startLoading()
 {
+    PROFILE_MEM(ContentAssets);
     ASSERT(!IsLoaded());
     ASSERT(Platform::AtomicRead(&_loadingTask) == 0);
     auto loadingTask = createLoadingTask();
@@ -606,12 +612,21 @@ bool Asset::onLoad(LoadAssetTask* task)
 
     // Load asset
     LoadResult result;
+#if USE_EDITOR
+    auto& deprecatedFlag = ContentDeprecatedFlags.Get();
+    bool prevDeprecated = deprecatedFlag;
+    deprecatedFlag = false;
+#endif
     {
         PROFILE_CPU_ASSET(this);
         result = loadAsset();
     }
     const bool isLoaded = result == LoadResult::Ok;
     const bool failed = !isLoaded;
+#if USE_EDITOR
+    const bool isDeprecated = deprecatedFlag;
+    deprecatedFlag = prevDeprecated;
+#endif
     Platform::AtomicStore(&_loadState, (int64)(isLoaded ? LoadState::Loaded : LoadState::LoadFailed));
     if (failed)
     {
@@ -632,6 +647,19 @@ bool Asset::onLoad(LoadAssetTask* task)
         // This allows to reduce mutexes and locks (max one frame delay isn't hurting but provides more safety)
         Content::onAssetLoaded(this);
     }
+    
+#if USE_EDITOR
+    // Auto-save deprecated assets to get rid of data in an old format
+    if (isDeprecated && isLoaded && !IsVirtual() && !GetPath().StartsWith(StringUtils::GetDirectoryName(Globals::TemporaryFolder)))
+    {
+        PROFILE_CPU_NAMED("Asset.Save");
+        LOG(Info, "Resaving asset '{}' that uses deprecated data format", ToString());
+        if (Save())
+        {
+            LOG(Error, "Failed to resave asset '{}'", ToString());
+        }
+    }
+#endif
 
     return failed;
 }
@@ -642,7 +670,7 @@ void Asset::onLoaded()
     {
         onLoaded_MainThread();
     }
-    else if (OnLoaded.IsBinded())
+    else if (OnLoaded.IsBinded() || _references.HasItems())
     {
         Function<void()> action;
         action.Bind<Asset, &Asset::onLoaded>(this);
@@ -655,6 +683,9 @@ void Asset::onLoaded_MainThread()
     ASSERT(IsInMainThread());
 
     // Send event
+    ScopeLock lock(_referencesLocker);
+    for (const auto& e : _references)
+        e.Item->OnAssetLoaded(this, this);
     OnLoaded(this);
 }
 
@@ -664,16 +695,69 @@ void Asset::onUnload_MainThread()
 
     ASSERT(IsInMainThread());
 
-    // Send event
-    OnUnloaded(this);
+    // Cancel any streaming before calling OnUnloaded event
+    CancelStreaming();
 
-    // Check if is during loading
-    auto loadingTask = (ContentLoadTask*)Platform::AtomicRead(&_loadingTask);
-    if (loadingTask != nullptr)
-    {
-        // Cancel loading
-        Platform::AtomicStore(&_loadingTask, 0);
-        LOG(Warning, "Cancel loading task for \'{0}\'", ToString());
-        loadingTask->Cancel();
-    }
+    // Send event
+    ScopeLock lock(_referencesLocker);
+    for (const auto& e : _references)
+        e.Item->OnAssetUnloaded(this, this);
+    OnUnloaded(this);
 }
+
+bool Asset::WaitForInitGraphics()
+{
+#define IS_GPU_NOT_READY() (GPUDevice::Instance == nullptr || GPUDevice::Instance->GetState() != GPUDevice::DeviceState::Ready)
+    if (!IsInMainThread() && IS_GPU_NOT_READY())
+    {
+        PROFILE_CPU();
+        ZoneColor(TracyWaitZoneColor);
+        int32 timeout = 1000;
+        while (IS_GPU_NOT_READY() && timeout-- > 0)
+            Platform::Sleep(1);
+        if (IS_GPU_NOT_READY())
+            return true;
+    }
+#undef IS_GPU_NOT_READY
+    return false;
+}
+
+bool Asset::WaitForInitPhysics()
+{
+    if (!IsInMainThread() && !Physics::DefaultScene)
+    {
+        PROFILE_CPU();
+        ZoneColor(TracyWaitZoneColor);
+        int32 timeout = 1000;
+        while (!Physics::DefaultScene && timeout-- > 0)
+            Platform::Sleep(1);
+        if (!Physics::DefaultScene)
+            return true;
+    }
+    return false;
+}
+
+#if USE_EDITOR
+
+bool Asset::OnCheckSave(const StringView& path) const
+{
+    if (LastLoadFailed())
+    {
+        LOG(Warning, "Saving asset that failed to load.");
+        if (path.IsEmpty())
+            return false;
+    }
+    if (WaitForLoaded())
+    {
+        LOG(Error, "Asset loading failed. Cannot save it.");
+        return true;
+    }
+    if (IsVirtual() && path.IsEmpty())
+    {
+        LOG(Error, "To save virtual asset asset you need to specify the target asset path location.");
+        return true;
+    }
+    return false;
+}
+
+#endif

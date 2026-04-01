@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.IO;
@@ -54,7 +54,8 @@ public class ModelPrefabEditor : GenericEditor
         }
 
         // Creates the import path UI
-        Utilities.Utils.CreateImportPathUI(layout, modelPrefab.ImportPath, false);
+        var group = layout.Group("Import Path");
+        Utilities.Utils.CreateImportPathUI(group, modelPrefab.ImportPath);
 
         var button = layout.Button("Reimport", "Reimports the source asset as prefab.");
         _reimportButton = button.Button;

@@ -1,8 +1,9 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using FlaxEditor.SceneGraph;
 using FlaxEditor.Scripting;
 using FlaxEngine;
 using FlaxEngine.GUI;
@@ -52,6 +53,21 @@ namespace FlaxEditor.CustomEditors
         /// </summary>
         /// <param name="nodes">The nodes to select</param>
         public void Select(List<SceneGraph.SceneGraphNode> nodes);
+
+        /// <summary>
+        /// Gets the current selection.
+        /// </summary>
+        public List<SceneGraphNode> Selection { get; }
+
+        /// <summary>
+        /// Indication of if the properties window is locked on specific objects.
+        /// </summary>
+        public bool LockSelection { get; set; }
+
+        /// <summary>
+        /// Gets the scene editing context.
+        /// </summary>
+        public ISceneEditingContext SceneContext { get; }
     }
 
     /// <summary>
@@ -79,7 +95,10 @@ namespace FlaxEditor.CustomEditors
                 _presenter = presenter;
                 AnchorPreset = AnchorPresets.StretchAll;
                 Offsets = Margin.Zero;
+                Pivot = Float2.Zero;
                 IsScrollable = true;
+                Spacing = Utilities.Constants.UIMargin;
+                Margin = new Margin(Utilities.Constants.UIMargin);
             }
 
             /// <inheritdoc />
@@ -94,7 +113,7 @@ namespace FlaxEditor.CustomEditors
                 {
                     FlaxEditor.Editor.LogWarning(ex);
 
-                    // Refresh layout on errors to reduce lgo spam
+                    // Refresh layout on errors to reduce log spam
                     _presenter.BuildLayout();
                 }
 
@@ -131,6 +150,8 @@ namespace FlaxEditor.CustomEditors
                 get => _overrideEditor;
                 set
                 {
+                    if (_overrideEditor == value)
+                        return;
                     _overrideEditor = value;
                     RebuildLayout();
                 }
@@ -193,6 +214,14 @@ namespace FlaxEditor.CustomEditors
                 base.Initialize(layout);
 
                 Presenter.AfterLayout?.Invoke(layout);
+            }
+
+            /// <inheritdoc />
+            protected override void Deinitialize()
+            {
+                Editor = null;
+
+                base.Deinitialize();
             }
 
             /// <inheritdoc />

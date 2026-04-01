@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 #if PLATFORM_WIN32
 
@@ -26,6 +26,7 @@ namespace
 {
     Guid DeviceId;
     CPUInfo CpuInfo;
+    uint64 ProgramSizeMemory;
     uint64 ClockFrequency;
     double CyclesToSeconds;
     WSAData WsaData;
@@ -71,6 +72,9 @@ bool Win32Platform::Init()
     ASSERT(freqResult && frequency.QuadPart > 0);
     ClockFrequency = frequency.QuadPart;
     CyclesToSeconds = 1.0 / static_cast<double>(frequency.QuadPart);
+
+	// Estimate program size by checking physical memory usage on start
+	ProgramSizeMemory = Platform::GetProcessMemoryStats().UsedPhysicalMemory;
 
     // Count CPUs
     BOOL done = FALSE;
@@ -247,7 +251,7 @@ void Win32Platform::MemoryBarrier()
 #endif
 }
 
-void Win32Platform::Prefetch(void const* ptr)
+void Win32Platform::MemoryPrefetch(void const* ptr)
 {
 #if _M_ARM64
     __prefetch((char const*)ptr);
@@ -259,6 +263,8 @@ void Win32Platform::Prefetch(void const* ptr)
 void* Win32Platform::Allocate(uint64 size, uint64 alignment)
 {
     void* ptr = _aligned_malloc((size_t)size, (size_t)alignment);
+    if (!ptr)
+        OutOfMemory();
 #if COMPILE_WITH_PROFILER
     OnMemoryAlloc(ptr, size);
 #endif
@@ -277,14 +283,23 @@ void* Win32Platform::AllocatePages(uint64 numPages, uint64 pageSize)
 {
     const uint64 numBytes = numPages * pageSize;
 #if PLATFORM_UWP
-    return VirtualAllocFromApp(nullptr, (SIZE_T)numBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    void* ptr = VirtualAllocFromApp(nullptr, (SIZE_T)numBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #else
-    return VirtualAlloc(nullptr, (SIZE_T)numBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    void* ptr = VirtualAlloc(nullptr, (SIZE_T)numBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 #endif
+    if (!ptr)
+        OutOfMemory();
+#if COMPILE_WITH_PROFILER
+    OnMemoryAlloc(ptr, numBytes);
+#endif
+    return ptr;
 }
 
 void Win32Platform::FreePages(void* ptr)
 {
+#if COMPILE_WITH_PROFILER
+    OnMemoryFree(ptr);
+#endif
     VirtualFree(ptr, 0, MEM_RELEASE);
 }
 
@@ -304,40 +319,28 @@ CPUInfo Win32Platform::GetCPUInfo()
     return CpuInfo;
 }
 
-int32 Win32Platform::GetCacheLineSize()
-{
-    return CpuInfo.CacheLineSize;
-}
-
 MemoryStats Win32Platform::GetMemoryStats()
 {
-    // Get memory stats
     MEMORYSTATUSEX statex;
     statex.dwLength = sizeof(statex);
     GlobalMemoryStatusEx(&statex);
-
-    // Fill result data
     MemoryStats result;
     result.TotalPhysicalMemory = statex.ullTotalPhys;
     result.UsedPhysicalMemory = statex.ullTotalPhys - statex.ullAvailPhys;
     result.TotalVirtualMemory = statex.ullTotalVirtual;
     result.UsedVirtualMemory = statex.ullTotalVirtual - statex.ullAvailVirtual;
-
+    result.ProgramSizeMemory = ProgramSizeMemory;
     return result;
 }
 
 ProcessMemoryStats Win32Platform::GetProcessMemoryStats()
 {
-    // Get memory stats
     PROCESS_MEMORY_COUNTERS_EX countersEx;
     countersEx.cb = sizeof(countersEx);
     GetProcessMemoryInfo(GetCurrentProcess(), (PPROCESS_MEMORY_COUNTERS)&countersEx, sizeof(countersEx));
-
-    // Fill result data
     ProcessMemoryStats result;
     result.UsedPhysicalMemory = countersEx.WorkingSetSize;
     result.UsedVirtualMemory = countersEx.PrivateUsage;
-
     return result;
 }
 
@@ -395,6 +398,11 @@ void Win32Platform::Sleep(int32 milliseconds)
 
     SetWaitableTimerEx(timer, &dueTime, 0, NULL, NULL, NULL, 0);
     WaitForSingleObject(timer, INFINITE);
+}
+
+void Win32Platform::Yield()
+{
+    SwitchToThread();
 }
 
 double Win32Platform::GetTimeSeconds()

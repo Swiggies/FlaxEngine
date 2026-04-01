@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System.Linq;
 using Flax.Build.Projects.VisualStudio;
@@ -31,7 +31,12 @@ namespace Flax.Build.Platforms
             }
 
             // Visual Studio 2017+ supported only
-            var visualStudio = VisualStudioInstance.GetInstances().FirstOrDefault(x => x.Version == VisualStudioVersion.VisualStudio2017 || x.Version == VisualStudioVersion.VisualStudio2019 || x.Version == VisualStudioVersion.VisualStudio2022);
+            var visualStudio = VisualStudioInstance.GetInstances().FirstOrDefault(x =>
+                x.Version == VisualStudioVersion.VisualStudio2017 || 
+                x.Version == VisualStudioVersion.VisualStudio2019 || 
+                x.Version == VisualStudioVersion.VisualStudio2022 ||
+                x.Version == VisualStudioVersion.VisualStudio2026
+                );
             if (visualStudio == null)
                 _hasRequiredSDKsInstalled = false;
 
@@ -46,7 +51,8 @@ namespace Flax.Build.Platforms
             if (!toolsets.ContainsKey(WindowsPlatformToolset.v141) &&
                 !toolsets.ContainsKey(WindowsPlatformToolset.v142) &&
                 !toolsets.ContainsKey(WindowsPlatformToolset.v143) &&
-                !toolsets.ContainsKey(WindowsPlatformToolset.v144))
+                !toolsets.ContainsKey(WindowsPlatformToolset.v144) &&
+                !toolsets.ContainsKey(WindowsPlatformToolset.v145))
             {
                 _hasRequiredSDKsInstalled = false;
             }

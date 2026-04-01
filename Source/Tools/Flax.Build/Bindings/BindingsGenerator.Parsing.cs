@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2024 Wojciech Figat. All rights reserved.
+// Copyright (c) Wojciech Figat. All rights reserved.
 
 using System;
 using System.Collections.Generic;
@@ -13,6 +13,7 @@ namespace Flax.Build.Bindings
             public FileInfo File;
             public Tokenizer Tokenizer;
             public ApiTypeInfo ScopeInfo;
+            public NativeCpp.BuildOptions ModuleOptions;
             public AccessLevel CurrentAccessLevel;
             public Stack<ApiTypeInfo> ScopeTypeStack;
             public Stack<AccessLevel> ScopeAccessStack;
@@ -534,6 +535,12 @@ namespace Flax.Build.Bindings
                     }
                     if (token.Type == TokenType.LeftCurlyBrace)
                         break;
+                    if (token.Type == TokenType.Preprocessor)
+                    {
+                        OnPreProcessorToken(ref context, ref token);
+                        while (token.Type == TokenType.Newline || token.Value == "endif")
+                            token = context.Tokenizer.NextToken();
+                    }
                     if (token.Type == TokenType.Colon)
                     {
                         token = context.Tokenizer.ExpectToken(TokenType.Colon);
@@ -552,15 +559,35 @@ namespace Flax.Build.Bindings
                     if (token.Type == TokenType.LeftAngleBracket)
                     {
                         inheritType.GenericArgs = new List<TypeInfo>();
-                        while (true)
+                        var argStack = new Stack<TypeInfo>();
+                        argStack.Push(inheritType);
+                        TypeInfo lastArg = null;
+                        while (argStack.Count > 0)
                         {
                             token = context.Tokenizer.NextToken();
                             if (token.Type == TokenType.RightAngleBracket)
-                                break;
+                            {
+                                // Go up
+                                argStack.Pop();
+                                lastArg = argStack.Count != 0 ? argStack.Peek() : null;
+                                continue;
+                            }
                             if (token.Type == TokenType.Comma)
                                 continue;
                             if (token.Type == TokenType.Identifier)
-                                inheritType.GenericArgs.Add(new TypeInfo { Type = token.Value });
+                            {
+                                var arg = new TypeInfo { Type = token.Value };
+                                var parent = argStack.Peek();
+                                if (parent.GenericArgs == null)
+                                    parent.GenericArgs = new List<TypeInfo>();
+                                parent.GenericArgs.Add(arg);
+                                lastArg = arg;
+                            }
+                            else if (token.Type == TokenType.LeftAngleBracket)
+                            {
+                                // Go down
+                                argStack.Push(lastArg);
+                            }
                             else
                                 throw new ParseException(ref context, "Incorrect inheritance");
                         }
@@ -1254,6 +1281,11 @@ namespace Flax.Build.Bindings
 
             // Read 'struct' keyword
             var token = context.Tokenizer.NextToken();
+            if (token.Value == "PACK_BEGIN")
+            {
+                context.Tokenizer.SkipUntil(TokenType.RightParent);
+                token = context.Tokenizer.NextToken();
+            }
             if (token.Value != "struct")
                 throw new ParseException(ref context, $"Invalid {ApiTokens.Struct} usage (expected 'struct' keyword but got '{token.Value} {context.Tokenizer.NextToken().Value}').");
 
